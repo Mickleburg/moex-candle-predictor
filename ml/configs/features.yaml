@@ -1,0 +1,42 @@
+# Feature engineering configuration
+
+# Tokenization
+num_classes: 7  # K=7 for MVP
+horizon: 3  # Prediction horizon h=3
+
+# Window configuration
+window_size: 32  # L=32 for MVP
+
+# Technical indicators
+indicators:
+  returns:
+    periods: [1, 3, 5]
+  
+  atr:
+    period: 14
+  
+  rolling_volatility:
+    window: 20
+  
+  volume_ratio:
+    window: 20
+  
+  ema:
+    periods: [9, 20, 50]
+  
+  candle_features:
+    - "body"
+    - "range"
+    - "upper_wick"
+    - "lower_wick"
+    - "body_ratio"
+
+# Time features
+time_features:
+  - "hour"
+  - "day_of_week"
+  - "month"
+
+# Feature normalization (fit on train only)
+normalization:
+  method: "standard"  # standard, minmax, or none

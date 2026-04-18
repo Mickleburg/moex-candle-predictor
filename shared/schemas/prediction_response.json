@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "PredictResponse",
+  "description": "Response with prediction results",
+  "properties": {
+    "predicted_token": {
+      "type": "integer",
+      "description": "Predicted token class (0 to K-1)"
+    },
+    "probabilities": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Class probabilities"
+    },
+    "action": {
+      "type": "string",
+      "enum": ["buy", "sell", "hold"],
+      "description": "Trading action"
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Confidence of prediction (max probability)"
+    },
+    "model_version": {
+      "type": "string",
+      "description": "Model version used"
+    },
+    "ticker": {
+      "type": "string",
+      "description": "Ticker symbol"
+    },
+    "timeframe": {
+      "type": "string",
+      "description": "Timeframe"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Prediction timestamp"
+    },
+    "n_candles_used": {
+      "type": "integer",
+      "description": "Number of candles used for prediction"
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Optional diagnostic information"
+    }
+  },
+  "required": ["predicted_token", "probabilities", "action", "confidence", "model_version", "ticker", "timeframe", "timestamp", "n_candles_used"]
+}

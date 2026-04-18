@@ -1,0 +1,34 @@
+# Data loading configuration
+
+# Raw data location
+raw_data_path: "../../data/raw"
+
+# Data format
+data_format: "parquet"  # parquet or csv
+
+# Target tickers and timeframes (extensible)
+tickers:
+  - "SBER"
+
+timeframes:
+  - "1H"
+
+# Data schema (expected columns)
+required_columns:
+  - "ticker"
+  - "timeframe"
+  - "begin"
+  - "end"
+  - "open"
+  - "high"
+  - "low"
+  - "close"
+  - "volume"
+  - "value"
+  - "source"
+
+# Time split configuration
+train_ratio: 0.7
+val_ratio: 0.15
+test_ratio: 0.15
+min_train_size: 1000

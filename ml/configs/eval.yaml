@@ -1,0 +1,29 @@
+# Evaluation configuration
+
+# Metrics to compute
+metrics:
+  classification:
+    - "accuracy"
+    - "macro_f1"
+    - "weighted_f1"
+    - "log_loss"
+    - "confusion_matrix"
+  
+  trading:
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "total_pnl"
+    - "win_rate"
+
+# Backtesting settings
+backtest:
+  initial_capital: 100000.0
+  commission: 0.0005  # 0.05% per trade
+  position_size: 1.0  # Full position
+
+# Prediction threshold for trading
+prediction_threshold: 0.5
+
+# Paths (relative to ml/ directory)
+reports_dir: "../../data/reports"
+predictions_dir: "../../data/predictions"

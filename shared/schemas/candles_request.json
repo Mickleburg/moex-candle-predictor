@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "PredictRequest",
+  "description": "Request for candle prediction",
+  "properties": {
+    "candles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "begin": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Candle start time"
+          },
+          "open": {
+            "type": "number",
+            "description": "Open price"
+          },
+          "high": {
+            "type": "number",
+            "description": "High price"
+          },
+          "low": {
+            "type": "number",
+            "description": "Low price"
+          },
+          "close": {
+            "type": "number",
+            "description": "Close price"
+          },
+          "volume": {
+            "type": "number",
+            "description": "Volume"
+          },
+          "ticker": {
+            "type": "string",
+            "default": "SBER",
+            "description": "Ticker symbol"
+          },
+          "timeframe": {
+            "type": "string",
+            "default": "1H",
+            "description": "Timeframe"
+          }
+        },
+        "required": ["begin", "open", "high", "low", "close", "volume"]
+      },
+      "description": "List of recent candles (must have at least L=32 candles)"
+    },
+    "model_version": {
+      "type": "string",
+      "description": "Optional model version to use (default: latest)"
+    }
+  },
+  "required": ["candles"]
+}

@@ -1,0 +1,31 @@
+# Training configuration
+
+# Model selection
+model_type: "lgbm"  # majority, markov, lgbm
+
+# Random seed for reproducibility
+random_state: 42
+
+# LightGBM hyperparameters
+lgbm_params:
+  objective: "multiclass"
+  num_class: 7
+  n_estimators: 100
+  max_depth: 6
+  learning_rate: 0.1
+  num_leaves: 31
+  min_child_samples: 20
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_alpha: 0.1
+  reg_lambda: 0.1
+  verbose: -1
+
+# Training settings
+early_stopping_rounds: 10
+verbose: 1
+
+# Paths (relative to ml/ directory)
+artifacts_dir: "artifacts"
+reports_dir: "../../data/reports"
+predictions_dir: "../../data/predictions"
