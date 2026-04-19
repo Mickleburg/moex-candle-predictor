@@ -179,10 +179,15 @@ def train_model(
         model = MarkovClassifier(n_classes=n_classes)
         model.fit(X_train, y_train)
     elif model_type == "lgbm":
+        lgbm_params = dict(train_config.get("lgbm_params", {}))
+        # Wrapper already hardcodes multiclass objective and class count.
+        lgbm_params.pop("objective", None)
+        lgbm_params.pop("num_class", None)
+
         model = LGBMClassifier(
             n_classes=n_classes,
             random_state=random_state,
-            **train_config.get("lgbm_params", {})
+            **lgbm_params
         )
         model.fit(X_train, y_train, X_val, y_val)
     else:

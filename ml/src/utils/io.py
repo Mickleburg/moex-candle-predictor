@@ -103,6 +103,11 @@ def write_json(data: dict, path: str | Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def save_json(data: dict, path: str | Path) -> None:
+    """Backward-compatible alias for JSON artifact saving."""
+    write_json(data, path)
+
+
 def save_joblib(obj: Any, path: str | Path) -> None:
     """Save object using joblib.
     

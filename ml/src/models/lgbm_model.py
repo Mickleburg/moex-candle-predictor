@@ -96,7 +96,6 @@ class LGBMClassifier:
             verbose=self.verbose,
             n_jobs=-1,  # Use all CPU cores
             force_col_wise=True,  # CPU optimization
-            force_row_wise=True
         )
         return model
     

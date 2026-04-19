@@ -19,13 +19,19 @@ class CandlePredictor:
     Performs the same feature engineering as training.
     """
     
-    def __init__(self, artifacts_dir: str = "ml/artifacts"):
+    def __init__(self, artifacts_dir: Optional[str] = None):
         """Initialize predictor.
         
         Args:
             artifacts_dir: Path to artifacts directory.
         """
-        self.artifacts_dir = Path(artifacts_dir)
+        if artifacts_dir is None:
+            self.artifacts_dir = Path(__file__).resolve().parents[2] / "artifacts"
+        else:
+            path = Path(artifacts_dir)
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parents[2] / path
+            self.artifacts_dir = path
         
         self.model: Optional[LGBMClassifier] = None
         self.tokenizer: Optional[CandleTokenizer] = None
@@ -108,6 +114,10 @@ class CandlePredictor:
         # Ensure datetime
         if "begin" in df.columns:
             df["begin"] = pd.to_datetime(df["begin"])
+
+        # Keep inference schema aligned with training raw data.
+        if "value" not in df.columns and {"close", "volume"}.issubset(df.columns):
+            df["value"] = df["close"] * df["volume"]
         
         return df
     

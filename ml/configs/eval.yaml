@@ -25,5 +25,5 @@ backtest:
 prediction_threshold: 0.5
 
 # Paths (relative to ml/ directory)
-reports_dir: "../../data/reports"
-predictions_dir: "../../data/predictions"
+reports_dir: "../data/reports"
+predictions_dir: "../data/predictions"

@@ -1,7 +1,7 @@
 # Data loading configuration
 
 # Raw data location
-raw_data_path: "../../data/raw"
+raw_data_path: "../data/raw"
 
 # Data format
 data_format: "parquet"  # parquet or csv

@@ -1,0 +1,226 @@
+{
+  "ticker": "SBER",
+  "timeframe": "1H",
+  "horizon": 3,
+  "K": 7,
+  "L": 32,
+  "feature_set": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value"
+  ],
+  "tokenizer": {
+    "n_bins": 7,
+    "horizon": 3,
+    "random_state": 42,
+    "is_fitted": true,
+    "bin_edges": [
+      -0.013968793542800848,
+      -0.003938103658020622,
+      -0.0019849996441995356,
+      -0.0005456297705821062,
+      0.0007300012473272812,
+      0.002362352968987046,
+      0.00444227986467682,
+      0.016455205910435908
+    ],
+    "normalization": "atr"
+  },
+  "model_class": "LGBMClassifier",
+  "train_period": {
+    "start": "2024-01-01T00:00:00",
+    "end": "2024-02-28T07:00:00",
+    "n_samples": 1400
+  },
+  "val_period": {
+    "start": "2024-02-28T08:00:00",
+    "end": "2024-03-11T19:00:00",
+    "n_samples": 300
+  },
+  "test_period": {
+    "start": "2024-03-11T20:00:00",
+    "end": "2024-03-24T07:00:00",
+    "n_samples": 300
+  },
+  "validation_metrics": {
+    "accuracy": 0.20152091254752852,
+    "macro_f1": 0.13823270321727685,
+    "weighted_f1": 0.18925532417538926,
+    "macro_precision": 0.13645186335403728,
+    "weighted_precision": 0.18446375433956025,
+    "macro_recall": 0.14451530612244895,
+    "weighted_recall": 0.20152091254752852,
+    "log_loss": 1.8819986286056867,
+    "confusion_matrix": [
+      [
+        0,
+        3,
+        0,
+        2,
+        2,
+        1,
+        0
+      ],
+      [
+        0,
+        5,
+        7,
+        16,
+        4,
+        3,
+        0
+      ],
+      [
+        0,
+        10,
+        8,
+        23,
+        7,
+        7,
+        0
+      ],
+      [
+        0,
+        6,
+        13,
+        22,
+        16,
+        7,
+        0
+      ],
+      [
+        1,
+        3,
+        10,
+        21,
+        14,
+        6,
+        0
+      ],
+      [
+        0,
+        3,
+        5,
+        13,
+        5,
+        4,
+        2
+      ],
+      [
+        0,
+        2,
+        3,
+        3,
+        2,
+        4,
+        0
+      ]
+    ],
+    "split": "val",
+    "n_samples": 263
+  },
+  "test_metrics": {
+    "accuracy": 0.19391634980988592,
+    "macro_f1": 0.12995206764990938,
+    "weighted_f1": 0.1865628331886504,
+    "macro_precision": 0.12856332981308652,
+    "weighted_precision": 0.18199067862951238,
+    "macro_recall": 0.13323257202567548,
+    "weighted_recall": 0.19391634980988592,
+    "log_loss": 1.8630074671493069,
+    "confusion_matrix": [
+      [
+        0,
+        2,
+        1,
+        2,
+        2,
+        0,
+        0
+      ],
+      [
+        0,
+        3,
+        8,
+        16,
+        11,
+        2,
+        0
+      ],
+      [
+        0,
+        9,
+        10,
+        17,
+        12,
+        7,
+        0
+      ],
+      [
+        0,
+        6,
+        15,
+        15,
+        18,
+        6,
+        0
+      ],
+      [
+        0,
+        8,
+        9,
+        22,
+        19,
+        6,
+        2
+      ],
+      [
+        0,
+        4,
+        6,
+        6,
+        9,
+        4,
+        0
+      ],
+      [
+        0,
+        3,
+        0,
+        1,
+        2,
+        0,
+        0
+      ]
+    ],
+    "split": "test",
+    "n_samples": 263
+  },
+  "artifact_version": "2026-04-19T17:29:17.793124",
+  "training_config": {
+    "model_type": "lgbm",
+    "random_state": 42,
+    "lgbm_params": {
+      "objective": "multiclass",
+      "num_class": 7,
+      "n_estimators": 100,
+      "max_depth": 6,
+      "learning_rate": 0.1,
+      "num_leaves": 31,
+      "min_child_samples": 20,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 0.1,
+      "verbose": -1
+    },
+    "early_stopping_rounds": 10,
+    "verbose": 1,
+    "artifacts_dir": "artifacts",
+    "reports_dir": "../data/reports",
+    "predictions_dir": "../data/predictions"
+  }
+}

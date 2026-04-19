@@ -27,5 +27,5 @@ verbose: 1
 
 # Paths (relative to ml/ directory)
 artifacts_dir: "artifacts"
-reports_dir: "../../data/reports"
-predictions_dir: "../../data/predictions"
+reports_dir: "../data/reports"
+predictions_dir: "../data/predictions"

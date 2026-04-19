@@ -1,0 +1,54 @@
+server:
+  address: ":8080"
+  read_timeout_seconds: 5
+  write_timeout_seconds: 15
+  shutdown_timeout_seconds: 10
+
+market:
+  default_ticker: "SBER"
+  default_timeframe: "1H"
+  default_source: "backend"
+  decision_horizon: "1h"
+
+moex:
+  base_url: "https://iss.moex.com"
+  engine: "stock"
+  market: "shares"
+  board: "TQBR"
+  timeout_seconds: 10
+
+ml:
+  base_url: "http://localhost:8001"
+  health_path: "/health"
+  predict_path: "/predict"
+  timeout_seconds: 5
+  retry_count: 1
+  retry_backoff_millis: 300
+  min_candles: 32
+  strict_health_check: true
+
+llm:
+  provider: "heuristic-fallback"
+  base_url: ""
+  health_path: "/health"
+  analyze_path: "/analyze"
+  timeout_seconds: 8
+
+aggregator:
+  weight_algo: 0.6
+  weight_llm: 0.4
+  buy_threshold: 0.35
+  sell_threshold: -0.35
+  risk_flags_block: true
+
+risk:
+  max_position_abs: 1.0
+  max_portfolio_exposure: 1.0
+  max_daily_loss: 0.0
+  base_position_size: 0.25
+  allow_short: false
+
+storage:
+  raw_dir: "../../data/raw"
+  decision_log_path: "../../data/reports/decision_log.jsonl"
+  save_raw_on_decision: true

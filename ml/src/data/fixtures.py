@@ -1,5 +1,7 @@
 """Mock data generator for smoke tests and development."""
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
