@@ -33,6 +33,10 @@
 - есть health endpoint;
 - есть endpoint для оценки финального торгового решения;
 - есть endpoint для fetch свечей из MOEX;
+- есть auth-aware клиент для MOEX ISS / AlgoPack;
+- есть универсальный JSON proxy для `/iss/...` ресурсов;
+- есть shortcut endpoint-ы для `security`, `candles`, `orderbook`, `trades`, `sitenews`;
+- есть отдельный namespace `/api/v1/algopack/*` для уникальных датасетов ALGOPACK;
 - есть endpoint для сохранения свечей в raw storage;
 - есть хранение raw-свечей в Parquet;
 - есть логирование решений в JSONL;
@@ -177,6 +181,166 @@ curl http://127.0.0.1:8080/health
 curl "http://127.0.0.1:8080/api/v1/candles/fetch?ticker=SBER&timeframe=1H&from=2024-01-01&to=2024-01-10"
 ```
 
+### `GET /api/v1/moex/iss`
+
+Универсальный proxy к JSON-ресурсам ISS / AlgoPack.
+
+Используется для любого ресурса `/iss/...`, который backend должен пробросить без написания отдельного handler-а.
+
+Примеры:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/iss?path=/iss/securities/SBER"
+curl "http://127.0.0.1:8080/api/v1/moex/iss?path=/iss/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles&from=2024-01-01&till=2024-01-10&interval=60&iss.meta=off&iss.only=candles"
+```
+
+Важно:
+
+- `path` передаётся отдельно от query string;
+- остальные query-параметры backend пробрасывает как есть;
+- разрешены только ресурсы внутри `/iss/...`;
+- proxy поддерживает только JSON-ответы.
+
+### `GET /api/v1/moex/security`
+
+Получить список бумаг или спецификацию одной бумаги.
+
+Примеры:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/security"
+curl "http://127.0.0.1:8080/api/v1/moex/security?security=SBER"
+```
+
+### `GET /api/v1/moex/candles`
+
+Получить raw JSON по свечам из ISS без сохранения в storage.
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/candles?ticker=SBER&timeframe=1H&from=2024-01-01&to=2024-01-10"
+```
+
+### `GET /api/v1/moex/orderbook`
+
+Получить стакан по инструменту.
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/orderbook?security=SBER&depth=20"
+```
+
+### `GET /api/v1/moex/trades`
+
+Получить сделки по инструменту.
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/trades?security=SBER&limit=100"
+```
+
+### `GET /api/v1/moex/sitenews`
+
+Получить биржевые новости из ISS.
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/sitenews?limit=20"
+```
+
+## Endpoint-ы ALGOPACK
+
+В backend теперь есть отдельный namespace `/api/v1/algopack/*`.
+
+Практическая логика такая:
+
+- realtime `candles/orderbook/trades` закрываются обычным ISS-слоем;
+- уникальные датасеты ALGOPACK идут через отдельный datashop API.
+
+### `GET /api/v1/algopack/dataset`
+
+Универсальный endpoint для датасетов ALGOPACK вида:
+
+```text
+/iss/datashop/algopack/{market}/{dataset}
+```
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/dataset?market=eq&dataset=obstats&date=2024-10-15"
+```
+
+### `GET /api/v1/algopack/tradestats`
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/tradestats?market=eq&date=2024-10-15"
+```
+
+### `GET /api/v1/algopack/orderstats`
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/orderstats?market=eq&date=2024-10-15"
+```
+
+### `GET /api/v1/algopack/obstats`
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/obstats?market=eq&date=2024-10-15"
+```
+
+### `GET /api/v1/algopack/hi2`
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/hi2?market=eq&date=2024-10-15"
+```
+
+### `GET /api/v1/algopack/futoi`
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/futoi"
+```
+
+### `GET /api/v1/algopack/realtime/candles`
+
+Alias на realtime свечи.
+
+Пример:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/realtime/candles?ticker=SBER&timeframe=1H&from=2024-01-01&to=2024-01-10"
+```
+
+### `GET /api/v1/algopack/realtime/orderbook`
+
+Alias на realtime стакан.
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/realtime/orderbook?security=SBER&depth=20"
+```
+
+### `GET /api/v1/algopack/realtime/trades`
+
+Alias на realtime сделки.
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/realtime/trades?security=SBER&limit=100"
+```
+
 ### `POST /api/v1/decisions/evaluate`
 
 Главный endpoint гибридного агента.
@@ -224,11 +388,50 @@ curl http://127.0.0.1:8001/health
 
 - адрес backend;
 - настройки MOEX;
+- auth-настройки для MOEX ISS / AlgoPack;
 - адрес ML сервиса;
 - настройки LLM analyzer;
 - веса агрегатора;
 - риск-лимиты;
 - пути к raw storage и decision log.
+
+### Настройки MOEX / AlgoPack
+
+Backend сейчас поддерживает несколько способов авторизации:
+
+- `moex.username` + `moex.password` — basic auth;
+- `moex.passport_cert` — cookie `MicexPassportCert`;
+- `moex.bearer_token` — bearer token;
+- `moex.api_key_header` + `moex.api_key_value` — кастомный header с ключом.
+
+Разделение base URL:
+
+- `moex.base_url` — обычный ISS, по умолчанию `https://iss.moex.com`
+- `moex.algopack_base_url` — datashop / ALGOPACK, по умолчанию `https://apim.moex.com`
+
+Есть env overrides:
+
+- `MOEX_BASE_URL`
+- `MOEX_ALGOPACK_BASE_URL`
+- `MOEX_ENGINE`
+- `MOEX_MARKET`
+- `MOEX_BOARD`
+- `MOEX_USERNAME`
+- `MOEX_PASSWORD`
+- `MOEX_PASSPORT_CERT`
+- `MOEX_BEARER_TOKEN`
+- `MOEX_API_KEY_HEADER`
+- `MOEX_API_KEY_VALUE`
+- `MOEX_USER_AGENT`
+
+Практически:
+
+- если у вас логин/пароль от MOEX Passport, используйте `username/password`;
+- если у вас уже есть `MicexPassportCert`, используйте `passport_cert`;
+- если у вас APIKEY ALGOPACK, используйте `bearer_token`;
+- если доступ к данным выдан через внешний шлюз с header/token auth, используйте `api_key_*`.
+
+Секреты лучше хранить через env, а не коммитить в YAML.
 
 ## Формат raw storage
 
@@ -318,6 +521,7 @@ final_score = w_algo * algo.direction * algo.confidence
 - `ml/test_smoke.py`
 - запуск ML service;
 - запуск backend;
+- успешная сборка backend после добавления AlgoPack / ISS integration;
 - успешный `GET /health` на обоих сервисах;
 - успешный запрос в `POST /api/v1/decisions/evaluate`.
 
@@ -383,6 +587,43 @@ python test_smoke.py
 cd /Users/main/Desktop/moex-candle-predictor/backend
 GOCACHE=/tmp/go-build go test ./...
 ```
+
+### Smoke-test AlgoPack / ISS integration
+
+Backend должен быть запущен.
+
+Проверка универсального proxy:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/iss?path=/iss/securities/SBER"
+```
+
+Проверка shortcut endpoint-ов:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/moex/security?security=SBER"
+curl "http://127.0.0.1:8080/api/v1/moex/orderbook?security=SBER&depth=20"
+curl "http://127.0.0.1:8080/api/v1/moex/trades?security=SBER&limit=100"
+curl "http://127.0.0.1:8080/api/v1/moex/sitenews?limit=20"
+```
+
+Если вы используете подписочные ресурсы AlgoPack, перед этим нужно заполнить auth-поля MOEX в config или env.
+
+### Smoke-test ALGOPACK datashop
+
+Backend должен быть запущен, а `MOEX_BEARER_TOKEN` должен быть задан.
+
+Примеры:
+
+```bash
+curl "http://127.0.0.1:8080/api/v1/algopack/obstats?market=eq&date=2024-10-15"
+curl "http://127.0.0.1:8080/api/v1/algopack/orderstats?market=eq&date=2024-10-15"
+curl "http://127.0.0.1:8080/api/v1/algopack/tradestats?market=eq&date=2024-10-15"
+curl "http://127.0.0.1:8080/api/v1/algopack/hi2?market=eq&date=2024-10-15"
+curl "http://127.0.0.1:8080/api/v1/algopack/futoi"
+```
+
+Если токен рабочий, backend должен вернуть JSON с `request_url`, `path` и `data`.
 
 ### Полный end-to-end test
 
@@ -478,6 +719,17 @@ PY
 То есть на данном этапе система уже готова для демонстрации backend architecture и интеграции,
 но не для реальной торговли.
 
+## Что ещё нужно для реального AlgoPack доступа
+
+Чтобы проверить не только публичные ISS ресурсы, но и подписочные AlgoPack данные, в backend нужно подставить один из реальных форматов доступа:
+
+- `MOEX_USERNAME` и `MOEX_PASSWORD`;
+- или `MOEX_PASSPORT_CERT`;
+- или `MOEX_BEARER_TOKEN`, если у вас APIKEY ALGOPACK;
+- или точный header/token формат, если у вас доступ выдан не basic/cookie, а через отдельный key gateway.
+
+Сейчас backend уже умеет эти варианты применять, но реальные секреты в репозиторий не добавлены.
+
 ## Следующий правильный шаг
 
 ### Backend делает
@@ -514,4 +766,3 @@ PY
 - [risk_service.go](/Users/main/Desktop/moex-candle-predictor/backend/internal/service/risk_service.go)
 - [history_service.go](/Users/main/Desktop/moex-candle-predictor/backend/internal/service/history_service.go)
 - [files.go](/Users/main/Desktop/moex-candle-predictor/backend/internal/storage/files.go)
-

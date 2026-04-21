@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"candle-predictor/internal/config"
@@ -90,6 +92,21 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/health", a.handleHealth)
 	mux.HandleFunc("/api/v1/candles/store", a.handleStoreCandles)
 	mux.HandleFunc("/api/v1/candles/fetch", a.handleFetchCandles)
+	mux.HandleFunc("/api/v1/moex/iss", a.handleMOEXISS)
+	mux.HandleFunc("/api/v1/moex/security", a.handleMOEXSecurity)
+	mux.HandleFunc("/api/v1/moex/candles", a.handleMOEXCandles)
+	mux.HandleFunc("/api/v1/moex/orderbook", a.handleMOEXOrderBook)
+	mux.HandleFunc("/api/v1/moex/trades", a.handleMOEXTrades)
+	mux.HandleFunc("/api/v1/moex/sitenews", a.handleMOEXSiteNews)
+	mux.HandleFunc("/api/v1/algopack/dataset", a.handleAlgoPackDataset)
+	mux.HandleFunc("/api/v1/algopack/tradestats", a.handleAlgoPackTradeStats)
+	mux.HandleFunc("/api/v1/algopack/orderstats", a.handleAlgoPackOrderStats)
+	mux.HandleFunc("/api/v1/algopack/obstats", a.handleAlgoPackOBStats)
+	mux.HandleFunc("/api/v1/algopack/hi2", a.handleAlgoPackHI2)
+	mux.HandleFunc("/api/v1/algopack/futoi", a.handleAlgoPackFUTOI)
+	mux.HandleFunc("/api/v1/algopack/realtime/candles", a.handleAlgoPackRealtimeCandles)
+	mux.HandleFunc("/api/v1/algopack/realtime/orderbook", a.handleAlgoPackRealtimeOrderBook)
+	mux.HandleFunc("/api/v1/algopack/realtime/trades", a.handleAlgoPackRealtimeTrades)
 	mux.HandleFunc("/api/v1/decisions/evaluate", a.handleEvaluateDecision)
 	return a.loggingMiddleware(mux)
 }
@@ -200,6 +217,259 @@ func (a *App) handleFetchCandles(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, payload)
 }
 
+func (a *App) handleMOEXISS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	resourcePath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if resourcePath == "" {
+		a.writeError(w, http.StatusBadRequest, "missing path query parameter", errors.New("example: /iss/securities/SBER"))
+		return
+	}
+
+	raw, requestURL, err := a.moex.FetchRawJSON(r.Context(), resourcePath, cloneQueryExcluding(r.URL.Query(), "path"))
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to query MOEX ISS resource", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, resourcePath, requestURL, raw)
+}
+
+func (a *App) handleMOEXSecurity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	security := strings.TrimSpace(r.URL.Query().Get("security"))
+	raw, requestURL, err := a.moex.FetchSecuritySpec(r.Context(), security)
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch MOEX security data", err)
+		return
+	}
+
+	resourcePath := "/iss/securities"
+	if security != "" {
+		resourcePath += "/" + security
+	}
+	a.writeMOEXPayload(w, resourcePath, requestURL, raw)
+}
+
+func (a *App) handleMOEXCandles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	ticker := r.URL.Query().Get("ticker")
+	if ticker == "" {
+		ticker = a.cfg.Market.DefaultTicker
+	}
+	timeframe := r.URL.Query().Get("timeframe")
+	if timeframe == "" {
+		timeframe = a.cfg.Market.DefaultTimeframe
+	}
+
+	from, err := parseDateTimeParam(r, "from")
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid from value", err)
+		return
+	}
+	to, err := parseDateTimeParam(r, "to")
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid to value", err)
+		return
+	}
+
+	engine, market, board := marketParamsOrDefault(r, a.cfg.MOEX)
+	raw, requestURL, err := a.moex.FetchRawCandles(r.Context(), ticker, timeframe, from, to, engine, market, board)
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch MOEX candles", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, pathForBoardResource(engine, market, board, ticker, "candles"), requestURL, raw)
+}
+
+func (a *App) handleMOEXOrderBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	security := strings.TrimSpace(r.URL.Query().Get("security"))
+	if security == "" {
+		a.writeError(w, http.StatusBadRequest, "missing security query parameter", errors.New("example: security=SBER"))
+		return
+	}
+
+	depth, err := parseOptionalIntParam(r, "depth", 0)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid depth value", err)
+		return
+	}
+
+	engine, market, board := marketParamsOrDefault(r, a.cfg.MOEX)
+	raw, requestURL, err := a.moex.FetchOrderBook(r.Context(), security, engine, market, board, depth)
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch MOEX orderbook", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, pathForBoardResource(engine, market, board, security, "orderbook"), requestURL, raw)
+}
+
+func (a *App) handleMOEXTrades(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	security := strings.TrimSpace(r.URL.Query().Get("security"))
+	if security == "" {
+		a.writeError(w, http.StatusBadRequest, "missing security query parameter", errors.New("example: security=SBER"))
+		return
+	}
+
+	start, err := parseOptionalIntParam(r, "start", 0)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid start value", err)
+		return
+	}
+	limit, err := parseOptionalIntParam(r, "limit", 0)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid limit value", err)
+		return
+	}
+
+	engine, market, board := marketParamsOrDefault(r, a.cfg.MOEX)
+	raw, requestURL, err := a.moex.FetchTrades(r.Context(), security, engine, market, board, start, limit)
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch MOEX trades", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, pathForBoardResource(engine, market, board, security, "trades"), requestURL, raw)
+}
+
+func (a *App) handleMOEXSiteNews(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	start, err := parseOptionalIntParam(r, "start", 0)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid start value", err)
+		return
+	}
+	limit, err := parseOptionalIntParam(r, "limit", 0)
+	if err != nil {
+		a.writeError(w, http.StatusBadRequest, "invalid limit value", err)
+		return
+	}
+
+	raw, requestURL, err := a.moex.FetchSiteNews(r.Context(), start, limit)
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch MOEX site news", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, "/iss/sitenews", requestURL, raw)
+}
+
+func (a *App) handleAlgoPackDataset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	dataset := strings.TrimSpace(r.URL.Query().Get("dataset"))
+	if dataset == "" {
+		a.writeError(w, http.StatusBadRequest, "missing dataset query parameter", errors.New("example: dataset=obstats"))
+		return
+	}
+
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	if market == "" {
+		market = "eq"
+	}
+
+	raw, requestURL, err := a.moex.FetchAlgoPackDataset(r.Context(), market, dataset, cloneQueryExcluding(r.URL.Query(), "market", "dataset"))
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch ALGOPACK dataset", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, pathForAlgoPackDataset(market, dataset), requestURL, raw)
+}
+
+func (a *App) handleAlgoPackTradeStats(w http.ResponseWriter, r *http.Request) {
+	a.handleNamedAlgoPackDataset(w, r, "tradestats")
+}
+
+func (a *App) handleAlgoPackOrderStats(w http.ResponseWriter, r *http.Request) {
+	a.handleNamedAlgoPackDataset(w, r, "orderstats")
+}
+
+func (a *App) handleAlgoPackOBStats(w http.ResponseWriter, r *http.Request) {
+	a.handleNamedAlgoPackDataset(w, r, "obstats")
+}
+
+func (a *App) handleAlgoPackHI2(w http.ResponseWriter, r *http.Request) {
+	a.handleNamedAlgoPackDataset(w, r, "hi2")
+}
+
+func (a *App) handleAlgoPackFUTOI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	raw, requestURL, err := a.moex.FetchFUTOI(r.Context(), cloneQueryExcluding(r.URL.Query()))
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch ALGOPACK FUTOI", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, "/iss/analyticalproducts/futoi/securities", requestURL, raw)
+}
+
+func (a *App) handleAlgoPackRealtimeCandles(w http.ResponseWriter, r *http.Request) {
+	a.handleMOEXCandles(w, r)
+}
+
+func (a *App) handleAlgoPackRealtimeOrderBook(w http.ResponseWriter, r *http.Request) {
+	a.handleMOEXOrderBook(w, r)
+}
+
+func (a *App) handleAlgoPackRealtimeTrades(w http.ResponseWriter, r *http.Request) {
+	a.handleMOEXTrades(w, r)
+}
+
+func (a *App) handleNamedAlgoPackDataset(w http.ResponseWriter, r *http.Request, dataset string) {
+	if r.Method != http.MethodGet {
+		a.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	if market == "" {
+		market = "eq"
+	}
+
+	raw, requestURL, err := a.moex.FetchAlgoPackDataset(r.Context(), market, dataset, cloneQueryExcluding(r.URL.Query(), "market"))
+	if err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to fetch ALGOPACK dataset", err)
+		return
+	}
+
+	a.writeMOEXPayload(w, pathForAlgoPackDataset(market, dataset), requestURL, raw)
+}
+
 func (a *App) handleEvaluateDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeMethodNotAllowed(w, http.MethodPost)
@@ -248,6 +518,20 @@ func (a *App) writeJSON(w http.ResponseWriter, code int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func (a *App) writeMOEXPayload(w http.ResponseWriter, resourcePath, requestURL string, raw json.RawMessage) {
+	var data any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		a.writeError(w, http.StatusBadGateway, "failed to decode MOEX response", err)
+		return
+	}
+
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"path":        resourcePath,
+		"request_url": requestURL,
+		"data":        data,
+	})
+}
+
 func parseDateTimeParam(r *http.Request, name string) (time.Time, error) {
 	value := r.URL.Query().Get(name)
 	if value == "" {
@@ -259,4 +543,56 @@ func parseDateTimeParam(r *http.Request, name string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, strconv.ErrSyntax
+}
+
+func parseOptionalIntParam(r *http.Request, name string, defaultValue int) (int, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(name))
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	return parsed, nil
+}
+
+func cloneQueryExcluding(values url.Values, excludedKeys ...string) url.Values {
+	excluded := make(map[string]struct{}, len(excludedKeys))
+	for _, key := range excludedKeys {
+		excluded[key] = struct{}{}
+	}
+
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		if _, skip := excluded[key]; skip {
+			continue
+		}
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
+}
+
+func marketParamsOrDefault(r *http.Request, cfg config.MOEXConfig) (string, string, string) {
+	engine := strings.TrimSpace(r.URL.Query().Get("engine"))
+	if engine == "" {
+		engine = cfg.Engine
+	}
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	if market == "" {
+		market = cfg.Market
+	}
+	board := strings.TrimSpace(r.URL.Query().Get("board"))
+	if board == "" {
+		board = cfg.Board
+	}
+	return engine, market, board
+}
+
+func pathForBoardResource(engine, market, board, security, resource string) string {
+	return "/iss/engines/" + engine + "/markets/" + market + "/boards/" + board + "/securities/" + security + "/" + resource
+}
+
+func pathForAlgoPackDataset(market, dataset string) string {
+	return "/iss/datashop/algopack/" + strings.ToLower(strings.TrimSpace(market)) + "/" + strings.ToLower(strings.TrimSpace(dataset))
 }

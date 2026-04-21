@@ -36,11 +36,19 @@ type MarketConfig struct {
 }
 
 type MOEXConfig struct {
-	BaseURL        string `yaml:"base_url"`
-	Engine         string `yaml:"engine"`
-	Market         string `yaml:"market"`
-	Board          string `yaml:"board"`
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	BaseURL         string `yaml:"base_url"`
+	AlgoPackBaseURL string `yaml:"algopack_base_url"`
+	Engine          string `yaml:"engine"`
+	Market          string `yaml:"market"`
+	Board           string `yaml:"board"`
+	Username        string `yaml:"username"`
+	Password        string `yaml:"password"`
+	PassportCert    string `yaml:"passport_cert"`
+	BearerToken     string `yaml:"bearer_token"`
+	APIKeyHeader    string `yaml:"api_key_header"`
+	APIKeyValue     string `yaml:"api_key_value"`
+	UserAgent       string `yaml:"user_agent"`
+	TimeoutSeconds  int    `yaml:"timeout_seconds"`
 }
 
 type MLConfig struct {
@@ -99,11 +107,14 @@ func Default() Config {
 			DecisionHorizon:  "1h",
 		},
 		MOEX: MOEXConfig{
-			BaseURL:        "https://iss.moex.com",
-			Engine:         "stock",
-			Market:         "shares",
-			Board:          "TQBR",
-			TimeoutSeconds: 10,
+			BaseURL:         "https://iss.moex.com",
+			AlgoPackBaseURL: "https://apim.moex.com",
+			Engine:          "stock",
+			Market:          "shares",
+			Board:           "TQBR",
+			APIKeyHeader:    "X-API-Key",
+			UserAgent:       "moex-candle-predictor-backend/0.1",
+			TimeoutSeconds:  10,
 		},
 		ML: MLConfig{
 			BaseURL:            "http://localhost:8001",
@@ -201,6 +212,42 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if value := os.Getenv("ML_BASE_URL"); value != "" {
 		c.ML.BaseURL = value
+	}
+	if value := os.Getenv("MOEX_BASE_URL"); value != "" {
+		c.MOEX.BaseURL = value
+	}
+	if value := os.Getenv("MOEX_ALGOPACK_BASE_URL"); value != "" {
+		c.MOEX.AlgoPackBaseURL = value
+	}
+	if value := os.Getenv("MOEX_ENGINE"); value != "" {
+		c.MOEX.Engine = value
+	}
+	if value := os.Getenv("MOEX_MARKET"); value != "" {
+		c.MOEX.Market = value
+	}
+	if value := os.Getenv("MOEX_BOARD"); value != "" {
+		c.MOEX.Board = value
+	}
+	if value := os.Getenv("MOEX_USERNAME"); value != "" {
+		c.MOEX.Username = value
+	}
+	if value := os.Getenv("MOEX_PASSWORD"); value != "" {
+		c.MOEX.Password = value
+	}
+	if value := os.Getenv("MOEX_PASSPORT_CERT"); value != "" {
+		c.MOEX.PassportCert = value
+	}
+	if value := os.Getenv("MOEX_BEARER_TOKEN"); value != "" {
+		c.MOEX.BearerToken = value
+	}
+	if value := os.Getenv("MOEX_API_KEY_HEADER"); value != "" {
+		c.MOEX.APIKeyHeader = value
+	}
+	if value := os.Getenv("MOEX_API_KEY_VALUE"); value != "" {
+		c.MOEX.APIKeyValue = value
+	}
+	if value := os.Getenv("MOEX_USER_AGENT"); value != "" {
+		c.MOEX.UserAgent = value
 	}
 	if value := os.Getenv("LLM_BASE_URL"); value != "" {
 		c.LLM.BaseURL = value
