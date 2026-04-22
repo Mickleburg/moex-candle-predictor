@@ -16,6 +16,7 @@ from .windows import (
     build_inference_window,
     build_sequence_windows,
     build_tabular_windows,
+    resolve_feature_columns,
 )
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     "build_tabular_windows",
     "build_sequence_windows",
     "build_inference_window",
+    "resolve_feature_columns",
 ]

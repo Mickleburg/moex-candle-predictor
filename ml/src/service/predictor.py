@@ -7,7 +7,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from ..features import CandleTokenizer, build_inference_window, compute_all_indicators
+from ..features import CandleTokenizer, build_inference_window, compute_all_indicators, resolve_feature_columns
 from ..models import LGBMClassifier
 from ..utils.io import read_json
 
@@ -58,10 +58,9 @@ class CandlePredictor:
         
         # Load tokenizer
         tokenizer_path = self.artifacts_dir / "tokenizer.pkl"
-        if not tokenizer_path.exists():
-            raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
-        self.tokenizer = CandleTokenizer.load(tokenizer_path)
-        
+        if tokenizer_path.exists():
+            self.tokenizer = CandleTokenizer.load(tokenizer_path)
+
         self.is_loaded = True
         print(f"Predictor loaded: model={self.model.__class__.__name__}, version={self.metadata.get('artifact_version')}")
 
@@ -74,9 +73,7 @@ class CandlePredictor:
                 raise ValueError(f"Missing feature columns required by model: {missing}")
             return list(configured)
 
-        feature_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
-        exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
-        return [column for column in feature_cols if column not in exclude_cols]
+        return resolve_feature_columns(features_df)
     
     def _candles_to_dataframe(self, candles: list) -> pd.DataFrame:
         """Convert list of candle objects to DataFrame.

@@ -15,6 +15,7 @@ from ..features import (
     CandleTokenizer,
     build_tabular_windows,
     compute_all_indicators,
+    resolve_feature_columns,
 )
 from ..models import LGBMClassifier, LogisticRegressionBaseline, MajorityClassifier, MarkovClassifier
 from ..utils.config import load_all_configs
@@ -320,9 +321,7 @@ def build_metadata(
     }
     
     # Feature set used by the model as input.
-    feature_cols = train_features_df.select_dtypes(include=[np.number]).columns.tolist()
-    exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
-    feature_set = [col for col in feature_cols if col not in exclude_cols]
+    feature_set = resolve_feature_columns(train_features_df)
     
     # Tokenizer settings
     tokenizer_metadata = tokenizer.get_metadata()

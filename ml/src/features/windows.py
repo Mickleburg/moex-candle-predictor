@@ -6,6 +6,30 @@ import numpy as np
 import pandas as pd
 
 
+def resolve_feature_columns(
+    features_df: pd.DataFrame,
+    feature_cols: Optional[list[str]] = None
+) -> list[str]:
+    """Resolve model input feature order from a feature dataframe.
+
+    If ``feature_cols`` is provided, it is treated as the source of truth and
+    validated against the dataframe. Otherwise the order is derived from the
+    dataframe's numeric columns, excluding non-feature identifiers.
+    """
+    df = features_df.copy()
+
+    if feature_cols is None:
+        feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
+    resolved = [col for col in feature_cols if col not in exclude_cols]
+    missing = [col for col in resolved if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing feature columns: {missing}")
+
+    return resolved
+
+
 def build_tabular_windows(
     features_df: pd.DataFrame,
     tokens: np.ndarray,
@@ -32,13 +56,7 @@ def build_tabular_windows(
     """
     df = features_df.copy()
     
-    # Determine feature columns
-    if feature_cols is None:
-        feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Remove non-feature columns
-    exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
-    feature_cols = [col for col in feature_cols if col not in exclude_cols]
+    feature_cols = resolve_feature_columns(df, feature_cols)
     
     # Extract feature matrix
     feature_matrix = df[feature_cols].values
@@ -106,13 +124,7 @@ def build_sequence_windows(
     """
     df = features_df.copy()
     
-    # Determine feature columns
-    if feature_cols is None:
-        feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Remove non-feature columns
-    exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
-    feature_cols = [col for col in feature_cols if col not in exclude_cols]
+    feature_cols = resolve_feature_columns(df, feature_cols)
     
     # Extract feature matrix
     feature_matrix = df[feature_cols].values
@@ -183,13 +195,7 @@ def build_inference_window(
     
     # Take last window_size samples
     df_window = df.iloc[-window_size:].copy()
-    # Determine feature columns
-    if feature_cols is None:
-        feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Remove non-feature columns
-    exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
-    feature_cols = [col for col in feature_cols if col not in exclude_cols]
+    feature_cols = resolve_feature_columns(df, feature_cols)
     
     # Extract feature matrix
     feature_matrix = df_window[feature_cols].values
