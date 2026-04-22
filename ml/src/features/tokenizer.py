@@ -49,14 +49,14 @@ class CandleTokenizer:
             "bin_edges": None,
         }
     
-    def _compute_normalized_returns(self, df: pd.DataFrame) -> np.ndarray:
-        """Compute normalized returns: return_h / ATR.
+    def _compute_target_returns(self, df: pd.DataFrame) -> np.ndarray:
+        """Compute normalized future returns used as training targets.
         
         Args:
             df: DataFrame with 'close' and 'atr' columns.
             
         Returns:
-            Array of normalized returns.
+            Array of normalized target returns.
         """
         # Compute future return over horizon h
         future_close = df["close"].shift(-self.horizon)
@@ -71,7 +71,7 @@ class CandleTokenizer:
         atr_safe = np.where(np.abs(atr) < epsilon, epsilon, atr)
         
         normalized_return = return_h / atr_safe
-        
+
         return normalized_return.values
     
     def fit(self, df: pd.DataFrame) -> "CandleTokenizer":
@@ -104,7 +104,7 @@ class CandleTokenizer:
             )
         
         # Compute normalized returns
-        normalized_returns = self._compute_normalized_returns(df)
+        normalized_returns = self._compute_target_returns(df)
         
         # Remove NaN values (from horizon shift at end of data)
         normalized_returns = normalized_returns[~np.isnan(normalized_returns)]
@@ -164,7 +164,7 @@ class CandleTokenizer:
             raise ValueError(f"Missing required columns: {missing}")
         
         # Compute normalized returns
-        normalized_returns = self._compute_normalized_returns(df)
+        normalized_returns = self._compute_target_returns(df)
         
         # Digitize using bin edges
         # np.digitize returns bin index in [1, n_bins+1], so subtract 1

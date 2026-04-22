@@ -9,7 +9,7 @@ import pandas as pd
 
 from ..features import CandleTokenizer, build_inference_window, compute_all_indicators
 from ..models import LGBMClassifier
-from ..utils.io import load_joblib, read_json
+from ..utils.io import read_json
 
 
 class CandlePredictor:
@@ -64,6 +64,19 @@ class CandlePredictor:
         
         self.is_loaded = True
         print(f"Predictor loaded: model={self.model.__class__.__name__}, version={self.metadata.get('artifact_version')}")
+
+    def _feature_columns(self, features_df: pd.DataFrame) -> list[str]:
+        """Return the exact feature order expected by the trained model."""
+        configured = self.metadata.get("feature_set") if self.metadata else None
+        if configured:
+            missing = [column for column in configured if column not in features_df.columns]
+            if missing:
+                raise ValueError(f"Missing feature columns required by model: {missing}")
+            return list(configured)
+
+        feature_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
+        exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
+        return [column for column in feature_cols if column not in exclude_cols]
     
     def _candles_to_dataframe(self, candles: list) -> pd.DataFrame:
         """Convert list of candle objects to DataFrame.
@@ -74,6 +87,9 @@ class CandlePredictor:
         Returns:
             DataFrame with normalized column names.
         """
+        if not candles:
+            raise ValueError("No candles provided")
+
         # Convert to list of dicts if needed
         if hasattr(candles[0], 'model_dump'):
             # Pydantic model
@@ -159,7 +175,10 @@ class CandlePredictor:
         """
         if not self.is_loaded:
             raise ValueError("Predictor not loaded. Call load() first.")
-        
+
+        if not candles:
+            raise ValueError("No candles provided")
+
         # Convert to DataFrame
         df = self._candles_to_dataframe(candles)
         
@@ -172,12 +191,14 @@ class CandlePredictor:
         
         # Compute features (same as training)
         features_df = compute_all_indicators(df)
-        
-        # Transform with fitted tokenizer
-        tokens = self.tokenizer.transform(features_df)
+        feature_cols = self._feature_columns(features_df)
         
         # Build inference window
-        X = build_inference_window(features_df, tokens, window_size=window_size)
+        X = build_inference_window(
+            features_df,
+            window_size=window_size,
+            feature_cols=feature_cols,
+        )
         
         # Flatten for tabular model
         X_flat = X.reshape(1, -1)

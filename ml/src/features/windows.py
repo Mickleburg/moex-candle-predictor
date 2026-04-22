@@ -15,7 +15,7 @@ def build_tabular_windows(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build tabular windows for tree-based models (LightGBM).
     
-    Flattens window of tokens and features into a single feature vector per sample.
+    Flattens a historical feature window into a single feature vector per sample.
     Target is the token h steps ahead.
     
     Args:
@@ -57,14 +57,9 @@ def build_tabular_windows(
     
     # Create sliding windows
     for i in range(n_samples - min_length + 1):
-        # Features: window_size steps of historical data
+        # Features: window_size steps of historical data only.
         window_features = feature_matrix[i:i + window_size].flatten()
-        
-        # Tokens: window_size historical tokens
-        window_tokens = tokens[i:i + window_size]
-        
-        # Combine features and tokens
-        X_sample = np.concatenate([window_features, window_tokens])
+        X_sample = window_features
         
         # Target: token h steps ahead from end of window
         target_idx = i + window_size + horizon - 1
@@ -136,14 +131,9 @@ def build_sequence_windows(
     
     # Create sliding windows
     for i in range(n_samples - min_length + 1):
-        # Features: window_size steps of historical data (3D)
+        # Features: window_size steps of historical data only.
         window_features = feature_matrix[i:i + window_size]
-        
-        # Tokens: window_size historical tokens (add as feature channel)
-        window_tokens = tokens[i:i + window_size].reshape(-1, 1)
-        
-        # Combine features and tokens along feature dimension
-        X_sample = np.concatenate([window_features, window_tokens], axis=1)
+        X_sample = window_features
         
         # Target: token h steps ahead from end of window
         target_idx = i + window_size + horizon - 1
@@ -166,7 +156,6 @@ def build_sequence_windows(
 
 def build_inference_window(
     features_df: pd.DataFrame,
-    tokens: np.ndarray,
     window_size: int = 32,
     feature_cols: Optional[list[str]] = None
 ) -> np.ndarray:
@@ -176,7 +165,6 @@ def build_inference_window(
     
     Args:
         features_df: DataFrame with feature columns.
-        tokens: Array of token IDs.
         window_size: Number of historical tokens to include (L).
         feature_cols: List of feature columns to include.
         
@@ -195,8 +183,6 @@ def build_inference_window(
     
     # Take last window_size samples
     df_window = df.iloc[-window_size:].copy()
-    tokens_window = tokens[-window_size:]
-    
     # Determine feature columns
     if feature_cols is None:
         feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -207,13 +193,9 @@ def build_inference_window(
     
     # Extract feature matrix
     feature_matrix = df_window[feature_cols].values
-    
-    # Combine features and tokens
-    window_tokens = tokens_window.reshape(-1, 1)
-    X = np.concatenate([feature_matrix, window_tokens], axis=1)
-    
+
     # Add batch dimension
-    X = X[np.newaxis, ...]
+    X = feature_matrix[np.newaxis, ...]
     
     print(f"Inference window: X shape={X.shape}")
     
@@ -237,9 +219,8 @@ if __name__ == "__main__":
     tokenizer.fit(indicators_df)
     
     # Transform to tokens
-    tokens = tokenizer.transform(indicators_df)
-    
     print(f"Data shape: {indicators_df.shape}")
+    tokens = tokenizer.transform(indicators_df)
     print(f"Tokens shape: {tokens.shape}")
     
     # Build tabular windows
@@ -256,6 +237,6 @@ if __name__ == "__main__":
     
     # Build inference window
     X_inf = build_inference_window(
-        indicators_df, tokens, window_size=32
+        indicators_df, window_size=32
     )
     print(f"Inference: X={X_inf.shape}")

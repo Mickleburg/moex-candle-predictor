@@ -198,8 +198,9 @@ class LGBMClassifier:
         """
         if not self.is_fitted_:
             raise ValueError("Model not fitted. Call fit() first.")
-        
-        return self.model_.feature_importances_(importance_type=importance_type)
+
+        booster = self.model_.booster_
+        return booster.feature_importance(importance_type=importance_type)
     
     def save(self, path: str | Path) -> None:
         """Save model to file.

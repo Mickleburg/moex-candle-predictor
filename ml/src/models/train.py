@@ -16,7 +16,7 @@ from ..features import (
     build_tabular_windows,
     compute_all_indicators,
 )
-from ..models import LGBMClassifier, MajorityClassifier, MarkovClassifier
+from ..models import LGBMClassifier, LogisticRegressionBaseline, MajorityClassifier, MarkovClassifier
 from ..utils.config import load_all_configs
 from ..utils.io import ensure_dir, save_json, save_pickle
 
@@ -178,6 +178,12 @@ def train_model(
     elif model_type == "markov":
         model = MarkovClassifier(n_classes=n_classes)
         model.fit(X_train, y_train)
+    elif model_type == "logistic":
+        model = LogisticRegressionBaseline(
+            n_classes=n_classes,
+            random_state=random_state,
+        )
+        model.fit(X_train, y_train)
     elif model_type == "lgbm":
         lgbm_params = dict(train_config.get("lgbm_params", {}))
         # Wrapper already hardcodes multiclass objective and class count.
@@ -271,6 +277,7 @@ def build_metadata(
     features_config: dict,
     train_config: dict,
     train_df: pd.DataFrame,
+    train_features_df: pd.DataFrame,
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
     tokenizer: CandleTokenizer,
@@ -312,8 +319,8 @@ def build_metadata(
         "n_samples": len(test_df)
     }
     
-    # Feature set (list of numeric columns)
-    feature_cols = train_df.select_dtypes(include=[np.number]).columns.tolist()
+    # Feature set used by the model as input.
+    feature_cols = train_features_df.select_dtypes(include=[np.number]).columns.tolist()
     exclude_cols = ["begin", "end", "ticker", "timeframe", "source"]
     feature_set = [col for col in feature_cols if col not in exclude_cols]
     
@@ -422,6 +429,7 @@ def train_pipeline(config_dir: str = "configs") -> dict:
         features_config,
         train_config,
         train_df,
+        train_features,
         val_df,
         test_df,
         tokenizer,

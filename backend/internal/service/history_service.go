@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
+	"time"
 
 	"candle-predictor/internal/config"
 	"candle-predictor/internal/models"
@@ -54,7 +54,7 @@ func (s *HistoryService) PrepareCandles(candles []models.Candle, source string) 
 
 	ticker := prepared[0].Ticker
 	timeframe := prepared[0].Timeframe
-	seenBegins := make([]string, 0, len(prepared))
+	seenBegins := make(map[string]struct{}, len(prepared))
 
 	for i, candle := range prepared {
 		if candle.Ticker != ticker {
@@ -64,12 +64,20 @@ func (s *HistoryService) PrepareCandles(candles []models.Candle, source string) 
 			return nil, fmt.Errorf("mixed timeframes in candle batch")
 		}
 		key := candle.Begin.UTC().Format("2006-01-02T15:04:05")
-		if slices.Contains(seenBegins, key) {
+		if _, exists := seenBegins[key]; exists {
 			return nil, fmt.Errorf("duplicate candle begin %s", key)
 		}
-		seenBegins = append(seenBegins, key)
-		if i > 0 && candle.Begin.Before(prepared[i-1].End) && candle.Begin.Equal(prepared[i-1].Begin) {
-			return nil, fmt.Errorf("duplicate or overlapping candle begin %s", key)
+		seenBegins[key] = struct{}{}
+		if i > 0 {
+			prev := prepared[i-1]
+			if !prev.End.IsZero() && candle.Begin.Before(prev.End) {
+				return nil, fmt.Errorf(
+					"overlapping candles: previous [%s, %s) overlaps current begin %s",
+					prev.Begin.UTC().Format(time.RFC3339),
+					prev.End.UTC().Format(time.RFC3339),
+					candle.Begin.UTC().Format(time.RFC3339),
+				)
+			}
 		}
 	}
 
