@@ -12,9 +12,17 @@ market:
 
 moex:
   base_url: "https://iss.moex.com"
+  algopack_base_url: "https://apim.moex.com"
   engine: "stock"
   market: "shares"
   board: "TQBR"
+  username: ""
+  password: ""
+  passport_cert: ""
+  bearer_token: ""
+  api_key_header: "X-API-Key"
+  api_key_value: ""
+  user_agent: "moex-candle-predictor-backend/0.1"
   timeout_seconds: 10
 
 ml:
