@@ -106,7 +106,7 @@ def compute_volume_ratio(
     if "volume" not in df.columns:
         raise ValueError("DataFrame must have 'volume' column")
     
-    rolling_mean = df["volume"].rolling(window=window).mean()
+    rolling_mean = df["volume"].shift(1).rolling(window=window).mean()
     volume_ratio = df["volume"] / rolling_mean
     
     return volume_ratio
