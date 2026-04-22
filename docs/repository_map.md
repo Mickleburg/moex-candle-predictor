@@ -28,6 +28,11 @@ moex-candle-predictor/
 
 ## Backend Map
 
+### Dependency Manifests
+
+- `backend/go.mod` — Go module definition for the backend.
+- `backend/go.sum` — locked Go dependency checksums.
+
 ### Entrypoints
 
 - `backend/cmd/app/main.go` — backend process entrypoint.
@@ -40,7 +45,7 @@ moex-candle-predictor/
 ### App Wiring And Routing
 
 - `backend/internal/app/app.go` — app construction, HTTP routes, handlers, middleware.
-- `backend/internal/app/db.go` — DB-related placeholder/helper; not central to current documented runtime.
+- `backend/internal/app/db.go` — helper that builds the file-backed store used by the current runtime.
 
 ### Models
 

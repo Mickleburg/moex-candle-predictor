@@ -77,14 +77,14 @@ Backend-side semantics:
       "timeframe": "1H"
     }
   ],
-  "model_version": null
+  "model_version": "2026-04-19T17:29:17.793124"
 }
 ```
 
 Поля:
 
 - `candles`: массив свечей
-- `model_version`: optional string/null
+- `model_version`: optional string; backend обычно просто не передает это поле
 
 Поля свечи:
 
