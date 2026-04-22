@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 
-def compute_returns(df: pd.DataFrame, periods: list[int] = [1]) -> pd.DataFrame:
+def compute_returns(df: pd.DataFrame, periods: Optional[list[int]] = None) -> pd.DataFrame:
     """Compute close-to-close returns for multiple periods.
     
     Args:
@@ -17,6 +17,9 @@ def compute_returns(df: pd.DataFrame, periods: list[int] = [1]) -> pd.DataFrame:
         DataFrame with return columns (e.g., 'return_1', 'return_3').
     """
     df = df.copy()
+
+    if periods is None:
+        periods = [1]
     
     if "close" not in df.columns:
         raise ValueError("DataFrame must have 'close' column")
