@@ -1,68 +1,168 @@
-# Архитектура
+# Architecture
 
-## Компоненты
+## Source-Of-Truth Hierarchy
+
+Для этой кодовой базы порядок источников истины должен быть таким:
+
+1. код;
+2. `shared/schemas/` и фактические runtime contracts;
+3. PDF-документы как future reference.
+
+Следствия:
+
+- если README или docs расходятся с кодом, правдой считается код;
+- если PDF описывает более широкую hybrid/LLM architecture, это не делает ее текущей реализацией;
+- `shared/schemas/` важны только там, где они реально существуют, то есть для `POST /predict`.
+
+## Current Architecture: Only Implemented System
+
+Документ ниже описывает только текущий реализованный scope:
+
+- `backend/`
+- `ml/`
+- `shared/schemas/`
+- `data/`
 
 ### Backend
 
-Go-сервис из `backend/`:
+Подтверждаемые entrypoints:
 
-- читает конфиг;
-- поднимает HTTP API;
-- получает свечи из MOEX ISS / ALGOPACK;
-- сохраняет raw candles в `data/raw`;
-- вызывает ML service;
-- строит итоговое решение через aggregation + risk.
+- `backend/cmd/app/main.go`
+- `backend/internal/app/app.go`
+
+Подтверждаемая роль backend:
+
+- поднять HTTP API;
+- загрузить/принять свечи;
+- провалидировать candle batch;
+- сохранить raw candles в `data/raw/`;
+- вызвать ML service по HTTP;
+- обработать response и error semantics.
 
 ### ML
 
-Python-код из `ml/`:
+Подтверждаемые entrypoints:
 
-- загружает raw candles из `data/raw`;
-- готовит признаки и токены;
-- обучает модель;
-- сохраняет `model.pkl`, `tokenizer.pkl`, `metadata.json`;
-- поднимает FastAPI inference.
+- `ml/src/models/train.py`
+- `ml/src/service/api.py`
 
-### Shared
+Подтверждаемая роль ML:
 
-`shared/schemas/` содержит JSON Schema для request/response контракта ML API.
+- training pipeline от raw candles до artifacts;
+- inference service с `GET /health` и `POST /predict`;
+- preprocessing внутри Python-кода;
+- загрузка `model.pkl`, `tokenizer.pkl`, `metadata.json`.
 
-### Data
+### Shared Schemas
 
-- `data/raw/` — Parquet со свечами;
-- `data/predictions/` — online prediction artifacts;
-- `data/reports/` — decision log и отчёты;
-- `data/processed/` — зарезервировано под промежуточные данные.
+`shared/schemas/` сейчас покрывает только contract для `POST /predict`:
 
-## Runtime flow
+- `shared/schemas/candles_request.json`
+- `shared/schemas/prediction_response.json`
 
-1. Backend получает свечи из MOEX или принимает их через API.
-2. Свечи валидируются и при необходимости сохраняются в `data/raw/`.
-3. Backend отправляет окно свечей в ML `/predict`.
-4. Backend получает отдельный LLM signal или fallback.
-5. Aggregator считает итоговый score.
-6. Risk layer может заблокировать `BUY`/`SELL` и превратить решение в `HOLD`.
-7. Decision response логируется в JSONL.
+Эти схемы не описывают:
 
-## Training flow
+- raw data schema в `data/raw/`;
+- backend health payload;
+- behavior decision/LLM path.
 
-1. `ml/src/data/load.py` читает raw data.
-2. `ml/src/data/clean.py` чистит и сортирует данные.
-3. `ml/src/data/split.py` делает time split.
-4. `ml/src/features/indicators.py` считает признаки.
-5. `ml/src/features/tokenizer.py` строит токены.
-6. `ml/src/features/windows.py` формирует training windows.
-7. `ml/src/models/train.py` обучает модель и пишет артефакты.
+### Data Layer
 
-## Критичные стыки
+Текущие runtime directories:
 
-- backend -> ml request/response contract;
-- backend storage schema -> ml training loader;
-- configs -> runtime paths;
-- `ml/artifacts/*` -> inference service.
+- `data/raw/` — raw candles storage;
+- `data/processed/` — зарезервировано под промежуточные данные;
+- `data/predictions/` — зарезервировано под prediction outputs;
+- `data/reports/` — decision log и возможные отчеты.
 
-## Известные риски
+Фактическое состояние checked-in repo:
 
-- Train и serve логика ML не эквивалентны по семантике токенов; это нужно считать критическим риском, а не допустимым MVP-компромиссом.
-- Документация и конфиги содержат параметры, которые не всегда реально используются кодом.
-- Репозиторий хранит локальные runtime artifacts (`ml/.venv`, `ml/artifacts`) вместе с исходниками, что усложняет handoff и воспроизводимость.
+- `data/raw/` пуст, кроме `.gitkeep`;
+- `data/reports/decision_log.jsonl` содержит исторические записи decision flow.
+
+## Critical Contracts
+
+### Raw Candle Contract
+
+Raw candle contract задается не JSON Schema, а комбинацией:
+
+- `backend/internal/storage/files.go`
+- `backend/internal/service/history_service.go`
+- `ml/src/data/load.py`
+- `ml/src/data/clean.py`
+
+Фактически ожидаются поля:
+
+- `ticker`
+- `timeframe`
+- `begin`
+- `end`
+- `open`
+- `high`
+- `low`
+- `close`
+- `volume`
+- `value`
+- `source`
+
+### Backend -> ML Contract
+
+Подтвержденный межсервисный контракт:
+
+- `GET /health`
+- `POST /predict`
+
+JSON Schema есть только для `POST /predict`. Дополнительные runtime assumptions фиксируются кодом:
+
+- минимум `32` свечи;
+- chronological ordering;
+- один ticker;
+- один timeframe.
+
+## Current Data Flow
+
+### Flow A: ingest/store raw candles
+
+1. backend получает candles от клиента или MOEX;
+2. `HistoryService.PrepareCandles` проверяет batch;
+3. `FileStore.SaveRawCandles` пишет Parquet в `data/raw/`.
+
+### Flow B: train pipeline
+
+1. `ml/src/models/train.py` читает `data/raw/`;
+2. loader/cleaner подготавливают DataFrame;
+3. pipeline строит features/tokens/windows;
+4. модель и metadata пишутся в `ml/artifacts/`.
+
+### Flow C: inference
+
+1. `ml/src/service/api.py` поднимает FastAPI app;
+2. `CandlePredictor` загружает artifacts;
+3. `/predict` строит features на входных candles и возвращает prediction payload.
+
+### Flow D: backend -> ML request path
+
+1. backend проверяет `/health`;
+2. backend отправляет `POST /predict`;
+3. backend парсит `PredictResponse`;
+4. при ошибках использует fallback semantics.
+
+## Planned / Future Architecture
+
+Приложенный PDF про гибридного торгового агента нужно трактовать как planned extension, а не как текущую runtime-архитектуру.
+
+К future/planned scope относятся:
+
+- отдельный LLM technical-analysis agent;
+- late-fusion aggregator как основная архитектурная ось;
+- memory/orchestration layers;
+- расширенный hybrid decision loop;
+- richer risk semantics и prompt-governed structured LLM outputs.
+
+В `backend/` уже есть кодовые заготовки, которые движутся в эту сторону:
+
+- `internal/service/decision_service.go`
+- `internal/service/llm_service.go`
+- `internal/service/risk_service.go`
+
+Но их нужно описывать как experimental/planned code present in repo, а не как подтвержденную текущую архитектуру системы.

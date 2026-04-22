@@ -1,12 +1,34 @@
-# API Contract: ML Inference
+# API Contract
 
-Документ описывает фактический HTTP-контракт между backend и ML inference service.
+## Scope
 
-## Endpoints
+Этот документ фиксирует только текущий подтверждаемый контракт между Go backend и Python ML inference service, плюс фактический raw data contract, на который опирается training/inference путь.
 
-### `GET /health`
+## Source Of Truth
 
-Ответ:
+Приоритет источников истины:
+
+1. код;
+2. `shared/schemas/` и фактические runtime models;
+3. `backend_integration.pdf` как reference, если он не противоречит коду.
+
+Важно:
+
+- `shared/schemas/` покрывают только `POST /predict`;
+- `GET /health` и raw candle storage contract схемами не покрыты;
+- PDF использует camelCase примеры, но текущий код работает в snake_case.
+
+## Backend <-> ML Contract
+
+### Endpoint: `GET /health`
+
+Назначение:
+
+- проверить доступность ML service;
+- определить, загружены ли artifacts;
+- получить `model_version`, если она известна.
+
+Фактический response shape по коду ML service:
 
 ```json
 {
@@ -17,15 +39,29 @@
 }
 ```
 
-Замечания:
+Поля:
 
-- endpoint всегда отвечает JSON;
-- `status` может быть `healthy` или `degraded`;
-- сам сервис может стартовать даже без загруженной модели.
+- `status`: `"healthy"` или `"degraded"`
+- `model_loaded`: `true` / `false`
+- `model_version`: string или `null`
+- `timestamp`: ISO datetime
 
-### `POST /predict`
+Backend-side semantics:
 
-Request:
+- `PredictService.Health` ожидает именно snake_case поля;
+- при `strict_health_check: true` backend требует `status == healthy` и `model_loaded == true` перед `POST /predict`;
+- backend `/health` агрегирует ML health в свой собственный payload, но это отдельный backend contract.
+
+### Endpoint: `POST /predict`
+
+Назначение:
+
+- передать последние свечи;
+- получить предсказанный класс, вероятности и action.
+
+#### Request
+
+Фактический request shape:
 
 ```json
 {
@@ -45,7 +81,25 @@ Request:
 }
 ```
 
-Response:
+Поля:
+
+- `candles`: массив свечей
+- `model_version`: optional string/null
+
+Поля свечи:
+
+- `begin`: обязательный datetime
+- `open`: обязательное число
+- `high`: обязательное число
+- `low`: обязательное число
+- `close`: обязательное число
+- `volume`: обязательное число
+- `ticker`: optional, но backend обычно передает явно
+- `timeframe`: optional, но backend обычно передает явно
+
+#### Response
+
+Фактический response shape:
 
 ```json
 {
@@ -66,37 +120,180 @@ Response:
 }
 ```
 
-## Request constraints
+Поля:
 
-- требуется массив `candles`;
-- каждая свеча должна содержать `begin`, `open`, `high`, `low`, `close`, `volume`;
-- `ticker` и `timeframe` optional;
-- по коду inference требует минимум `window_size` свечей.
+- `predicted_token`: integer
+- `probabilities`: array of float
+- `action`: `"buy" | "sell" | "hold"`
+- `confidence`: float
+- `model_version`: string
+- `ticker`: string
+- `timeframe`: string
+- `timestamp`: ISO datetime
+- `n_candles_used`: integer
+- `diagnostics`: optional object
 
-## Error semantics
+## Validation Rules
 
-- `400` — некорректный request или недостаточно свечей;
-- `503` — отсутствуют артефакты модели;
-- `500` — внутренняя ошибка preprocessing или модели.
+### Schema-Level
 
-## Shared schemas
+`shared/schemas/candles_request.json` и `shared/schemas/prediction_response.json` задают форму request/response.
 
-Актуальные schema files:
+Они проверяют:
 
-- `shared/schemas/candles_request.json`
-- `shared/schemas/prediction_response.json`
+- наличие обязательных полей;
+- базовые JSON types;
+- `action` enum в response.
 
-Эти схемы описывают форму request/response, но не все runtime-ограничения:
+### Runtime-Level
 
-- не выражают минимальный размер окна;
-- не выражают требования к порядку свечей;
-- не выражают train/serve совместимость артефактов.
+Код добавляет более строгие ограничения, которых нет в JSON Schema:
 
-## Что backend предполагает дополнительно
+- свечей должно быть не меньше `window_size`;
+- inference ожидает данные в хронологическом порядке;
+- request логически предполагает один ticker;
+- request логически предполагает один timeframe;
+- вход должен быть совместим с Python preprocessing path.
 
-Поверх JSON Schema backend ожидает, что:
+## Minimum Candles
 
-- свечи относятся к одному ticker и одному timeframe;
-- свечи отсортированы от старых к новым;
-- ML response возвращает осмысленные `probabilities`, `confidence`, `model_version`;
-- `action` ограничен значениями `buy`, `sell`, `hold`.
+На текущем кодовом пути есть два согласованных источника значения:
+
+- backend config: `ml.min_candles = 32`
+- checked-in ML metadata: `L = 32`
+
+Практически это означает:
+
+- backend не отправляет request, если свечей меньше `32`;
+- ML predictor также отклонит request, если свечей меньше `window_size`.
+
+Это число нельзя считать навсегда фиксированным для будущих версий без синхронного изменения backend config, artifacts и документации.
+
+## Ordering Requirements
+
+Требование порядка:
+
+- candles должны идти от старых к новым.
+
+Почему это критично:
+
+- backend history validation сортирует batch перед storage;
+- inference строит окно из последних `window_size` записей;
+- нарушение порядка меняет смысл признаков и таргета.
+
+## Single Ticker / Single Timeframe Assumptions
+
+Текущий код и docs опираются на такие предположения:
+
+- один inference request = один ticker;
+- один inference request = один timeframe;
+- один training run фактически использует первый ticker и первый timeframe из ML config.
+
+Backend explicitly проверяет mixed ticker/timeframe при работе с `models.Candle`.
+
+## Error Handling Semantics
+
+### `400 Bad Request`
+
+Типичные причины:
+
+- меньше минимального числа свечей;
+- неверный request body;
+- missing required fields;
+- проблемы preprocessing или shape mismatch, surfaced как user-visible validation/runtime error.
+
+Backend semantics:
+
+- retry не делать;
+- логировать причину;
+- переходить в безопасный fallback.
+
+### `503 Service Unavailable`
+
+Типичные причины:
+
+- artifacts не найдены;
+- service стартовал, но модель не загружена.
+
+Backend semantics:
+
+- допустим ограниченный повтор позже;
+- response нельзя использовать как торговый сигнал;
+- безопасный fallback обязателен.
+
+### `500 Internal Server Error`
+
+Типичные причины:
+
+- сбой preprocessing;
+- ошибка модели;
+- неожиданный runtime failure.
+
+Backend semantics:
+
+- retry допустим ограниченно;
+- сохранять причину ошибки;
+- fallback в безопасное состояние.
+
+## Retry And Fallback Expectations
+
+Текущее backend behavior по коду:
+
+- preflight health check возможен и по умолчанию обязателен через `strict_health_check: true`;
+- retry выполняется только на network/url errors и HTTP `5xx`;
+- retry count по умолчанию: `1`;
+- на HTTP `4xx` retry не выполняется;
+- при недоступности ML decision path уходит в `HOLD` fallback.
+
+## Raw Data Contract
+
+Raw candle contract задается кодом, а не JSON Schema.
+
+Фактическая storage schema:
+
+- `ticker`
+- `timeframe`
+- `begin`
+- `end`
+- `open`
+- `high`
+- `low`
+- `close`
+- `volume`
+- `value`
+- `source`
+
+Storage format:
+
+- Parquet
+
+Backend-side quality checks:
+
+- positive OHLC;
+- `high >= low`;
+- `volume > 0`;
+- no duplicate `begin`;
+- no mixed ticker/timeframe;
+- sorted by `begin`;
+- no overlapping intervals when `end` is known.
+
+ML-side loader/cleaner then assumes that this storage remains compatible with `load.py` and `clean.py`.
+
+## Compatibility / Change Policy
+
+### Safe Changes
+
+- добавить optional field в `POST /predict` response;
+- добавить optional field в request;
+- расширить `diagnostics`;
+- документировать дополнительные assumptions без изменения shape.
+
+### Breaking Changes
+
+- изменить required fields;
+- изменить endpoint path;
+- изменить enum или semantics поля `action`;
+- изменить naming convention полей;
+- изменить minimum candle logic без синхронного изменения backend config и artifacts.
+
+Если такие изменения понадобятся, безопаснее вводить новую версию контракта, а не silently менять текущий.
