@@ -38,17 +38,18 @@ def build_tabular_windows(
     feature_cols: Optional[list[str]] = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build tabular windows for tree-based models (LightGBM).
-    
+
     Flattens a historical feature window into a single feature vector per sample.
-    Target is the token h steps ahead.
-    
+    Target is the token at the last candle of the historical window. The token
+    itself already encodes the future return over ``horizon`` candles.
+
     Args:
         features_df: DataFrame with feature columns.
         tokens: Array of token IDs (same length as features_df).
         window_size: Number of historical tokens to include (L).
-        horizon: Prediction horizon h (number of steps ahead for target).
+        horizon: Prediction horizon h encoded inside each target token.
         feature_cols: List of feature columns to include. If None, uses all numeric columns.
-        
+
     Returns:
         Tuple of (X, y) where:
         - X shape: (n_samples, n_features) - flattened features per window
@@ -62,12 +63,12 @@ def build_tabular_windows(
     feature_matrix = df[feature_cols].values
     
     n_samples = len(df)
-    min_length = window_size + horizon
+    min_length = window_size
     
     if n_samples < min_length:
         raise ValueError(
             f"Insufficient data: {n_samples} samples, need at least {min_length} "
-            f"(window_size={window_size}, horizon={horizon})"
+            f"(window_size={window_size})"
         )
     
     X_list = []
@@ -79,8 +80,9 @@ def build_tabular_windows(
         window_features = feature_matrix[i:i + window_size].flatten()
         X_sample = window_features
         
-        # Target: token h steps ahead from end of window
-        target_idx = i + window_size + horizon - 1
+        # Target token for the current decision point; the token value already
+        # contains the future-return horizon.
+        target_idx = i + window_size - 1
         y_sample = tokens[target_idx]
         
         # Skip if target is invalid (-1)
@@ -106,17 +108,18 @@ def build_sequence_windows(
     feature_cols: Optional[list[str]] = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build sequence windows for RNN models (LSTM/GRU).
-    
-    Creates 3D tensor of sequences for sequence models.
-    Target is the token h steps ahead.
-    
+
+    Creates 3D tensor of sequences for sequence models. Target is the token at
+    the last candle of the historical window. The token itself already encodes
+    the future return over ``horizon`` candles.
+
     Args:
         features_df: DataFrame with feature columns.
         tokens: Array of token IDs (same length as features_df).
         window_size: Number of historical tokens to include (L).
-        horizon: Prediction horizon h (number of steps ahead for target).
+        horizon: Prediction horizon h encoded inside each target token.
         feature_cols: List of feature columns to include. If None, uses all numeric columns.
-        
+
     Returns:
         Tuple of (X, y) where:
         - X shape: (n_samples, window_size, n_features) - 3D sequence tensor
@@ -130,12 +133,12 @@ def build_sequence_windows(
     feature_matrix = df[feature_cols].values
     
     n_samples = len(df)
-    min_length = window_size + horizon
+    min_length = window_size
     
     if n_samples < min_length:
         raise ValueError(
             f"Insufficient data: {n_samples} samples, need at least {min_length} "
-            f"(window_size={window_size}, horizon={horizon})"
+            f"(window_size={window_size})"
         )
     
     X_list = []
@@ -147,8 +150,9 @@ def build_sequence_windows(
         window_features = feature_matrix[i:i + window_size]
         X_sample = window_features
         
-        # Target: token h steps ahead from end of window
-        target_idx = i + window_size + horizon - 1
+        # Target token for the current decision point; the token value already
+        # contains the future-return horizon.
+        target_idx = i + window_size - 1
         y_sample = tokens[target_idx]
         
         # Skip if target is invalid (-1)
@@ -163,6 +167,54 @@ def build_sequence_windows(
     
     print(f"Sequence windows: X shape={X.shape}, y shape={y.shape}")
     
+    return X, y
+
+
+def build_token_windows(
+    tokens: np.ndarray,
+    window_size: int = 32,
+    horizon: int = 3
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build token-only windows for sequence baselines such as Markov models.
+
+    Args:
+        tokens: Array of token IDs.
+        window_size: Number of historical realized tokens to include.
+        horizon: Prediction horizon h encoded inside each target token. A token
+            for candle ``t`` becomes observable only after ``t + h``.
+
+    Returns:
+        Tuple of (X, y), where X contains token context windows.
+    """
+    n_samples = len(tokens)
+    min_length = window_size + horizon
+
+    if n_samples < min_length:
+        raise ValueError(
+            f"Insufficient data: {n_samples} samples, need at least {min_length} "
+            f"(window_size={window_size}, horizon={horizon})"
+        )
+
+    X_list = []
+    y_list = []
+
+    for target_idx in range(window_size + horizon - 1, n_samples):
+        context_end = target_idx - horizon + 1
+        context_start = context_end - window_size
+        window_tokens = tokens[context_start:context_end]
+        y_sample = tokens[target_idx]
+
+        if y_sample == -1 or np.any(window_tokens == -1):
+            continue
+
+        X_list.append(window_tokens)
+        y_list.append(y_sample)
+
+    X = np.array(X_list)
+    y = np.array(y_list)
+
+    print(f"Token windows: X shape={X.shape}, y shape={y.shape}")
+
     return X, y
 
 

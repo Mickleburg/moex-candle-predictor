@@ -14,6 +14,7 @@ from ..evaluation.metrics import compute_classification_metrics
 from ..features import (
     CandleTokenizer,
     build_tabular_windows,
+    build_token_windows,
     compute_all_indicators,
     resolve_feature_columns,
 )
@@ -174,10 +175,13 @@ def train_model(
     print(f"Training model: {model_type}")
     
     if model_type == "majority":
-        model = MajorityClassifier()
+        model = MajorityClassifier(n_classes=n_classes)
         model.fit(X_train, y_train)
     elif model_type == "markov":
-        model = MarkovClassifier(n_classes=n_classes)
+        model = MarkovClassifier(
+            n_classes=n_classes,
+            order=train_config.get("markov_order", 1),
+        )
         model.fit(X_train, y_train)
     elif model_type == "logistic":
         model = LogisticRegressionBaseline(
@@ -237,6 +241,27 @@ def evaluate_model(
     print(f"{split_name} metrics: {metrics}")
     
     return metrics
+
+
+def build_windows_for_model(
+    features_df: pd.DataFrame,
+    tokens: np.ndarray,
+    features_config: dict,
+    train_config: dict
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build model-appropriate windows.
+
+    Markov models operate on token histories; tabular models operate on
+    flattened feature windows.
+    """
+    if train_config.get("model_type") == "markov":
+        return build_token_windows(
+            tokens,
+            window_size=features_config.get("window_size", 32),
+            horizon=features_config.get("horizon", 3),
+        )
+
+    return build_training_windows(features_df, tokens, features_config)
 
 
 def save_artifacts(
@@ -395,21 +420,21 @@ def train_pipeline(config_dir: str = "configs") -> dict:
     )
     
     # Build training windows
-    X_train, y_train = build_training_windows(train_features, train_tokens, features_config)
+    X_train, y_train = build_windows_for_model(train_features, train_tokens, features_config, train_config)
     
     # Process validation data (use fitted tokenizer)
     print("\nProcessing validation data...")
     val_features, val_tokens, _ = compute_features_and_tokens(
         val_df, features_config, tokenizer=tokenizer
     )
-    X_val, y_val = build_training_windows(val_features, val_tokens, features_config)
+    X_val, y_val = build_windows_for_model(val_features, val_tokens, features_config, train_config)
     
     # Process test data (use fitted tokenizer)
     print("\nProcessing test data...")
     test_features, test_tokens, _ = compute_features_and_tokens(
         test_df, features_config, tokenizer=tokenizer
     )
-    X_test, y_test = build_training_windows(test_features, test_tokens, features_config)
+    X_test, y_test = build_windows_for_model(test_features, test_tokens, features_config, train_config)
     
     # Train model
     print("\nTraining model...")

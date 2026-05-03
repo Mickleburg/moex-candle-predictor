@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from ..features import CandleTokenizer, build_inference_window, compute_all_indicators, resolve_feature_columns
-from ..models import LGBMClassifier
+from ..models import LGBMClassifier, LogisticRegressionBaseline, MajorityClassifier, MarkovClassifier
 from ..utils.io import read_json
 
 
@@ -33,7 +33,7 @@ class CandlePredictor:
                 path = Path(__file__).resolve().parents[2] / path
             self.artifacts_dir = path
         
-        self.model: Optional[LGBMClassifier] = None
+        self.model = None
         self.tokenizer: Optional[CandleTokenizer] = None
         self.metadata: Optional[dict] = None
         
@@ -54,7 +54,16 @@ class CandlePredictor:
         model_path = self.artifacts_dir / "model.pkl"
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
-        self.model = LGBMClassifier.load(model_path)
+        model_class = self.metadata.get("model_class", "LGBMClassifier")
+        loaders = {
+            "LGBMClassifier": LGBMClassifier,
+            "LogisticRegressionBaseline": LogisticRegressionBaseline,
+            "MajorityClassifier": MajorityClassifier,
+            "MarkovClassifier": MarkovClassifier,
+        }
+        if model_class not in loaders:
+            raise ValueError(f"Unsupported model class in metadata: {model_class}")
+        self.model = loaders[model_class].load(model_path)
         
         # Load tokenizer
         tokenizer_path = self.artifacts_dir / "tokenizer.pkl"
@@ -178,6 +187,9 @@ class CandlePredictor:
 
         # Convert to DataFrame
         df = self._candles_to_dataframe(candles)
+
+        if self.metadata.get("model_class") == "MarkovClassifier":
+            raise ValueError("MarkovClassifier artifacts are not supported by HTTP inference yet")
         
         # Check minimum candles
         window_size = self.metadata.get("L", 32)

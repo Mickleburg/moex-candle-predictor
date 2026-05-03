@@ -1,24 +1,24 @@
 # Training configuration
 
 # Model selection
-model_type: "lgbm"  # majority, markov, lgbm
+model_type: "logistic"  # majority, markov, logistic, lgbm
 
 # Random seed for reproducibility
 random_state: 42
 
-# LightGBM hyperparameters
+# LightGBM hyperparameters retained for the best LGBM variant from SBER 1H grid
 lgbm_params:
   objective: "multiclass"
-  num_class: 7
-  n_estimators: 100
-  max_depth: 6
-  learning_rate: 0.1
+  num_class: 3
+  n_estimators: 220
+  max_depth: 4
+  learning_rate: 0.025
   num_leaves: 31
-  min_child_samples: 20
-  subsample: 0.8
-  colsample_bytree: 0.8
-  reg_alpha: 0.1
-  reg_lambda: 0.1
+  min_child_samples: 50
+  subsample: 0.85
+  colsample_bytree: 0.85
+  reg_alpha: 0.05
+  reg_lambda: 0.5
   verbose: -1
 
 # Training settings

@@ -23,6 +23,8 @@ type Client struct {
 	logger     *slog.Logger
 }
 
+const moexCandlePageSize = 500
+
 func NewClient(cfg config.MOEXConfig, logger *slog.Logger) *Client {
 	return &Client{
 		cfg:        cfg,
@@ -37,7 +39,7 @@ func (c *Client) FetchCandles(ctx context.Context, ticker, timeframe string, fro
 		return nil, "", err
 	}
 
-	query := url.Values{
+	baseQuery := url.Values{
 		"iss.meta": {"off"},
 		"iss.only": {"candles"},
 		"from":     {from.UTC().Format("2006-01-02")},
@@ -45,23 +47,45 @@ func (c *Client) FetchCandles(ctx context.Context, ticker, timeframe string, fro
 		"interval": {strconv.Itoa(interval)},
 	}
 
-	raw, requestURL, err := c.FetchRawJSON(ctx, c.boardSecurityPath(ticker, "candles"), query)
-	if err != nil {
-		return nil, requestURL, err
+	var allCandles []models.Candle
+	var firstRequestURL string
+
+	for start := 0; ; start += moexCandlePageSize {
+		if err := ctx.Err(); err != nil {
+			return nil, firstRequestURL, err
+		}
+
+		query := cloneValues(baseQuery)
+		if start > 0 {
+			query.Set("start", strconv.Itoa(start))
+		}
+
+		raw, requestURL, err := c.FetchRawJSON(ctx, c.boardSecurityPath(ticker, "candles"), query)
+		if firstRequestURL == "" {
+			firstRequestURL = requestURL
+		}
+		if err != nil {
+			return nil, requestURL, err
+		}
+
+		var payload candleResponse
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, requestURL, err
+		}
+
+		candles, err := payload.toCandles(ticker, timeframe)
+		if err != nil {
+			return nil, requestURL, err
+		}
+		allCandles = append(allCandles, candles...)
+
+		if len(candles) < moexCandlePageSize {
+			break
+		}
 	}
 
-	var payload candleResponse
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, requestURL, err
-	}
-
-	candles, err := payload.toCandles(ticker, timeframe)
-	if err != nil {
-		return nil, requestURL, err
-	}
-
-	c.logger.Info("fetched candles from moex", "ticker", ticker, "timeframe", timeframe, "count", len(candles))
-	return candles, requestURL, nil
+	c.logger.Info("fetched candles from moex", "ticker", ticker, "timeframe", timeframe, "count", len(allCandles))
+	return allCandles, firstRequestURL, nil
 }
 
 func (c *Client) FetchRawCandles(ctx context.Context, ticker, timeframe string, from, to time.Time, engine, market, board string) (json.RawMessage, string, error) {
@@ -316,6 +340,14 @@ func normalizeISSJSONPath(resourcePath string) (string, error) {
 	default:
 		return resourcePath + ".json", nil
 	}
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
 }
 
 func (c *Client) algopackBaseURL() string {

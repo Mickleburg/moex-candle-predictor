@@ -1,10 +1,14 @@
 """Baseline models for comparison."""
 
-from typing import Optional
-
 import numpy as np
 from scipy.stats import mode
+from pathlib import Path
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from ..utils.io import load_joblib, save_joblib
 
 
 class MajorityClassifier:
@@ -13,8 +17,9 @@ class MajorityClassifier:
     Always predicts the most frequent class from training data.
     """
     
-    def __init__(self):
+    def __init__(self, n_classes: int | None = None):
         """Initialize majority classifier."""
+        self.n_classes = n_classes
         self.most_frequent_class_: int = None
         self.class_probabilities_: np.ndarray = None
         self.is_fitted_ = False
@@ -41,10 +46,11 @@ class MajorityClassifier:
         
         # Compute class probabilities
         unique_classes, counts = np.unique(valid_y, return_counts=True)
-        n_classes = max(unique_classes) + 1
+        n_classes = self.n_classes or (max(unique_classes) + 1)
         self.class_probabilities_ = np.zeros(n_classes)
         for cls, count in zip(unique_classes, counts):
-            self.class_probabilities_[cls] = count / len(valid_y)
+            if 0 <= cls < n_classes:
+                self.class_probabilities_[cls] = count / len(valid_y)
         
         self.is_fitted_ = True
         print(f"Majority class: {self.most_frequent_class_}")
@@ -82,6 +88,30 @@ class MajorityClassifier:
         n_samples = X.shape[0]
         return np.tile(self.class_probabilities_, (n_samples, 1))
 
+    def save(self, path: str | Path) -> None:
+        """Save classifier state."""
+        if not self.is_fitted_:
+            raise ValueError("Model not fitted. Cannot save.")
+        save_joblib(
+            {
+                "n_classes": self.n_classes,
+                "most_frequent_class_": self.most_frequent_class_,
+                "class_probabilities_": self.class_probabilities_,
+                "is_fitted_": self.is_fitted_,
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "MajorityClassifier":
+        """Load classifier state."""
+        data = load_joblib(path)
+        model = cls(n_classes=data["n_classes"])
+        model.most_frequent_class_ = data["most_frequent_class_"]
+        model.class_probabilities_ = data["class_probabilities_"]
+        model.is_fitted_ = data["is_fitted_"]
+        return model
+
 
 class MarkovClassifier:
     """Markov chain classifier for token sequences.
@@ -115,42 +145,30 @@ class MarkovClassifier:
         Returns:
             Self.
         """
-        # Extract last tokens from X
-        if X.ndim == 2:
-            # Assume last column or last position contains the last token
-            if X.shape[1] > 1:
-                last_tokens = X[:, -1].astype(int)
-            else:
-                last_tokens = X[:, 0].astype(int)
-        else:
-            last_tokens = X.astype(int)
+        contexts = self._contexts_from_X(X)
         
         # Filter invalid tokens
-        valid_mask = (y != -1) & (last_tokens != -1)
+        valid_mask = y != -1
         valid_y = y[valid_mask]
-        valid_last_tokens = last_tokens[valid_mask]
+        valid_contexts = [ctx for ctx, valid in zip(contexts, valid_mask) if valid and all(token != -1 for token in ctx)]
         
-        if len(valid_y) == 0:
+        if len(valid_y) == 0 or len(valid_contexts) == 0:
             raise ValueError("No valid samples found")
         
         # Build transition matrix
         self.transition_matrix_ = {}
-        for i in range(self.n_classes):
-            self.transition_matrix_[i] = np.zeros(self.n_classes)
         
         # Count transitions
-        for prev_token, next_token in zip(valid_last_tokens, valid_y):
-            if 0 <= prev_token < self.n_classes and 0 <= next_token < self.n_classes:
-                self.transition_matrix_[prev_token][next_token] += 1
+        for context, next_token in zip(valid_contexts, valid_y):
+            if 0 <= next_token < self.n_classes and all(0 <= token < self.n_classes for token in context):
+                self.transition_matrix_.setdefault(context, np.zeros(self.n_classes))
+                self.transition_matrix_[context][next_token] += 1
         
         # Normalize to probabilities
-        for prev_token in range(self.n_classes):
-            total = self.transition_matrix_[prev_token].sum()
+        for context, counts in self.transition_matrix_.items():
+            total = counts.sum()
             if total > 0:
-                self.transition_matrix_[prev_token] /= total
-            else:
-                # Use uniform distribution if no transitions seen
-                self.transition_matrix_[prev_token] = np.ones(self.n_classes) / self.n_classes
+                self.transition_matrix_[context] = counts / total
         
         # Compute default distribution (overall class frequencies)
         unique_classes, counts = np.unique(valid_y, return_counts=True)
@@ -169,6 +187,21 @@ class MarkovClassifier:
         print(f"Markov classifier fitted: order={self.order}, n_classes={self.n_classes}")
         
         return self
+
+    def _contexts_from_X(self, X: np.ndarray) -> list[tuple[int, ...]]:
+        """Extract the Markov context from token windows."""
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+
+        contexts = []
+        for row in X:
+            tokens = np.asarray(row).astype(int)
+            if len(tokens) >= self.order:
+                context = tuple(tokens[-self.order:])
+            else:
+                context = tuple(tokens)
+            contexts.append(context)
+        return contexts
     
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict next token using transition probabilities.
@@ -182,19 +215,12 @@ class MarkovClassifier:
         if not self.is_fitted_:
             raise ValueError("Model not fitted. Call fit() first.")
         
-        # Extract last tokens
-        if X.ndim == 2:
-            if X.shape[1] > 1:
-                last_tokens = X[:, -1].astype(int)
-            else:
-                last_tokens = X[:, 0].astype(int)
-        else:
-            last_tokens = X.astype(int)
+        contexts = self._contexts_from_X(X)
         
         predictions = []
-        for token in last_tokens:
-            if 0 <= token < self.n_classes:
-                probs = self.transition_matrix_[token]
+        for context in contexts:
+            if context in self.transition_matrix_:
+                probs = self.transition_matrix_[context]
                 pred = np.argmax(probs)
             else:
                 # Use default distribution for unknown tokens
@@ -215,24 +241,42 @@ class MarkovClassifier:
         if not self.is_fitted_:
             raise ValueError("Model not fitted. Call fit() first.")
         
-        # Extract last tokens
-        if X.ndim == 2:
-            if X.shape[1] > 1:
-                last_tokens = X[:, -1].astype(int)
-            else:
-                last_tokens = X[:, 0].astype(int)
-        else:
-            last_tokens = X.astype(int)
+        contexts = self._contexts_from_X(X)
         
         probabilities = []
-        for token in last_tokens:
-            if 0 <= token < self.n_classes:
-                probs = self.transition_matrix_[token]
+        for context in contexts:
+            if context in self.transition_matrix_:
+                probs = self.transition_matrix_[context]
             else:
                 probs = self.default_distribution_
             probabilities.append(probs)
         
         return np.array(probabilities)
+
+    def save(self, path: str | Path) -> None:
+        """Save classifier state."""
+        if not self.is_fitted_:
+            raise ValueError("Model not fitted. Cannot save.")
+        save_joblib(
+            {
+                "order": self.order,
+                "n_classes": self.n_classes,
+                "transition_matrix_": self.transition_matrix_,
+                "default_distribution_": self.default_distribution_,
+                "is_fitted_": self.is_fitted_,
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "MarkovClassifier":
+        """Load classifier state."""
+        data = load_joblib(path)
+        model = cls(order=data["order"], n_classes=data["n_classes"])
+        model.transition_matrix_ = data["transition_matrix_"]
+        model.default_distribution_ = data["default_distribution_"]
+        model.is_fitted_ = data["is_fitted_"]
+        return model
 
 
 class LogisticRegressionBaseline:
@@ -250,7 +294,7 @@ class LogisticRegressionBaseline:
         """
         self.n_classes = n_classes
         self.random_state = random_state
-        self.model_: LogisticRegression = None
+        self.model_ = None
         self.is_fitted_ = False
     
     def fit(self, X: np.ndarray, y: np.ndarray) -> "LogisticRegressionBaseline":
@@ -271,13 +315,16 @@ class LogisticRegressionBaseline:
         if len(y_valid) == 0:
             raise ValueError("No valid labels found (all are -1)")
         
-        # Initialize model
-        self.model_ = LogisticRegression(
-            multi_class="multinomial",
-            solver="lbfgs",
-            max_iter=1000,
-            random_state=self.random_state,
-            n_jobs=-1
+        # Rolling technical indicators intentionally leave early-window NaNs.
+        # Tree models handle them natively; linear models need imputation.
+        self.model_ = make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler(),
+            LogisticRegression(
+                solver="lbfgs",
+                max_iter=1000,
+                random_state=self.random_state,
+            ),
         )
         
         # Fit model
@@ -314,8 +361,37 @@ class LogisticRegressionBaseline:
         """
         if not self.is_fitted_:
             raise ValueError("Model not fitted. Call fit() first.")
-        
-        return self.model_.predict_proba(X)
+
+        proba = self.model_.predict_proba(X)
+        estimator = self.model_.named_steps["logisticregression"]
+        full_proba = np.zeros((len(X), self.n_classes))
+        for source_idx, cls in enumerate(estimator.classes_):
+            if 0 <= cls < self.n_classes:
+                full_proba[:, cls] = proba[:, source_idx]
+        return full_proba
+
+    def save(self, path: str | Path) -> None:
+        """Save classifier state."""
+        if not self.is_fitted_:
+            raise ValueError("Model not fitted. Cannot save.")
+        save_joblib(
+            {
+                "n_classes": self.n_classes,
+                "random_state": self.random_state,
+                "model_": self.model_,
+                "is_fitted_": self.is_fitted_,
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "LogisticRegressionBaseline":
+        """Load classifier state."""
+        data = load_joblib(path)
+        model = cls(n_classes=data["n_classes"], random_state=data["random_state"])
+        model.model_ = data["model_"]
+        model.is_fitted_ = data["is_fitted_"]
+        return model
 
 
 if __name__ == "__main__":

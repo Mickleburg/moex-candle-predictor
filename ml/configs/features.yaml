@@ -1,11 +1,11 @@
 # Feature engineering configuration
 
 # Tokenization
-num_classes: 7  # K=7 for MVP
-horizon: 3  # Prediction horizon h=3
+num_classes: 3  # K=3: down / neutral / up for SBER 1H research
+horizon: 1  # Predict the next hourly candle
 
 # Window configuration
-window_size: 32  # L=32 for MVP
+window_size: 32  # Best validation macro-F1 in SBER 1H grid
 
 # Technical indicators
 indicators:

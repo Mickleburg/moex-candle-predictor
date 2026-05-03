@@ -14,7 +14,7 @@ class CandleTokenizer:
     """Tokenizer for candle returns using quantile binning.
     
     Tokenization strategy:
-    - Compute normalized return: return_h / ATR (where return_h is close-to-close return over horizon h)
+    - Compute normalized move: close-to-close price delta over horizon h / ATR
     - Use ATR for normalization (more robust than rolling volatility)
     - Fit quantile bins on train data only
     - Transform returns to token IDs [0, K-1]
@@ -58,10 +58,10 @@ class CandleTokenizer:
         Returns:
             Array of normalized target returns.
         """
-        # Compute future return over horizon h
+        # Compute future price move over horizon h
         future_close = df["close"].shift(-self.horizon)
         current_close = df["close"]
-        return_h = (future_close - current_close) / current_close
+        price_delta = future_close - current_close
         
         # Normalize by ATR (handle division by zero)
         atr = df["atr"].values
@@ -70,7 +70,7 @@ class CandleTokenizer:
         epsilon = 1e-8
         atr_safe = np.where(np.abs(atr) < epsilon, epsilon, atr)
         
-        normalized_return = return_h / atr_safe
+        normalized_return = price_delta / atr_safe
 
         return normalized_return.values
     
