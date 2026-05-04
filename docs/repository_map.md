@@ -163,6 +163,7 @@ moex-candle-predictor/
 - `docs/architecture.md` — current implemented architecture + future boundary.
 - `docs/api_contract.md` — backend<->ML contract and raw data contract.
 - `docs/runtime_flow.md` — step-by-step runtime flows.
+- `docs/ml_module_architecture.md` — detailed ML module structure, candle-language architecture and prediction process.
 - `docs/known_limits.md` — verification status and caveats.
 - `docs/experiments.md` — training/evaluation scope.
 - `docs/repository_map.md` — этот документ.
