@@ -1,0 +1,40 @@
+description: Paper-inspired candle language research grid for SBER H1.
+data:
+  ticker: SBER
+  timeframe: 1H
+  source: data/raw/SBER_1H_*.parquet
+  train_ratio: 0.70
+  val_ratio: 0.15
+labels:
+  horizon_candles: [1, 3, 6]
+  commission: 0.0005
+  actions:
+    0: SELL
+    1: HOLD
+    2: BUY
+pipeline:
+  candle_shape_variants:
+    - ohlc
+    - shape
+  clustering:
+    - kmeans
+    - minibatch_kmeans
+    - agglomerative
+    - gmm
+    - dbscan
+    - hdbscan
+  vectorization:
+    - tfidf
+    - tfidf_svd
+    - cooccurrence_svd
+  classification:
+    - ridge
+    - linear_svc
+    - lightgbm
+    - extra_trees
+    - logreg
+    - mlp
+selection:
+  primary_metric: validation macro_f1
+  secondary_metric: validation accuracy
+  final_metric: test macro_f1

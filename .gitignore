@@ -4,5 +4,6 @@ ml/.venv/
 artifacts/
 data/raw/*.parquet
 data/predictions/*.parquet
+data/reports/*.csv
 data/reports/*.json
 data/reports/*.jsonl
