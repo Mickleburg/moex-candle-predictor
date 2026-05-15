@@ -1,68 +1,68 @@
-# SBER H1 Walk-Forward Research, 2026-05-15
+# SBER H1: walk-forward research, 2026-05-15
 
-## Scope
+## Цель
 
-This pass adds expanding-window walk-forward validation for two research paths:
+Этот этап добавляет expanding-window walk-forward validation для двух исследовательских направлений:
 
 - candle-word forecasting: previous words -> next word(s);
 - action classification: previous words -> `SELL/HOLD/BUY`.
 
-The goal is stability checking, not maximum score tuning. No test split is used
-for selection in these scripts.
+Цель этапа - проверить устойчивость во времени, а не максимизировать метрику любой ценой. Test split в этих скриптах не используется для selection.
 
-## Fold Design
+## Подтверждено кодом
 
-Default folds use the cleaned SBER 1H frame with 24,613 candles:
+- `walk_forward_ranges` строит ordered expanding folds без пересечения train/validation.
+- Clusterers fit-ятся внутри fold только на train candle shapes.
+- Validation words назначаются через train-fitted clusterer.
+- Vectorizer и classifier в action pipeline fit-ятся только на train fold samples.
+- Next-word forecasters fit-ятся только на train fold word targets.
+- Centroid distance matrices derived from train-fitted clusterers.
+- Markov next-word prior features fit-ятся только по train fold transitions.
+- Validation samples держат context и target внутри validation fold.
+- Selection использует только validation-fold aggregates.
 
-| fold | train range | validation range | train rows | validation rows |
+## Подтверждено запуском
+
+Команды:
+
+```powershell
+python ml\scripts\sber_next_word_walk_forward.py --output-json data/reports/sber_h1_next_word_walk_forward_20260515.json --output-csv data/reports/sber_h1_next_word_walk_forward_20260515.csv
+python ml\scripts\sber_nlp_walk_forward.py --output-json data/reports/sber_h1_nlp_walk_forward_20260515.json --output-csv data/reports/sber_h1_nlp_walk_forward_20260515.csv
+```
+
+Default folds на cleaned SBER 1H frame с 24613 свечами:
+
+| Fold | Train range | Validation range | Train rows | Validation rows |
 | ---: | --- | --- | ---: | ---: |
 | 1 | `[0:12000)` | `[12000:15000)` | 12000 | 3000 |
 | 2 | `[0:15000)` | `[15000:18000)` | 15000 | 3000 |
 | 3 | `[0:18000)` | `[18000:21000)` | 18000 | 3000 |
 
-Train is always strictly before validation. The default is expanding-window
-validation, implemented by `walk_forward_ranges` in `ml/src/data/split.py`.
+Train всегда строго раньше validation.
 
-## Leakage Rules
+## Формулы потерь samples
 
-Confirmed by code:
-
-- clusterers are fit per fold on train candle shapes only;
-- validation words are assigned by train-fitted clusterers;
-- sentence/vectorizer models are fit on train fold samples only;
-- action classifiers are fit on train fold labels only;
-- next-word forecasters are fit on train fold word targets only;
-- centroid distance matrices are derived from train-fitted clusterers;
-- Markov next-word prior features are fit from train fold transitions only;
-- validation samples keep their context and target inside the validation fold;
-- selection uses validation-fold aggregates only.
-
-For action samples, the expected count per fold is:
+Для action samples:
 
 ```text
 samples = fold_len - window_size - horizon + 1
 ```
 
-With `window_size=32` and `horizon=1`, a 3000-row validation fold yields
-2968 samples.
+При `window_size=32`, `horizon=1` validation fold на 3000 rows дает 2968 samples.
 
-For next-word samples, the expected count per fold is:
+Для next-word samples:
 
 ```text
 samples = fold_len - context_size - forecast_horizon + 1
 ```
 
+Эти потери математически неизбежны: часть свечей нужна для warmup context, а tail не может иметь target внутри fold.
+
 ## Next-Word Walk-Forward Results
-
-Command:
-
-```powershell
-python ml\scripts\sber_next_word_walk_forward.py --output-json data/reports/sber_h1_next_word_walk_forward_20260515.json --output-csv data/reports/sber_h1_next_word_walk_forward_20260515.csv
-```
 
 Top validation aggregates:
 
-| model | context | K | folds | val mean exact | std | min | max | val soft |
+| Model | Context | K | Folds | Val mean exact | Std | Min | Max | Val soft |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | markov1 | 16 | 1 | 3 | 0.3657 | 0.0707 | 0.2802 | 0.4534 | 0.9292 |
 | markov1 | 32 | 1 | 3 | 0.3650 | 0.0703 | 0.2800 | 0.4522 | 0.9291 |
@@ -77,24 +77,11 @@ Best by validation-fold selection:
 markov1, context_size=16, forecast_horizon=1
 ```
 
-Interpretation:
-
-- Markov-1 beats persistence and unigram on mean exact accuracy across folds.
-- The signal is not regime-stable: std is about 0.071 for the best K=1 result.
-- Soft similarity remains high for multiple baselines, so exact/top-k metrics are
-  still the primary diagnostic.
-
 ## Action Walk-Forward Results
-
-Command:
-
-```powershell
-python ml\scripts\sber_nlp_walk_forward.py --output-json data/reports/sber_h1_nlp_walk_forward_20260515.json --output-csv data/reports/sber_h1_nlp_walk_forward_20260515.csv
-```
 
 Validation aggregates:
 
-| config | Markov prior features | folds | val macro-F1 | std | worst fold | val accuracy |
+| Config | Markov prior features | Folds | Val macro-F1 | Std | Worst fold | Val accuracy |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | best_holdout | false | 3 | 0.3980 | 0.0275 | 0.3611 | 0.4666 |
 | best_holdout_markov_features | true | 3 | 0.3973 | 0.0262 | 0.3615 | 0.4657 |
@@ -106,43 +93,33 @@ Best by validation-fold selection:
 best_holdout
 ```
 
-Interpretation:
+## Почему прежние метрики слабые
 
-- The previous holdout-selected NLP configuration remains the strongest among
-  the small walk-forward set.
-- Markov next-word prior features do not improve this configuration in the
-  current minimal experiment.
-- The weaker KMeans/TF-IDF reference confirms that the better holdout result was
-  not only a single split artifact, but stability is still modest.
+- `Markov-1` - baseline по последнему слову, а не полноценная language model. Он оценивает локальную инерцию, но не строит богатую conditional distribution для всей будущей фразы.
+- Exact sequence match для `K > 1` быстро падает: даже при приемлемой token accuracy ошибка на любом шаге ломает всю sequence.
+- Candle words - это cluster IDs формы свечи, а не натуральные слова с устойчивой семантикой.
+- Soft similarity часто высока даже у простых baselines, потому что многие cluster centroids близки по форме. Ее нельзя использовать как главный selection metric.
+- Fold variance около 0.06-0.10 для next-word metrics указывает на смену рыночных режимов.
+- Текущая модель скорее ловит локальную инерцию candle shapes, чем устойчивую "грамматику свечей".
 
-## Holdout vs Walk-Forward
+## Интерпретация
 
-The earlier holdout validation macro-F1 for the best action config was around
-0.4067. Walk-forward mean macro-F1 is 0.3980 across three validation periods.
-These numbers are close enough to keep the direction alive, but not strong
-enough to claim a production trading edge.
+Action config из holdout-этапа остается лучшим среди малой walk-forward проверки: mean macro-F1 0.3980 против holdout validation около 0.4067. Это поддерживает направление исследования, но не доказывает торговую пригодность.
 
-The earlier next-word holdout best used one validation segment. Walk-forward
-shows Markov-1 remains the most credible simple baseline, but fold variance is
-large. Future work should report per-period degradation before trying larger
-models.
+Markov next-word prior features не улучшили action classifier в минимальном эксперименте: 0.3973 против 0.3980 macro-F1. Это не закрывает идею pretext features, но текущая простая версия пользы не показала.
 
-## Remaining Concerns
+Next-word baseline `markov1` лучше persistence/unigram по mean exact, но variance по folds слишком велика для сильного вывода.
 
-- Only three folds are used by default to keep runtime modest.
-- No final holdout/test evaluation is performed in these walk-forward scripts.
-- Next-word soft similarity is useful as a shape-distance diagnostic, but it is
-  too forgiving to be the selection metric by itself.
-- The Markov prior feature experiment is intentionally minimal: it uses only
-  train-fitted transition probabilities from the current word, plus entropy and
-  expected centroid distance.
+## Ограничения
 
-## Next Steps
+- Использовано только 3 folds, чтобы runtime оставался умеренным.
+- Final test evaluation не выполнялся.
+- Next-word path на этом этапе еще не был полноценной sequence language model.
+- Trading layer не строился.
 
-1. Add a fourth or fifth fold or a rolling train window to test late-regime
-   degradation.
-2. Keep Markov-1 as the next-word baseline before adding richer sequence models.
-3. Try calibration/thresholding for the action classifier using validation folds
-   only.
-4. If next-word features are revisited, test them as a pretext representation,
-   not as actual future-word leakage.
+## Следующие шаги
+
+1. Перейти от per-horizon next-word baselines к n-gram/backoff language model.
+2. Оценивать `P(w[t+1..t+K] | words[t-L+1..t])` через token NLL, perplexity, top-k, MRR и beam sequence metrics.
+3. Проверить качество словаря candle words: clusterer, vocabulary size, entropy, transition entropy и validation perplexity.
+4. Не переходить к Transformer/LSTM до сильного честного n-gram baseline.

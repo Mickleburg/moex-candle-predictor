@@ -328,6 +328,47 @@ def test_walk_forward_invariants():
         return False
 
 
+def test_word_lm_invariants():
+    """Test n-gram LM probabilities, decoding, and train-only fit."""
+
+    print("\nTesting word language-model invariants...")
+
+    try:
+        import numpy as np
+
+        from src.nlp.word_forecast import make_next_word_samples
+        from src.nlp.word_lm import NGramBackoffLanguageModel, evaluate_language_model
+
+        words = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 2, 0, 2, 0, 2])
+        train_start, train_end = 0, 8
+        val_start, val_end = 8, len(words)
+        model = NGramBackoffLanguageModel(order=2, alpha=0.1).fit(
+            words,
+            train_start=train_start,
+            train_end=train_end,
+            n_words=3,
+        )
+        proba = model.next_proba([0])
+        assert np.isclose(proba.sum(), 1.0)
+        assert proba[1] > proba[2], "validation-only transition leaked into train counts"
+
+        samples = make_next_word_samples(words, val_start, val_end, context_size=2, forecast_horizon=3)
+        decoded = model.greedy_decode(samples.X_contexts[0], forecast_horizon=3)
+        assert len(decoded) == 3
+        beam = model.beam_search(samples.X_contexts[0], forecast_horizon=3, beam_width=3)
+        assert len(beam) == 3
+        metrics = evaluate_language_model(model, samples.X_contexts, samples.Y_future_words, beam_width=3)
+        assert np.isfinite(metrics["mean_token_nll"])
+        assert np.isfinite(metrics["perplexity"])
+        assert metrics["perplexity"] > 0
+        assert "beam_contains_true_sequence" in metrics
+        print("  PASS Word LM probabilities, NLL, perplexity, and train-only counts")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Word LM invariant test failed: {exc}")
+        return False
+
+
 def test_predictor_input_validation():
     """Test inference preprocessing sorts and rejects ambiguous inputs."""
 
@@ -392,6 +433,7 @@ def main():
         ("Validation Selection", test_selection_uses_validation_only()),
         ("Next-word Forecast", test_next_word_forecast_invariants()),
         ("Walk-forward Invariants", test_walk_forward_invariants()),
+        ("Word LM Invariants", test_word_lm_invariants()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]
 

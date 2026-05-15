@@ -27,6 +27,12 @@ from .word_forecast import (
     make_markov_prior_feature_matrix,
     make_next_word_samples,
 )
+from .word_lm import (
+    NGramBackoffLanguageModel,
+    evaluate_language_model,
+    transition_entropy,
+    word_distribution_metrics,
+)
 
 __all__ = [
     "ACTION_LABELS",
@@ -52,4 +58,8 @@ __all__ = [
     "fit_markov_prior_features",
     "make_markov_prior_feature_matrix",
     "make_next_word_samples",
+    "NGramBackoffLanguageModel",
+    "evaluate_language_model",
+    "transition_entropy",
+    "word_distribution_metrics",
 ]

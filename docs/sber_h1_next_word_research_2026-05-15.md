@@ -1,38 +1,53 @@
-# SBER H1 Calendar Audit And Next-Word Research, 2026-05-15
+# SBER H1: календарный audit и next-word research, 2026-05-15
 
-## Scope
+## Цель
 
-This note documents the second ML/NLP audit step:
+Этот документ фиксирует второй audit-этап ML/NLP части:
 
-- remove test-based tie-breakers from model selection;
-- explain why SBER H1 has 24613 candles, not a naive 24/7 count;
-- add strict candle accounting and calendar diagnostics;
-- add a separate next-candle-word forecasting research path.
+- убрать selection leakage из research scripts;
+- объяснить, почему SBER H1 содержит 24613 свечей, а не naive 24/7 count;
+- добавить строгий candle accounting и calendar diagnostics;
+- добавить отдельный исследовательский путь для прогнозирования следующих candle words.
 
-The existing action-classification pipeline and legacy `/predict` API remain compatible.
+Legacy `/predict` API и текущий action-classification pipeline не менялись.
 
-## Selection Leakage Fix
+## Подтверждено кодом
 
-Selection now uses validation-side metrics only.
+- Selection helpers выбирают best только по validation-side metrics.
+- `clusterer` fit-ится только на train candle shapes.
+- Validation/test candle words назначаются через fitted clusterer.
+- Sentence/next-word samples не выпускают target за границу своего split.
+- Similarity metrics используют centroids train-fitted clusterer.
+- Test metrics остаются report-only и не участвуют в selection.
 
-- `ml/scripts/sber_nlp_research.py`: validation macro-F1, then validation accuracy, then deterministic grid order.
-- `ml/scripts/sber_hourly_research.py`: validation macro-F1, then validation action accuracy, then deterministic grid order.
+## Подтверждено запуском
 
-Test metrics are still computed and written to reports, but they are report-only and do not affect `best`.
-
-## Calendar Audit
-
-Status: confirmed by command run.
-
-Command:
+Accounting команда:
 
 ```powershell
 python ml\scripts\sber_pipeline_accounting.py --include-calendar-diagnostics --output-json data/reports/sber_h1_pipeline_accounting_20260515.json
 ```
 
-Observed data:
+Next-word команда:
 
-| Item | Value |
+```powershell
+python ml\scripts\sber_next_word_research.py --output-json data/reports/sber_h1_next_word_research_20260515.json --output-csv data/reports/sber_h1_next_word_research_20260515.csv
+```
+
+## Исправление selection leakage
+
+Selection теперь использует только validation metrics:
+
+- `ml/scripts/sber_nlp_research.py`: validation macro-F1, затем validation accuracy, затем deterministic grid order;
+- `ml/scripts/sber_hourly_research.py`: validation macro-F1, затем validation action accuracy, затем deterministic grid order.
+
+Test metrics продолжают считаться и записываться в отчеты, но являются только финальным отчетом и не влияют на `best`.
+
+## Calendar Audit
+
+Наблюдаемые данные:
+
+| Показатель | Значение |
 | --- | ---: |
 | First begin | 2020-01-03 09:00 |
 | Last begin | 2026-05-03 18:00 |
@@ -47,26 +62,20 @@ Observed data:
 | Saturday dates with candles | 50 |
 | Sunday dates with candles | 45 |
 
-The user's rough 46680 estimate assumes a shorter 24/7 span. For the actual file range,
-the naive 24/7 hourly count is 55498. Observed candles are 24613, or 44.3% of 24/7.
-Against weekday-only 24h bars, observed candles are 62.1%.
+Наивная оценка 24/7 не подходит для MOEX equity candles. Для фактического диапазона файла naive 24/7 hourly count равен 55498, а наблюдаемых свечей 24613, то есть 44.3% от 24/7. От weekday-only 24h bars наблюдаемые свечи составляют 62.1%.
 
-This is expected for MOEX shares data: the source contains trading-session bars, not
-continuous wall-clock hours. The hour distribution confirms this:
+Интерпретация: источник содержит бары торговых сессий, а не непрерывные wall-clock часы. Распределение часов это подтверждает:
 
 ```text
 present hours: 6..23
 missing hours: 0..5
 ```
 
-The number of unique trading dates is greater than the number of weekdays because the
-source includes 95 weekend dates with candles. The report lists the first 20 weekend
-dates and their candle counts. Timestamps are treated as timezone-naive local exchange
-timestamps; no timezone conversion is performed in this diagnostic.
+Количество trading dates больше количества weekdays, потому что в данных есть 95 weekend dates with candles. Диагностика выводит первые 20 weekend dates и их candle counts. Timestamps трактуются как timezone-naive local exchange timestamps; timezone conversion в этом audit не выполняется.
 
-Most days have about 15 candles:
+Большинство дней содержит около 15 свечей:
 
-| Candles per date | Value |
+| Candles per date | Значение |
 | --- | ---: |
 | min | 5 |
 | max | 18 |
@@ -85,15 +94,13 @@ Gap categories:
 | weekend/holiday | 421 |
 | very large | 1 |
 
-The one very large gap is 2022-02-25 23:00 to 2022-03-24 09:00, consistent with the
-known Russian market halt period. There are only 3 intraday gaps greater than 1h inside
-an observed trading day, each missing one hourly bar inside the observed day span:
+Единственный very large gap: `2022-02-25 23:00` -> `2022-03-24 09:00`, что согласуется с известной остановкой российского рынка. Есть только 3 intraday gaps больше 1h внутри наблюдаемого торгового дня:
 
-- 2022-02-24: 07:00 to 09:00
-- 2024-02-13: 13:00 to 15:00
-- 2025-09-13: 09:00 to 11:00
+- 2022-02-24: 07:00 -> 09:00;
+- 2024-02-13: 13:00 -> 15:00;
+- 2025-09-13: 09:00 -> 11:00.
 
-These are now visible in the report. They are not introduced by cleaning or splitting.
+Эти gaps видны в raw data и не создаются cleaning/split/window logic.
 
 Raw file coverage:
 
@@ -102,13 +109,11 @@ Raw file coverage:
 - overlaps between raw files: 0;
 - gaps between raw files: 0.
 
-So this run is not silently ignoring earlier raw files.
+В этом запуске loader не игнорирует более ранние raw files.
 
 ## Pipeline Loss Accounting
 
-Status: confirmed by code and command run.
-
-For `window=32`, `horizon=1`:
+Для `window=32`, `horizon=1`:
 
 | Stage | Count |
 | --- | ---: |
@@ -124,88 +129,58 @@ For `window=32`, `horizon=1`:
 | Val samples | 3660 |
 | Test samples | 3660 |
 
-Mathematical loss per split:
+Математическая потеря samples по каждому split:
 
 ```text
 expected samples = split_len - window_size - horizon + 1
 ```
 
-For each split, this means 31 candles are not sample targets because of context warmup,
-and 1 candle is not a sample target because its future label would leave the split.
+Для каждого split 31 свеча уходит на context warmup, а 1 свеча не может стать target, потому что ее future label вышел бы за границу split.
 
-All accounting checks are true:
+Все accounting checks истинны:
 
-- cleaned begin sorted;
-- no duplicate begin;
-- no invalid OHLC;
-- no missing OHLCV;
-- split ranges do not overlap;
-- shape rows equal cleaned rows;
-- word rows equal cleaned rows;
-- valid labels equal `len(df) - horizon`;
-- invalid labels are tail-only;
-- sentence windows are aligned.
+- cleaned `begin` sorted;
+- duplicate `begin` нет;
+- invalid OHLC нет;
+- missing OHLCV нет;
+- split ranges не пересекаются;
+- shape rows равны cleaned rows;
+- word rows равны cleaned rows;
+- valid labels равны `len(df) - horizon`;
+- invalid labels находятся только в tail;
+- sentence windows aligned.
 
 ## Next-Word Forecasting
 
-Status: confirmed by code.
-
-New module:
-
-- `ml/src/nlp/word_forecast.py`
-
-New research CLI:
-
-- `ml/scripts/sber_next_word_research.py`
-
-Task:
+Постановка:
 
 ```text
 input:  words[t-L+1], ..., words[t]
 target: words[t+1], ..., words[t+K]
 ```
 
-The clusterer is fit only on train candle shapes. Validation/test words are assigned
-through the fitted clusterer. Target future words stay inside their own split.
+Реализованные baselines:
 
-Implemented baselines:
+- `persistence`: повторяет последнее известное слово;
+- `unigram`: предсказывает самый частый train future word;
+- `markov1`: direct transition от последнего context word к каждому future step;
+- `tfidf_logreg`: per-horizon classifiers над context word n-grams.
 
-- persistence: repeat the latest observed word;
-- unigram: predict the most frequent train future word;
-- Markov-1: direct transition from last context word to each future step;
-- TF-IDF logistic regression: per-horizon classifiers over context word n-grams.
+Важно: этот путь был первым baseline-слоем. Он еще не является полноценной language-model постановкой `P(w[t+1..t+K] | context)`, потому что часть моделей предсказывает horizons независимо.
 
 Similarity-aware evaluation:
 
 - exact per-horizon accuracy;
 - macro-F1 per horizon;
 - sequence exact match;
-- top-3 accuracy when probabilities exist;
+- top-3 accuracy, если есть probabilities;
 - mean centroid distance;
-- soft similarity `exp(-distance / tau)`, where `tau` is the median nonzero train-centroid distance;
+- soft similarity `exp(-distance / tau)`, где `tau` равен median nonzero train-centroid distance;
 - within-nearest-3 accuracy.
-
-Centroids and similarity are derived only from train-fitted clusters.
-
-Soft similarity sanity diagnostics are written to JSON:
-
-- min/median/mean/max nonzero centroid distance;
-- random-uniform baseline soft similarity;
-- per-result mean predicted-vs-true centroid distance;
-- unigram baseline metrics as an ordinary model row.
 
 ## Next-Word Results
 
-Status: confirmed by command run.
-
-Command:
-
-```powershell
-python ml\scripts\sber_next_word_research.py --output-json data/reports/sber_h1_next_word_research_20260515.json --output-csv data/reports/sber_h1_next_word_research_20260515.csv
-```
-
-Selection is validation-only: validation mean accuracy, then validation mean soft similarity,
-then deterministic config order.
+Selection validation-only: validation mean accuracy, затем validation mean soft similarity, затем deterministic config order.
 
 | Model | Context | K | Val exact@1 | Val soft | Test exact@1 | Test soft |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -220,55 +195,28 @@ then deterministic config order.
 
 Best by validation: `markov1`, `context=32`, `K=1`.
 
-Soft similarity sanity:
+## Почему метрики слабые
 
-| Item | Value |
-| --- | ---: |
-| Min nonzero centroid distance | 0.2411 |
-| Median nonzero centroid distance (`tau`) | 7.5434 |
-| Mean nonzero centroid distance | 25.8802 |
-| Max centroid distance | 121.8638 |
-| Random-uniform val soft similarity | 0.6266 |
-| Random-uniform test soft similarity | 0.6255 |
-| Unigram val soft similarity, context 32 K=1 | 0.9210 |
+- `markov1` ловит локальную инерцию последнего слова, но не моделирует устойчивую "грамматику свечей".
+- Exact sequence match для нескольких будущих слов падает быстро: если token accuracy умеренная, вероятность угадать всю последовательность примерно мультипликативно уменьшается с ростом `K`.
+- Candle words являются кластерами формы свечи, а не настоящими семантическими словами; похожие формы могут попадать в разные кластеры.
+- Soft similarity полезна как shape-proximity diagnostic, но слишком мягкая для выбора модели: даже `unigram` может иметь высокий soft score.
+- Разрыв между validation и report-only test показывает зависимость от выбранного временного сегмента; этот результат нельзя использовать для подбора.
 
-So the `0.92-0.95` model soft similarity is not merely an artifact of the exponential
-score always being high: random word guesses are much lower. However, unigram is already
-high on soft similarity, which means exact accuracy and sequence accuracy remain
-important and soft similarity should be interpreted as a shape-proximity diagnostic,
-not as a substitute for prediction accuracy.
+## Интерпретация
 
-For `markov1`, `context=32`, `K=3`:
+Текущий next-word baseline показывает, что в последовательности candle words есть локальная структура, но evidence пока слабый. Нельзя делать вывод о торговой пригодности. Следующий корректный шаг - оценивать именно sequence continuation через n-gram/backoff LM, NLL/perplexity и walk-forward folds.
 
-| Horizon | Val exact | Val top-3 | Val within-nearest-3 |
-| ---: | ---: | ---: | ---: |
-| 1 | 0.2657 | 0.5757 | 0.6132 |
-| 2 | 0.2305 | 0.5197 | 0.5954 |
-| 3 | 0.2242 | 0.5210 | 0.6178 |
+## Ограничения
 
-Sequence exact match for K=3 is low: validation 0.0580, test 0.1473.
+- Baselines не являются полноценной neural language model.
+- Test metrics показаны только как report-only исторический результат этого этапа.
+- Soft similarity не должна быть главным selection metric.
+- Trading strategy layer здесь не строился.
 
-## Interpretation
+## Следующие шаги
 
-Status: interpretation and remaining concerns.
-
-Next-word prediction is better than persistence and unigram on validation exact@1,
-but the signal is still weak. The linear TF-IDF classifier did not beat Markov-1 in
-this first grid. Multi-step sequence prediction is hard: exact full-sequence matching
-falls quickly.
-
-This supports using next-word prediction as a pretext/diagnostic task before making it
-a trading decision layer. A reasonable next step is:
-
-1. keep action classification as the downstream target;
-2. add next-word prediction as a representation-learning or validation task;
-3. only later map predicted word distributions to risk/action, using validation-only
-   calibration and a separate trading metric.
-
-Remaining concerns:
-
-- the calendar audit identifies 3 intraday gaps greater than 1h; these are not created
-  by the pipeline, but should stay visible in future data-quality reports;
-- next-word validation exact@1 is modest, and K=3 sequence exact match is low;
-- soft similarity is useful only together with exact/top-k metrics because dominant
-  or nearby clusters can score softly well.
+1. Добавить n-gram/backoff language model для `P(w[t+1..t+K] | words[t-L+1..t])`.
+2. Оценивать multi-step sequence continuation через NLL, perplexity, top-k и beam metrics.
+3. Проверить разные vocabulary sizes и clusterers без test selection.
+4. Использовать next-word modeling как pretext/diagnostic path, а не как готовый trading signal.
