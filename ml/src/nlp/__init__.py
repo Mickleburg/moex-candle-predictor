@@ -23,6 +23,8 @@ from .word_forecast import (
     clusterer_distance_matrix,
     evaluate_word_forecast,
     expected_next_word_sample_count,
+    fit_markov_prior_features,
+    make_markov_prior_feature_matrix,
     make_next_word_samples,
 )
 
@@ -47,5 +49,7 @@ __all__ = [
     "clusterer_distance_matrix",
     "evaluate_word_forecast",
     "expected_next_word_sample_count",
+    "fit_markov_prior_features",
+    "make_markov_prior_feature_matrix",
     "make_next_word_samples",
 ]

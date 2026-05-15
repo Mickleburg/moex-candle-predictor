@@ -261,6 +261,73 @@ def test_next_word_forecast_invariants():
         return False
 
 
+def test_walk_forward_invariants():
+    """Test walk-forward fold ordering and train-only Markov priors."""
+
+    print("\nTesting walk-forward invariants...")
+
+    try:
+        import numpy as np
+
+        from src.data.split import walk_forward_ranges
+        from src.nlp.word_forecast import (
+            expected_next_word_sample_count,
+            fit_markov_prior_features,
+            make_markov_prior_feature_matrix,
+            make_next_word_samples,
+        )
+
+        folds = walk_forward_ranges(
+            100,
+            n_splits=3,
+            initial_train_size=40,
+            val_size=15,
+            gap=0,
+            min_train_size=20,
+        )
+        assert len(folds) == 3
+        previous_train_end = 0
+        words = np.arange(100) % 5
+        context_size, forecast_horizon = 6, 3
+        for fold in folds:
+            assert fold.train_start == 0
+            assert fold.train_end <= fold.val_start
+            assert fold.val_end <= 100
+            assert fold.train_end > previous_train_end
+            previous_train_end = fold.train_end
+            train_samples = make_next_word_samples(
+                words,
+                fold.train_start,
+                fold.train_end,
+                context_size,
+                forecast_horizon,
+            )
+            val_samples = make_next_word_samples(
+                words,
+                fold.val_start,
+                fold.val_end,
+                context_size,
+                forecast_horizon,
+            )
+            assert train_samples.size == expected_next_word_sample_count(fold.train_len, context_size, forecast_horizon)
+            assert val_samples.size == expected_next_word_sample_count(fold.val_len, context_size, forecast_horizon)
+            assert np.all(val_samples.sample_indices - context_size + 1 >= fold.val_start)
+            assert np.all(val_samples.sample_indices + forecast_horizon < fold.val_end)
+
+        train_only_words = np.array([0, 1, 0, 1, 0, 2, 2, 2, 2, 2])
+        prior = fit_markov_prior_features(train_only_words, train_start=0, train_end=5, n_words=3)
+        assert prior.transition_matrix[0, 1] == 1.0
+        assert prior.transition_matrix[0, 2] == 0.0
+        features = make_markov_prior_feature_matrix(train_only_words, [4, 5], prior)
+        assert features.shape == (2, 6)
+        assert features[0, 1] == 1.0
+        print("  PASS Walk-forward ranges and train-only Markov priors")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Walk-forward invariant test failed: {exc}")
+        return False
+
+
 def test_predictor_input_validation():
     """Test inference preprocessing sorts and rejects ambiguous inputs."""
 
@@ -295,6 +362,13 @@ def test_predictor_input_validation():
         except ValueError:
             pass
 
+        mixed_timeframe = [dict(candles[0]), dict(candles[1], timeframe="10min")]
+        try:
+            predictor._candles_to_dataframe(mixed_timeframe)
+            raise AssertionError("mixed timeframe was accepted")
+        except ValueError:
+            pass
+
         print("  PASS Predictor input validation")
         return True
     except Exception as exc:
@@ -317,6 +391,7 @@ def main():
         ("NLP Alignment", test_nlp_alignment_invariants()),
         ("Validation Selection", test_selection_uses_validation_only()),
         ("Next-word Forecast", test_next_word_forecast_invariants()),
+        ("Walk-forward Invariants", test_walk_forward_invariants()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]
 

@@ -154,6 +154,83 @@ class MarkovWordForecaster:
         return probabilities
 
 
+@dataclass
+class MarkovPriorFeatures:
+    """Train-only Markov next-word priors for downstream action models."""
+
+    transition_matrix: np.ndarray
+    default_distribution: np.ndarray
+
+
+def fit_markov_prior_features(
+    words: Sequence[int],
+    *,
+    train_start: int,
+    train_end: int,
+    n_words: int,
+) -> MarkovPriorFeatures:
+    """Fit one-step transition probabilities on a train range only."""
+
+    if train_start < 0 or train_end > len(words) or train_start >= train_end:
+        raise ValueError("Invalid train range")
+    if n_words < 1:
+        raise ValueError("n_words must be >= 1")
+
+    word_array = np.asarray(words, dtype=int)
+    table = np.zeros((n_words, n_words), dtype=float)
+    for idx in range(train_start, train_end - 1):
+        current = int(word_array[idx])
+        nxt = int(word_array[idx + 1])
+        if 0 <= current < n_words and 0 <= nxt < n_words:
+            table[current, nxt] += 1.0
+
+    default = table.sum(axis=0)
+    if default.sum() > 0:
+        default = default / default.sum()
+    else:
+        default = np.ones(n_words, dtype=float) / n_words
+
+    row_sums = table.sum(axis=1, keepdims=True)
+    table = np.divide(table, row_sums, out=np.zeros_like(table), where=row_sums > 0)
+    empty_rows = table.sum(axis=1) == 0
+    table[empty_rows] = default
+    return MarkovPriorFeatures(transition_matrix=table, default_distribution=default)
+
+
+def make_markov_prior_feature_matrix(
+    words: Sequence[int],
+    target_indices: Sequence[int],
+    prior: MarkovPriorFeatures,
+    *,
+    distance_matrix: np.ndarray | None = None,
+) -> np.ndarray:
+    """Build features from train-fitted transition priors and current words.
+
+    Features use the current/past word at each target index and the already
+    fitted transition matrix. They never use the actual future word.
+    """
+
+    word_array = np.asarray(words, dtype=int)
+    target_indices = np.asarray(target_indices, dtype=int)
+    transition = prior.transition_matrix
+    n_words = transition.shape[1]
+    rows = np.zeros((len(target_indices), n_words + 3), dtype=float)
+    for row_idx, target_idx in enumerate(target_indices):
+        current_word = int(word_array[target_idx])
+        if 0 <= current_word < transition.shape[0]:
+            proba = transition[current_word]
+        else:
+            proba = prior.default_distribution
+        proba = np.asarray(proba, dtype=float)
+        rows[row_idx, :n_words] = proba
+        rows[row_idx, n_words] = float(proba.max()) if len(proba) else 0.0
+        positive = proba[proba > 0]
+        rows[row_idx, n_words + 1] = float(-np.sum(positive * np.log(positive))) if len(positive) else 0.0
+        if distance_matrix is not None and distance_matrix.size and 0 <= current_word < distance_matrix.shape[0]:
+            rows[row_idx, n_words + 2] = float(np.dot(proba, distance_matrix[current_word, :n_words]))
+    return rows
+
+
 class TextLogisticWordForecaster:
     """Per-horizon logistic classifiers over count or TF-IDF context n-grams."""
 
