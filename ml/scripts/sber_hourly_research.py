@@ -344,6 +344,34 @@ def model_grid() -> list[ModelSpec]:
     ]
 
 
+def validation_selection_key(result: dict[str, Any], order: int = 0) -> tuple[float, float, int]:
+    """Return the validation-only selection key.
+
+    Test metrics are intentionally excluded from selection and are reported
+    only after the validation-selected configuration is fixed.
+    """
+
+    val_metrics = result.get("val", {})
+    return (
+        float(val_metrics.get("macro_f1", -1.0)),
+        float(val_metrics.get("trade_action_accuracy", -1.0)),
+        -int(order),
+    )
+
+
+def select_best_by_validation(results: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Return validation-selected best result and validation-sorted results."""
+
+    successful = [item for item in results if "error" not in item]
+    ordered = sorted(
+        enumerate(successful),
+        key=lambda item: validation_selection_key(item[1], order=item[0]),
+        reverse=True,
+    )
+    sorted_results = [item for _, item in ordered]
+    return (sorted_results[0] if sorted_results else None), sorted_results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--from-date", default="2020-01-01")
@@ -415,16 +443,7 @@ def main() -> int:
                         )
                         print(f"  failed: {exc}")
 
-    successful = [item for item in results if "error" not in item]
-    successful.sort(
-        key=lambda item: (
-            item["val"].get("macro_f1", -1),
-            item["val"].get("trade_action_accuracy", -1),
-            item["test"].get("macro_f1", -1),
-        ),
-        reverse=True,
-    )
-    best = successful[0] if successful else None
+    best, successful = select_best_by_validation(results)
 
     report = {
         "dataset": {
@@ -442,7 +461,7 @@ def main() -> int:
             "test_rows": int(len(test_df)),
         },
         "selection": {
-            "criterion": "validation macro_f1, then validation action accuracy, then test macro_f1",
+            "criterion": "validation macro_f1, then validation action accuracy, then deterministic config order; test is report-only",
             "best": best,
         },
         "top_10": successful[:10],

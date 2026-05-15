@@ -17,6 +17,14 @@ from .classifiers import ClassifierSpec, build_classifier
 from .clustering import CandleClusterer, ClusterSpec
 from .pipeline import ExperimentConfig, run_experiment
 from .vectorizers import VectorizerSpec, build_vectorizer
+from .word_forecast import (
+    NextWordSamples,
+    build_word_forecaster,
+    clusterer_distance_matrix,
+    evaluate_word_forecast,
+    expected_next_word_sample_count,
+    make_next_word_samples,
+)
 
 __all__ = [
     "ACTION_LABELS",
@@ -34,4 +42,10 @@ __all__ = [
     "run_experiment",
     "VectorizerSpec",
     "build_vectorizer",
+    "NextWordSamples",
+    "build_word_forecaster",
+    "clusterer_distance_matrix",
+    "evaluate_word_forecast",
+    "expected_next_word_sample_count",
+    "make_next_word_samples",
 ]

@@ -5,6 +5,7 @@ from pathlib import Path
 
 # Add ml package root to path.
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 
 
 def test_imports():
@@ -131,6 +132,176 @@ def test_nlp_pipeline():
         return False
 
 
+def test_nlp_alignment_invariants():
+    """Test split/window/horizon accounting invariants."""
+
+    print("\nTesting NLP alignment invariants...")
+
+    try:
+        import numpy as np
+
+        from src.data.fixtures import generate_mock_candles
+        from src.nlp import make_action_labels, make_sentence_samples, split_ranges
+        from src.nlp.accounting import build_nlp_accounting_report
+        from src.nlp.clustering import ClusterSpec
+
+        df = generate_mock_candles(n=320, ticker="SBER", timeframe="1H", seed=42)
+        horizon = 3
+        window_size = 8
+        ranges = split_ranges(len(df), train_ratio=0.7, val_ratio=0.15)
+        labels, future_returns, _ = make_action_labels(df, horizon=horizon, commission=0.0005)
+        word_tokens = [f"w{i % 6:03d}" for i in range(len(df))]
+
+        for split_name, (split_start, split_end) in ranges.items():
+            samples = make_sentence_samples(
+                word_tokens,
+                labels,
+                future_returns,
+                split_start,
+                split_end,
+                window_size,
+                horizon,
+            )
+            split_len = split_end - split_start
+            expected = split_len - window_size - horizon + 1
+            assert samples.size == expected, (split_name, samples.size, expected)
+            assert samples.target_indices[0] == split_start + window_size - 1
+            assert samples.target_indices[-1] == split_end - horizon - 1
+            assert np.all(samples.target_indices - window_size + 1 >= split_start)
+            assert np.all(samples.target_indices + horizon < split_end)
+
+        report = build_nlp_accounting_report(
+            df,
+            shape_variant="shape",
+            horizon=horizon,
+            window_size=window_size,
+            cluster=ClusterSpec("kmeans", {"n_clusters": 6, "n_init": 3}),
+        )
+        assert all(report["checks"].values()), report["checks"]
+        print("  PASS NLP split/window/horizon accounting")
+        return True
+    except Exception as exc:
+        print(f"  FAIL NLP alignment test failed: {exc}")
+        return False
+
+
+def test_selection_uses_validation_only():
+    """Test research best-selection helpers ignore test metrics."""
+
+    print("\nTesting validation-only selection...")
+
+    try:
+        from sber_hourly_research import select_best_by_validation as select_hourly
+        from sber_nlp_research import select_best_by_validation as select_nlp
+
+        nlp_results = [
+            {
+                "status": "ok",
+                "label": "first",
+                "metrics": {"val": {"macro_f1": 0.4, "accuracy": 0.5}, "test": {"macro_f1": 0.9}},
+            },
+            {
+                "status": "ok",
+                "label": "second",
+                "metrics": {"val": {"macro_f1": 0.4, "accuracy": 0.5}, "test": {"macro_f1": 0.1}},
+            },
+        ]
+        assert select_nlp(nlp_results)["label"] == "first"
+
+        hourly_results = [
+            {"model_label": "first", "val": {"macro_f1": 0.4, "trade_action_accuracy": 0.5}, "test": {"macro_f1": 0.1}},
+            {"model_label": "second", "val": {"macro_f1": 0.4, "trade_action_accuracy": 0.5}, "test": {"macro_f1": 0.9}},
+        ]
+        best, _ = select_hourly(hourly_results)
+        assert best["model_label"] == "first"
+        print("  PASS Selection ignores test metrics")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Selection test failed: {exc}")
+        return False
+
+
+def test_next_word_forecast_invariants():
+    """Test next-word sample alignment and metrics."""
+
+    print("\nTesting next-word forecast invariants...")
+
+    try:
+        import numpy as np
+
+        from src.nlp.word_forecast import (
+            PersistenceWordForecaster,
+            evaluate_word_forecast,
+            expected_next_word_sample_count,
+            make_next_word_samples,
+        )
+
+        words = np.arange(80) % 5
+        split_start, split_end = 10, 60
+        context_size, forecast_horizon = 6, 4
+        samples = make_next_word_samples(words, split_start, split_end, context_size, forecast_horizon)
+        expected = expected_next_word_sample_count(split_end - split_start, context_size, forecast_horizon)
+        assert samples.size == expected
+        assert samples.sample_indices[0] == split_start + context_size - 1
+        assert samples.sample_indices[-1] == split_end - forecast_horizon - 1
+        assert np.all(samples.X_contexts[:, -1] == words[samples.sample_indices])
+        for row_idx, t_idx in enumerate(samples.sample_indices):
+            assert np.array_equal(samples.Y_future_words[row_idx], words[t_idx + 1 : t_idx + forecast_horizon + 1])
+
+        model = PersistenceWordForecaster().fit(samples.X_contexts, samples.Y_future_words, n_words=5)
+        pred = model.predict(samples.X_contexts)
+        distances = np.abs(np.subtract.outer(np.arange(5), np.arange(5))).astype(float)
+        metrics = evaluate_word_forecast(samples.Y_future_words, pred, n_words=5, distance_matrix=distances)
+        assert "mean_soft_similarity" in metrics
+        assert len(metrics["per_horizon"]) == forecast_horizon
+        print("  PASS Next-word samples and metrics")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Next-word invariant test failed: {exc}")
+        return False
+
+
+def test_predictor_input_validation():
+    """Test inference preprocessing sorts and rejects ambiguous inputs."""
+
+    print("\nTesting predictor input validation...")
+
+    try:
+        from datetime import datetime, timedelta
+
+        from src.service import CandlePredictor
+
+        predictor = CandlePredictor()
+        base = datetime(2024, 1, 1, 10)
+        candles = [
+            {"begin": base + timedelta(hours=2), "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10, "ticker": "SBER", "timeframe": "1H"},
+            {"begin": base, "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10, "ticker": "SBER", "timeframe": "1H"},
+            {"begin": base + timedelta(hours=1), "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10, "ticker": "SBER", "timeframe": "1H"},
+        ]
+        df = predictor._candles_to_dataframe(candles)
+        assert df["begin"].is_monotonic_increasing
+
+        duplicate = [candles[0], candles[0]]
+        try:
+            predictor._candles_to_dataframe(duplicate)
+            raise AssertionError("duplicate begin was accepted")
+        except ValueError:
+            pass
+
+        mixed = [dict(candles[0]), dict(candles[1], ticker="GAZP")]
+        try:
+            predictor._candles_to_dataframe(mixed)
+            raise AssertionError("mixed ticker was accepted")
+        except ValueError:
+            pass
+
+        print("  PASS Predictor input validation")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Predictor validation test failed: {exc}")
+        return False
+
+
 def main():
     """Run all smoke tests."""
 
@@ -143,6 +314,10 @@ def main():
         ("Config Loading", test_config_loading()),
         ("Mock Pipeline", test_mock_pipeline()),
         ("NLP Pipeline", test_nlp_pipeline()),
+        ("NLP Alignment", test_nlp_alignment_invariants()),
+        ("Validation Selection", test_selection_uses_validation_only()),
+        ("Next-word Forecast", test_next_word_forecast_invariants()),
+        ("Predictor Validation", test_predictor_input_validation()),
     ]
 
     print("\n" + "=" * 50)

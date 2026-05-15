@@ -134,8 +134,18 @@ class CandlePredictor:
         df = df.rename(columns=column_mapping)
         
         # Ensure datetime
-        if "begin" in df.columns:
-            df["begin"] = pd.to_datetime(df["begin"])
+        if "begin" not in df.columns:
+            raise ValueError("Missing required candle timestamp column: begin")
+        df["begin"] = pd.to_datetime(df["begin"])
+
+        if df["begin"].isna().any():
+            raise ValueError("Candle begin contains invalid timestamps")
+        if df["begin"].duplicated().any():
+            raise ValueError("Duplicate candle begin timestamps are not supported")
+        for column in ("ticker", "timeframe"):
+            if column in df.columns and df[column].dropna().nunique() > 1:
+                raise ValueError(f"Mixed {column} values are not supported in one prediction request")
+        df = df.sort_values("begin").reset_index(drop=True)
 
         # Keep inference schema aligned with training raw data.
         if "value" not in df.columns and {"close", "volume"}.issubset(df.columns):

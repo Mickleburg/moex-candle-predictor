@@ -216,6 +216,33 @@ def run_grid(df: pd.DataFrame, grid: list[ExperimentConfig], random_state: int) 
     return results
 
 
+def validation_selection_key(result: dict[str, Any], order: int = 0) -> tuple[float, float, int]:
+    """Return the validation-only selection key.
+
+    Test metrics are intentionally excluded from model selection. The final
+    element keeps ties deterministic by preferring the earlier grid order.
+    """
+
+    metrics = result.get("metrics", {}).get("val", {})
+    return (
+        float(metrics.get("macro_f1", -1.0)),
+        float(metrics.get("accuracy", -1.0)),
+        -int(order),
+    )
+
+
+def select_best_by_validation(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Select the best result using validation metrics only."""
+
+    ok_results = [result for result in results if result.get("status") == "ok"]
+    if not ok_results:
+        return None
+    return max(
+        enumerate(ok_results),
+        key=lambda item: validation_selection_key(item[1], order=item[0]),
+    )[1]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="SBER")
@@ -252,6 +279,8 @@ def main() -> int:
         "quick": bool(args.quick),
         "limit": int(args.limit),
         "random_state": int(args.random_state),
+        "selection": "validation macro_f1, then validation accuracy, then deterministic config order; test is report-only",
+        "best": select_best_by_validation(results),
         "results": results,
     }
     output_json = REPO_ROOT / args.output_json
@@ -260,17 +289,11 @@ def main() -> int:
     write_csv(rows, output_csv)
 
     if ok_results:
-        best = max(
-            ok_results,
-            key=lambda item: (
-                item["metrics"]["val"]["macro_f1"],
-                item["metrics"]["val"]["accuracy"],
-                item["metrics"]["test"]["macro_f1"],
-            ),
-        )
+        best = select_best_by_validation(results)
         print("Best by validation macro_f1:")
-        print(best["label"])
-        print(json.dumps(best["metrics"], ensure_ascii=False, indent=2))
+        if best:
+            print(best["label"])
+            print(json.dumps(best["metrics"], ensure_ascii=False, indent=2))
     print(f"Wrote {output_json}")
     print(f"Wrote {output_csv}")
     return 0
