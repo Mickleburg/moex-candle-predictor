@@ -240,8 +240,13 @@ def word_distribution_metrics(words: Sequence[int], n_words: int) -> dict[str, f
     return {
         "entropy": entropy,
         "normalized_entropy": float(normalized),
+        "effective_vocab_size": float(np.exp(entropy)),
         "dominant_share": float(proba.max()),
+        "top3_share": _top_n_share(proba, 3),
+        "top5_share": _top_n_share(proba, 5),
+        "rare_word_share": float(np.mean(proba < 0.01)),
         "nonempty_words": float(np.count_nonzero(counts)),
+        "empty_words": float(n_words - np.count_nonzero(counts)),
     }
 
 
@@ -269,9 +274,238 @@ def transition_entropy(words: Sequence[int], n_words: int) -> float:
     return float(np.dot(entropies, weights)) if entropies else 0.0
 
 
+def transition_quality_metrics(words: Sequence[int], n_words: int) -> dict[str, float]:
+    """Return train-only transition balance diagnostics."""
+
+    word_array = np.asarray(words, dtype=int)
+    table = np.zeros((n_words, n_words), dtype=float)
+    for current, nxt in zip(word_array[:-1], word_array[1:]):
+        if 0 <= int(current) < n_words and 0 <= int(nxt) < n_words:
+            table[int(current), int(nxt)] += 1.0
+    total = table.sum()
+    if total <= 0:
+        return {
+            "transition_entropy": 0.0,
+            "self_transition_rate": 0.0,
+            "average_outgoing_transition_entropy": 0.0,
+        }
+
+    row_sums = table.sum(axis=1)
+    entropies = []
+    weighted_entropies = []
+    weights = []
+    for row, row_sum in zip(table, row_sums):
+        if row_sum <= 0:
+            continue
+        proba = row / row_sum
+        positive = proba[proba > 0]
+        entropy = float(-np.sum(positive * np.log(positive)))
+        entropies.append(entropy)
+        weighted_entropies.append(entropy)
+        weights.append(float(row_sum / total))
+    return {
+        "transition_entropy": float(np.dot(weighted_entropies, weights)) if weighted_entropies else 0.0,
+        "self_transition_rate": float(np.trace(table) / total),
+        "average_outgoing_transition_entropy": float(np.mean(entropies)) if entropies else 0.0,
+    }
+
+
+def confidence_analysis(
+    model: NGramBackoffLanguageModel,
+    X_contexts: np.ndarray,
+    Y_future_words: np.ndarray,
+    *,
+    thresholds: Sequence[float] = (0.25, 0.35, 0.5),
+    top3_mass_thresholds: Sequence[float] = (0.6,),
+    entropy_quantiles: Sequence[float] = (0.25, 0.5),
+) -> dict[str, Any]:
+    """Analyze next-token confidence on validation samples."""
+
+    X_contexts = np.asarray(X_contexts, dtype=int)
+    Y_future_words = np.asarray(Y_future_words, dtype=int)
+    probabilities = model.teacher_forced_probabilities(X_contexts, Y_future_words)[0]
+    y_true = Y_future_words[:, 0]
+    y_pred = np.argmax(probabilities, axis=1)
+    top_sorted = np.sort(probabilities, axis=1)[:, ::-1]
+    top1 = top_sorted[:, 0]
+    top2 = top_sorted[:, 1] if top_sorted.shape[1] > 1 else np.zeros(len(top1))
+    top3_mass = top_sorted[:, : min(3, top_sorted.shape[1])].sum(axis=1)
+    entropy = -np.sum(np.where(probabilities > 0, probabilities * np.log(np.maximum(probabilities, 1e-300)), 0.0), axis=1)
+    margin = top1 - top2
+    sample_nll = -np.log(np.maximum(probabilities[np.arange(len(y_true)), y_true], 1e-300))
+
+    return {
+        "summary": {
+            "mean_top1_probability": float(top1.mean()) if len(top1) else 0.0,
+            "mean_top3_probability_mass": float(top3_mass.mean()) if len(top3_mass) else 0.0,
+            "mean_distribution_entropy": float(entropy.mean()) if len(entropy) else 0.0,
+            "mean_top1_top2_margin": float(margin.mean()) if len(margin) else 0.0,
+            "accuracy_at_1": float(np.mean(y_pred == y_true)) if len(y_true) else 0.0,
+            "top3_accuracy": _top_k_accuracy(y_true, probabilities, min(3, probabilities.shape[1])) if len(y_true) else 0.0,
+            "mean_token_nll": float(sample_nll.mean()) if len(sample_nll) else 0.0,
+        },
+        "confidence_buckets": _confidence_buckets(y_true, y_pred, probabilities, top1, sample_nll),
+        "abstention_curves": {
+            "top1_probability": [_subset_metrics(top1 >= threshold, y_true, y_pred, probabilities, sample_nll, f"top1>={threshold}") for threshold in thresholds],
+            "top3_probability_mass": [
+                _subset_metrics(top3_mass >= threshold, y_true, y_pred, probabilities, sample_nll, f"top3_mass>={threshold}")
+                for threshold in top3_mass_thresholds
+            ],
+            "entropy": [
+                _subset_metrics(entropy <= np.quantile(entropy, quantile), y_true, y_pred, probabilities, sample_nll, f"entropy<=p{int(quantile * 100)}")
+                for quantile in entropy_quantiles
+            ],
+        },
+    }
+
+
+def error_analysis(
+    model: NGramBackoffLanguageModel,
+    X_contexts: np.ndarray,
+    Y_future_words: np.ndarray,
+    *,
+    distance_matrix: np.ndarray | None = None,
+    max_items: int = 12,
+) -> dict[str, Any]:
+    """Return first-step error diagnostics for a fitted LM."""
+
+    X_contexts = np.asarray(X_contexts, dtype=int)
+    Y_future_words = np.asarray(Y_future_words, dtype=int)
+    probabilities = model.teacher_forced_probabilities(X_contexts, Y_future_words)[0]
+    y_true = Y_future_words[:, 0]
+    y_pred = np.argmax(probabilities, axis=1)
+    n_words = int(model.n_words_ or probabilities.shape[1])
+    true_counts = np.bincount(y_true, minlength=n_words)
+    pred_counts = np.bincount(y_pred, minlength=n_words)
+    sample_nll = -np.log(np.maximum(probabilities[np.arange(len(y_true)), y_true], 1e-300))
+
+    confusion: dict[tuple[int, int], int] = {}
+    for true, pred in zip(y_true, y_pred):
+        confusion[(int(true), int(pred))] = confusion.get((int(true), int(pred)), 0) + 1
+    top_pairs = sorted(confusion.items(), key=lambda item: item[1], reverse=True)[:max_items]
+
+    per_word = []
+    for word in range(n_words):
+        mask = y_true == word
+        if not np.any(mask):
+            continue
+        per_word.append(
+            {
+                "word": int(word),
+                "count": int(mask.sum()),
+                "share": float(mask.mean()),
+                "accuracy": float(np.mean(y_pred[mask] == y_true[mask])),
+                "mean_nll": float(sample_nll[mask].mean()),
+            }
+        )
+    per_word = sorted(per_word, key=lambda item: item["count"], reverse=True)
+
+    wrong = y_pred != y_true
+    examples = []
+    if np.any(wrong):
+        wrong_indices = np.where(wrong)[0]
+        top3 = np.argsort(probabilities, axis=1)[:, -min(3, n_words) :][:, ::-1]
+        for idx in wrong_indices[:max_items]:
+            true = int(y_true[idx])
+            pred = int(y_pred[idx])
+            examples.append(
+                {
+                    "true_word": true,
+                    "predicted_word": pred,
+                    "centroid_distance": _distance_lookup(distance_matrix, pred, true),
+                    "true_word_count": int(true_counts[true]),
+                    "top3_candidates": [int(item) for item in top3[idx]],
+                    "top3_probabilities": [float(probabilities[idx, item]) for item in top3[idx]],
+                }
+            )
+
+    error_distances = None
+    if distance_matrix is not None and distance_matrix.size and np.any(wrong):
+        error_distances = distance_matrix[y_pred[wrong], y_true[wrong]]
+
+    return {
+        "most_frequent_true_words": _count_rows(true_counts, max_items),
+        "most_frequent_predicted_words": _count_rows(pred_counts, max_items),
+        "confusion_top_pairs": [
+            {"true_word": int(pair[0]), "predicted_word": int(pair[1]), "count": int(count)}
+            for pair, count in top_pairs
+        ],
+        "per_word_metrics": per_word[:max_items],
+        "low_accuracy_frequent_words": sorted(
+            [item for item in per_word if item["count"] >= max(10, int(0.01 * len(y_true)))],
+            key=lambda item: (item["accuracy"], -item["count"]),
+        )[:max_items],
+        "mean_centroid_distance_for_errors": float(error_distances.mean()) if error_distances is not None and len(error_distances) else None,
+        "typical_errors": examples,
+    }
+
+
 def _top_k_accuracy(y_true: np.ndarray, proba: np.ndarray, k: int) -> float:
     top = np.argsort(proba, axis=1)[:, -k:]
     return float(np.mean([int(target) in row for target, row in zip(y_true, top)]))
+
+
+def _top_n_share(proba: np.ndarray, n: int) -> float:
+    if len(proba) == 0:
+        return 0.0
+    return float(np.sort(proba)[-min(n, len(proba)) :].sum())
+
+
+def _confidence_buckets(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    probabilities: np.ndarray,
+    confidence: np.ndarray,
+    sample_nll: np.ndarray,
+) -> list[dict[str, Any]]:
+    edges = [0.0, 0.25, 0.35, 0.5, 0.75, 1.0 + 1e-12]
+    buckets = []
+    for left, right in zip(edges, edges[1:]):
+        mask = (confidence >= left) & (confidence < right)
+        buckets.append(_subset_metrics(mask, y_true, y_pred, probabilities, sample_nll, f"[{left:.2f},{min(right, 1.0):.2f})"))
+    return buckets
+
+
+def _subset_metrics(
+    mask: np.ndarray,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    probabilities: np.ndarray,
+    sample_nll: np.ndarray,
+    label: str,
+) -> dict[str, Any]:
+    count = int(np.count_nonzero(mask))
+    if count == 0:
+        return {
+            "label": label,
+            "count": 0,
+            "coverage": 0.0,
+            "accuracy_at_1": None,
+            "top3_accuracy": None,
+            "mean_token_nll": None,
+        }
+    return {
+        "label": label,
+        "count": count,
+        "coverage": float(count / len(mask)),
+        "accuracy_at_1": float(np.mean(y_pred[mask] == y_true[mask])),
+        "top3_accuracy": _top_k_accuracy(y_true[mask], probabilities[mask], min(3, probabilities.shape[1])),
+        "mean_token_nll": float(sample_nll[mask].mean()),
+    }
+
+
+def _count_rows(counts: np.ndarray, max_items: int) -> list[dict[str, Any]]:
+    total = float(counts.sum()) if counts.sum() else 1.0
+    order = np.argsort(counts)[::-1][:max_items]
+    return [{"word": int(word), "count": int(counts[word]), "share": float(counts[word] / total)} for word in order if counts[word] > 0]
+
+
+def _distance_lookup(distance_matrix: np.ndarray | None, pred: int, true: int) -> float | None:
+    if distance_matrix is None or not distance_matrix.size:
+        return None
+    if pred >= distance_matrix.shape[0] or true >= distance_matrix.shape[1]:
+        return None
+    return float(distance_matrix[pred, true])
 
 
 def _mean_reciprocal_rank(y_true: np.ndarray, proba: np.ndarray) -> float:

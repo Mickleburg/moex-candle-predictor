@@ -29,8 +29,11 @@ from .word_forecast import (
 )
 from .word_lm import (
     NGramBackoffLanguageModel,
+    confidence_analysis,
+    error_analysis,
     evaluate_language_model,
     transition_entropy,
+    transition_quality_metrics,
     word_distribution_metrics,
 )
 
@@ -59,7 +62,10 @@ __all__ = [
     "make_markov_prior_feature_matrix",
     "make_next_word_samples",
     "NGramBackoffLanguageModel",
+    "confidence_analysis",
+    "error_analysis",
     "evaluate_language_model",
     "transition_entropy",
+    "transition_quality_metrics",
     "word_distribution_metrics",
 ]

@@ -269,7 +269,7 @@ def test_walk_forward_invariants():
     try:
         import numpy as np
 
-        from src.data.split import walk_forward_ranges
+        from src.data.split import rolling_walk_forward_ranges, walk_forward_ranges
         from src.nlp.word_forecast import (
             expected_next_word_sample_count,
             fit_markov_prior_features,
@@ -321,7 +321,18 @@ def test_walk_forward_invariants():
         features = make_markov_prior_feature_matrix(train_only_words, [4, 5], prior)
         assert features.shape == (2, 6)
         assert features[0, 1] == 1.0
-        print("  PASS Walk-forward ranges and train-only Markov priors")
+
+        rolling = rolling_walk_forward_ranges(100, train_size=40, val_size=15, step_size=10, max_folds=3)
+        assert [(fold.train_start, fold.train_end, fold.val_start, fold.val_end) for fold in rolling] == [
+            (0, 40, 40, 55),
+            (10, 50, 50, 65),
+            (20, 60, 60, 75),
+        ]
+        for fold in rolling:
+            assert fold.train_len == 40
+            assert fold.val_len == 15
+            assert fold.train_end <= fold.val_start
+        print("  PASS Walk-forward ranges, rolling folds, and train-only Markov priors")
         return True
     except Exception as exc:
         print(f"  FAIL Walk-forward invariant test failed: {exc}")
@@ -337,7 +348,7 @@ def test_word_lm_invariants():
         import numpy as np
 
         from src.nlp.word_forecast import make_next_word_samples
-        from src.nlp.word_lm import NGramBackoffLanguageModel, evaluate_language_model
+        from src.nlp.word_lm import NGramBackoffLanguageModel, confidence_analysis, evaluate_language_model
 
         words = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 2, 0, 2, 0, 2])
         train_start, train_end = 0, 8
@@ -362,10 +373,61 @@ def test_word_lm_invariants():
         assert np.isfinite(metrics["perplexity"])
         assert metrics["perplexity"] > 0
         assert "beam_contains_true_sequence" in metrics
+        confidence = confidence_analysis(model, samples.X_contexts, samples.Y_future_words, thresholds=(0.99,))
+        assert confidence["confidence_buckets"]
+        assert confidence["abstention_curves"]["top1_probability"][0]["coverage"] >= 0.0
         print("  PASS Word LM probabilities, NLL, perplexity, and train-only counts")
         return True
     except Exception as exc:
         print(f"  FAIL Word LM invariant test failed: {exc}")
+        return False
+
+
+def test_vocabulary_selection_constraints():
+    """Test vocabulary selection constraints and rejection reasons."""
+
+    print("\nTesting vocabulary selection constraints...")
+
+    try:
+        from sber_word_lm_walk_forward import apply_vocabulary_constraints
+
+        rows = [
+            {
+                "shape_variant": "shape",
+                "clusterer": "gmm_diag",
+                "vocab_size_requested": 20,
+                "normalized_entropy_mean": 0.7,
+                "dominant_share_mean": 0.3,
+                "top3_share_mean": 0.7,
+                "observed_vocab_ratio_mean": 1.0,
+            },
+            {
+                "shape_variant": "ohlc",
+                "clusterer": "kmeans",
+                "vocab_size_requested": 8,
+                "normalized_entropy_mean": 0.3,
+                "dominant_share_mean": 0.8,
+                "top3_share_mean": 0.95,
+                "observed_vocab_ratio_mean": 1.0,
+            },
+        ]
+        constrained = apply_vocabulary_constraints(
+            rows,
+            min_norm_entropy=0.5,
+            max_dominant_share=0.55,
+            max_top3_share=0.8,
+            min_observed_vocab_ratio=0.8,
+        )
+        assert constrained[0]["accepted_by_constraints"]
+        assert constrained[0]["rejection_reason"] == ""
+        assert not constrained[1]["accepted_by_constraints"]
+        assert "normalized_entropy" in constrained[1]["rejection_reason"]
+        assert "dominant_share" in constrained[1]["rejection_reason"]
+        assert "top3_share" in constrained[1]["rejection_reason"]
+        print("  PASS Vocabulary constraints and rejection reasons")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Vocabulary selection constraint test failed: {exc}")
         return False
 
 
@@ -434,6 +496,7 @@ def main():
         ("Next-word Forecast", test_next_word_forecast_invariants()),
         ("Walk-forward Invariants", test_walk_forward_invariants()),
         ("Word LM Invariants", test_word_lm_invariants()),
+        ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]
 
