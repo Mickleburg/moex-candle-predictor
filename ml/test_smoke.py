@@ -383,6 +383,46 @@ def test_word_lm_invariants():
         return False
 
 
+def test_lm_action_feature_invariants():
+    """Test LM-derived action features are aligned and finite."""
+
+    print("\nTesting LM action feature invariants...")
+
+    try:
+        import inspect
+        import numpy as np
+
+        from src.nlp.action_features import make_lm_action_features
+        from src.nlp.word_forecast import make_next_word_samples
+        from src.nlp.word_lm import NGramBackoffLanguageModel
+
+        words = np.arange(80) % 6
+        split_start, split_end = 20, 70
+        context_size = 8
+        samples = make_next_word_samples(words, split_start, split_end, context_size=context_size, forecast_horizon=1)
+        model = NGramBackoffLanguageModel(order=2, alpha=0.1).fit(words, train_start=0, train_end=split_start, n_words=6)
+        distances = np.abs(np.subtract.outer(np.arange(6), np.arange(6))).astype(float)
+        features = make_lm_action_features(
+            word_ids=words,
+            target_indices=samples.sample_indices,
+            context_size=context_size,
+            model=model,
+            distance_matrix=distances,
+            include_probabilities=True,
+        )
+        assert features.X.shape[0] == samples.size
+        assert features.X.shape[1] == len(features.names)
+        assert np.all(np.isfinite(features.X))
+        signature = inspect.signature(make_lm_action_features)
+        assert "Y_future_words" not in signature.parameters
+        assert "future_words" not in signature.parameters
+        print("  PASS LM action features aligned, finite, and target-free")
+        return True
+    except Exception as exc:
+        print(f"  FAIL LM action feature invariant test failed: {exc}")
+        return False
+
+
 def test_vocabulary_selection_constraints():
     """Test vocabulary selection constraints and rejection reasons."""
 
@@ -496,6 +536,7 @@ def main():
         ("Next-word Forecast", test_next_word_forecast_invariants()),
         ("Walk-forward Invariants", test_walk_forward_invariants()),
         ("Word LM Invariants", test_word_lm_invariants()),
+        ("LM Action Features", test_lm_action_feature_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]

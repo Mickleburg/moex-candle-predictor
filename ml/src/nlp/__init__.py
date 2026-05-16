@@ -13,6 +13,7 @@ from .candles import (
     make_sentence_samples,
     split_ranges,
 )
+from .action_features import LMActionFeatures, make_lm_action_features
 from .classifiers import ClassifierSpec, build_classifier
 from .clustering import CandleClusterer, ClusterSpec
 from .pipeline import ExperimentConfig, run_experiment
@@ -39,10 +40,12 @@ from .word_lm import (
 
 __all__ = [
     "ACTION_LABELS",
+    "LMActionFeatures",
     "SentenceSamples",
     "candle_shape_matrix",
     "label_distribution",
     "make_action_labels",
+    "make_lm_action_features",
     "make_sentence_samples",
     "split_ranges",
     "ClassifierSpec",
