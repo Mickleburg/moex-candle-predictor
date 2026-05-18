@@ -498,6 +498,79 @@ def test_action_lm_robustness_invariants():
         return False
 
 
+def test_nested_threshold_invariants():
+    """Test nested threshold selection does not use outer validation for honest modes."""
+
+    print("\nTesting nested threshold invariants...")
+
+    try:
+        import numpy as np
+
+        from sber_action_nested_thresholds import (
+            apply_temperature,
+            nested_range,
+            select_global_thresholds,
+            select_regime_thresholds,
+            threshold_predictions,
+        )
+        from src.data.split import WalkForwardRange
+
+        fold = WalkForwardRange(fold_id=1, train_start=0, train_end=80, val_start=80, val_end=110)
+        ranges = nested_range(fold, calibration_size=20)
+        assert ranges.inner_train_start == 0
+        assert ranges.inner_train_end == 60
+        assert ranges.calibration_start == 60
+        assert ranges.calibration_end == 80
+        assert ranges.calibration_end <= ranges.outer_fold.val_start
+
+        proba = np.array(
+            [
+                [0.60, 0.25, 0.15],
+                [0.20, 0.55, 0.25],
+                [0.15, 0.30, 0.55],
+                [0.35, 0.30, 0.35],
+            ],
+            dtype=float,
+        )
+        calibrated = apply_temperature(proba, 1.25)
+        assert np.all(np.isfinite(calibrated))
+        assert np.allclose(calibrated.sum(axis=1), 1.0)
+        pred = threshold_predictions(calibrated, buy_threshold=0.3, sell_threshold=0.3)
+        assert pred.shape == (4,)
+
+        y = np.array([0, 1, 2, 1])
+        grid = [0.25, 0.30, 0.35]
+        temps = [0.75, 1.0]
+        decision = select_global_thresholds(y, proba, grid, temps, selection_metric="macro_f1", mode="global")
+        assert not decision.is_oracle
+        assert decision.buy_threshold in grid
+        assert decision.sell_threshold in grid
+        assert decision.temperature in temps
+
+        regimes = np.array(["a", "a", "b", "b"], dtype=object)
+        regime_decision = select_regime_thresholds(
+            y,
+            proba,
+            regimes,
+            grid,
+            temps,
+            selection_metric="macro_f1",
+            mode="regime_test",
+            min_regime_calibration_samples=3,
+        )
+        assert regime_decision.regime_thresholds is not None
+        assert regime_decision.regime_thresholds["a"]["fallback"]
+        assert regime_decision.regime_thresholds["b"]["fallback"]
+
+        oracle = select_global_thresholds(y, proba, grid, temps, selection_metric="macro_f1", mode="oracle_global", is_oracle=True)
+        assert oracle.is_oracle
+        print("  PASS Nested threshold selection helpers")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Nested threshold invariant test failed: {exc}")
+        return False
+
+
 def test_vocabulary_selection_constraints():
     """Test vocabulary selection constraints and rejection reasons."""
 
@@ -613,6 +686,7 @@ def main():
         ("Word LM Invariants", test_word_lm_invariants()),
         ("LM Action Features", test_lm_action_feature_invariants()),
         ("Action LM Robustness", test_action_lm_robustness_invariants()),
+        ("Nested Thresholds", test_nested_threshold_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]
