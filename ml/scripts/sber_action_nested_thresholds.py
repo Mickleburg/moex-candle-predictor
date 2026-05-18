@@ -67,6 +67,8 @@ class NestedRange:
 class ThresholdDecision:
     mode: str
     calibration_method: str
+    selection_objective: str
+    temperature_selection: str
     temperature: float
     buy_threshold: float | None
     sell_threshold: float | None
@@ -87,13 +89,25 @@ def parse_int_list(value: str) -> list[int]:
 def parse_class_weights(value: str) -> list[str | None]:
     result: list[str | None] = []
     for item in parse_list(value):
-        if item.lower() == "none":
+        item_lower = item.lower()
+        if item_lower == "none":
             result.append(None)
-        elif item.lower() == "balanced":
+        elif item_lower == "balanced":
             result.append("balanced")
+        elif item_lower.startswith("action_boost_"):
+            result.append(item_lower)
         else:
             raise ValueError(f"Unsupported class weight: {item}")
     return result
+
+
+def resolve_class_weight(value: str | None) -> str | dict[int, float] | None:
+    if value is None or value == "balanced":
+        return value
+    if value.startswith("action_boost_"):
+        boost = float(value.removeprefix("action_boost_"))
+        return {0: boost, 1: 0.8, 2: boost}
+    raise ValueError(f"Unsupported class weight: {value}")
 
 
 def nested_range(fold: WalkForwardRange, calibration_size: int) -> NestedRange:
@@ -198,6 +212,10 @@ def run_nested_fold_vocab_horizon(
     temperature_grid: list[float],
     threshold_modes: list[str],
     selection_metric: str,
+    selection_objectives: list[str],
+    temperature_selection: str,
+    target_action_rate: float,
+    action_rate_penalty: float,
     min_regime_calibration_samples: int,
     random_state: int,
 ) -> list[dict[str, Any]]:
@@ -261,6 +279,9 @@ def run_nested_fold_vocab_horizon(
     regime_train = build_regime_labels(df, samples["inner_train"].target_indices, samples["inner_train"].target_indices, lm_train.X, lm_train.X)
     regime_calib = build_regime_labels(df, samples["inner_train"].target_indices, samples["calibration"].target_indices, lm_train.X, lm_calib.X)
     regime_val = build_regime_labels(df, samples["inner_train"].target_indices, samples["outer_val"].target_indices, lm_train.X, lm_val.X)
+    regime_features_train = build_regime_feature_matrix(df, samples["inner_train"].target_indices, samples["inner_train"].target_indices, lm_train.X, lm_train.X)
+    regime_features_calib = build_regime_feature_matrix(df, samples["inner_train"].target_indices, samples["calibration"].target_indices, lm_train.X, lm_calib.X)
+    regime_features_val = build_regime_feature_matrix(df, samples["inner_train"].target_indices, samples["outer_val"].target_indices, lm_train.X, lm_val.X)
 
     rows = []
     for feature_set in feature_sets:
@@ -272,11 +293,14 @@ def run_nested_fold_vocab_horizon(
             lm_train.X,
             lm_calib.X,
             lm_val.X,
+            regime_features_train,
+            regime_features_calib,
+            regime_features_val,
         )
         for class_weight in class_weights:
             for classifier_name in classifiers:
                 classifier = build_classifier(
-                    ClassifierSpec(classifier_name, {"max_iter": 1000, "class_weight": class_weight}),
+                    ClassifierSpec(classifier_name, {"max_iter": 1000, "class_weight": resolve_class_weight(class_weight)}),
                     random_state=random_state,
                 )
                 fit_train = X_train
@@ -306,6 +330,10 @@ def run_nested_fold_vocab_horizon(
                         temperature_grid=temperature_grid,
                         threshold_modes=threshold_modes,
                         selection_metric=selection_metric,
+                        selection_objectives=selection_objectives,
+                        temperature_selection=temperature_selection,
+                        target_action_rate=target_action_rate,
+                        action_rate_penalty=action_rate_penalty,
                         min_regime_calibration_samples=min_regime_calibration_samples,
                         regime_calib=regime_calib,
                         regime_val=regime_val,
@@ -330,15 +358,22 @@ def evaluate_threshold_modes(
     temperature_grid: list[float],
     threshold_modes: list[str],
     selection_metric: str,
+    selection_objectives: list[str],
+    temperature_selection: str,
+    target_action_rate: float,
+    action_rate_penalty: float,
     min_regime_calibration_samples: int,
     regime_calib: dict[str, np.ndarray],
     regime_val: dict[str, np.ndarray],
     random_state: int,
 ) -> list[dict[str, Any]]:
     rows = []
+    objective_names = selection_objectives or [selection_metric]
     argmax_decision = ThresholdDecision(
         mode="argmax",
         calibration_method="none",
+        selection_objective="argmax",
+        temperature_selection="none",
         temperature=1.0,
         buy_threshold=None,
         sell_threshold=None,
@@ -361,86 +396,96 @@ def evaluate_threshold_modes(
         )
     )
 
-    if "global" in threshold_modes:
-        global_decision = select_global_thresholds(
-            samples["calibration"].y,
-            calib_proba,
-            threshold_grid,
-            temperature_grid,
-            selection_metric=selection_metric,
-            mode="global",
-        )
-        rows.append(
-            result_row(
-                ranges,
-                samples["outer_val"].y,
-                val_proba,
-                global_decision,
-                vocab_config=vocab_config,
-                feature_set=feature_set,
-                classifier_name=classifier_name,
-                class_weight=class_weight,
-                action_horizon=action_horizon,
-                random_state=random_state,
-                regime_labels=regime_val,
+    for objective_name in objective_names:
+        if "global" in threshold_modes:
+            global_decision = select_global_thresholds(
+                samples["calibration"].y,
+                calib_proba,
+                threshold_grid,
+                temperature_grid,
+                selection_objective=objective_name,
+                temperature_selection=temperature_selection,
+                target_action_rate=target_action_rate,
+                action_rate_penalty=action_rate_penalty,
+                mode="global",
             )
-        )
-
-    for mode in threshold_modes:
-        if mode not in {"regime_volatility", "regime_trend"}:
-            continue
-        regime_name = "volatility" if mode == "regime_volatility" else "trend"
-        regime_decision = select_regime_thresholds(
-            samples["calibration"].y,
-            calib_proba,
-            regime_calib[regime_name],
-            threshold_grid,
-            temperature_grid,
-            selection_metric=selection_metric,
-            mode=mode,
-            min_regime_calibration_samples=min_regime_calibration_samples,
-        )
-        rows.append(
-            result_row(
-                ranges,
-                samples["outer_val"].y,
-                val_proba,
-                regime_decision,
-                vocab_config=vocab_config,
-                feature_set=feature_set,
-                classifier_name=classifier_name,
-                class_weight=class_weight,
-                action_horizon=action_horizon,
-                random_state=random_state,
-                regime_labels=regime_val,
-                active_regime=regime_name,
+            rows.append(
+                result_row(
+                    ranges,
+                    samples["outer_val"].y,
+                    val_proba,
+                    global_decision,
+                    vocab_config=vocab_config,
+                    feature_set=feature_set,
+                    classifier_name=classifier_name,
+                    class_weight=class_weight,
+                    action_horizon=action_horizon,
+                    random_state=random_state,
+                    regime_labels=regime_val,
+                )
             )
-        )
 
-    oracle_decision = select_global_thresholds(
-        samples["outer_val"].y,
-        val_proba,
-        threshold_grid,
-        temperature_grid,
-        selection_metric=selection_metric,
-        mode="oracle_global",
-        is_oracle=True,
-    )
-    rows.append(
-        result_row(
-            ranges,
+        for mode in threshold_modes:
+            if mode not in {"regime_volatility", "regime_trend"}:
+                continue
+            regime_name = "volatility" if mode == "regime_volatility" else "trend"
+            regime_decision = select_regime_thresholds(
+                samples["calibration"].y,
+                calib_proba,
+                regime_calib[regime_name],
+                threshold_grid,
+                temperature_grid,
+                selection_objective=objective_name,
+                temperature_selection=temperature_selection,
+                target_action_rate=target_action_rate,
+                action_rate_penalty=action_rate_penalty,
+                mode=mode,
+                min_regime_calibration_samples=min_regime_calibration_samples,
+            )
+            rows.append(
+                result_row(
+                    ranges,
+                    samples["outer_val"].y,
+                    val_proba,
+                    regime_decision,
+                    vocab_config=vocab_config,
+                    feature_set=feature_set,
+                    classifier_name=classifier_name,
+                    class_weight=class_weight,
+                    action_horizon=action_horizon,
+                    random_state=random_state,
+                    regime_labels=regime_val,
+                    active_regime=regime_name,
+                )
+            )
+
+        oracle_decision = select_global_thresholds(
             samples["outer_val"].y,
             val_proba,
-            oracle_decision,
-            vocab_config=vocab_config,
-            feature_set=feature_set,
-            classifier_name=classifier_name,
-            class_weight=class_weight,
-            action_horizon=action_horizon,
-            random_state=random_state,
-            regime_labels=regime_val,
+            threshold_grid,
+            temperature_grid,
+            selection_objective=objective_name,
+            temperature_selection="objective",
+            target_action_rate=target_action_rate,
+            action_rate_penalty=action_rate_penalty,
+            mode="oracle_global",
+            is_oracle=True,
         )
-    )
+        rows.append(
+            result_row(
+                ranges,
+                samples["outer_val"].y,
+                val_proba,
+                oracle_decision,
+                vocab_config=vocab_config,
+                feature_set=feature_set,
+                classifier_name=classifier_name,
+                class_weight=class_weight,
+                action_horizon=action_horizon,
+                random_state=random_state,
+                regime_labels=regime_val,
+            )
+        )
     return rows
 
 
@@ -450,10 +495,27 @@ def select_global_thresholds(
     threshold_grid: list[float],
     temperature_grid: list[float],
     *,
-    selection_metric: str,
+    selection_objective: str,
+    temperature_selection: str,
+    target_action_rate: float,
+    action_rate_penalty: float,
     mode: str,
     is_oracle: bool = False,
 ) -> ThresholdDecision:
+    if temperature_selection == "nll":
+        temperature_grid = [
+            min(
+                temperature_grid,
+                key=lambda temperature: negative_log_likelihood(y_true, apply_temperature(proba, temperature)),
+            )
+        ]
+    elif temperature_selection == "macro_f1":
+        selection_objective_for_temperature = "macro_f1"
+    elif temperature_selection == "objective":
+        selection_objective_for_temperature = selection_objective
+    else:
+        raise ValueError(f"Unsupported temperature selection: {temperature_selection}")
+
     candidates = []
     for temperature in temperature_grid:
         calibrated = apply_temperature(proba, temperature)
@@ -461,6 +523,19 @@ def select_global_thresholds(
             for sell_threshold in threshold_grid:
                 pred = threshold_predictions(calibrated, buy_threshold=buy_threshold, sell_threshold=sell_threshold)
                 metrics = _score_metrics(y_true, pred)
+                objective_name = selection_objective_for_temperature if temperature_selection != "nll" else selection_objective
+                metrics["selection_objective_value"] = objective_value(
+                    metrics,
+                    objective_name,
+                    target_action_rate=target_action_rate,
+                    action_rate_penalty=action_rate_penalty,
+                )
+                metrics["requested_objective_value"] = objective_value(
+                    metrics,
+                    selection_objective,
+                    target_action_rate=target_action_rate,
+                    action_rate_penalty=action_rate_penalty,
+                )
                 candidates.append(
                     {
                         "temperature": float(temperature),
@@ -469,14 +544,16 @@ def select_global_thresholds(
                         "metrics": metrics,
                     }
                 )
-    best = max(candidates, key=lambda row: (row["metrics"][selection_metric], row["metrics"]["buy_f1"] + row["metrics"]["sell_f1"]))
+    best = max(candidates, key=lambda row: (row["metrics"]["selection_objective_value"], row["metrics"]["buy_f1"] + row["metrics"]["sell_f1"]))
     return ThresholdDecision(
         mode=mode,
         calibration_method="temperature_scaling",
+        selection_objective=selection_objective,
+        temperature_selection=temperature_selection,
         temperature=best["temperature"],
         buy_threshold=best["buy_threshold"],
         sell_threshold=best["sell_threshold"],
-        calibration_score=float(best["metrics"][selection_metric]),
+        calibration_score=float(best["metrics"]["requested_objective_value"]),
         calibration_metrics=best["metrics"],
         is_oracle=is_oracle,
     )
@@ -489,7 +566,10 @@ def select_regime_thresholds(
     threshold_grid: list[float],
     temperature_grid: list[float],
     *,
-    selection_metric: str,
+    selection_objective: str,
+    temperature_selection: str,
+    target_action_rate: float,
+    action_rate_penalty: float,
     mode: str,
     min_regime_calibration_samples: int,
 ) -> ThresholdDecision:
@@ -498,7 +578,10 @@ def select_regime_thresholds(
         proba,
         threshold_grid,
         temperature_grid,
-        selection_metric=selection_metric,
+        selection_objective=selection_objective,
+        temperature_selection=temperature_selection,
+        target_action_rate=target_action_rate,
+        action_rate_penalty=action_rate_penalty,
         mode="global_fallback",
     )
     calibrated = apply_temperature(proba, global_decision.temperature)
@@ -519,7 +602,10 @@ def select_regime_thresholds(
                 calibrated[mask],
                 threshold_grid,
                 [1.0],
-                selection_metric=selection_metric,
+                selection_objective=selection_objective,
+                temperature_selection="objective",
+                target_action_rate=target_action_rate,
+                action_rate_penalty=action_rate_penalty,
                 mode=f"{mode}:{regime}",
             )
             regime_thresholds[regime] = {
@@ -535,13 +621,21 @@ def select_regime_thresholds(
             sell_threshold=row["sell_threshold"],
         )
     metrics = _score_metrics(y_true, pred)
+    metrics["requested_objective_value"] = objective_value(
+        metrics,
+        selection_objective,
+        target_action_rate=target_action_rate,
+        action_rate_penalty=action_rate_penalty,
+    )
     return ThresholdDecision(
         mode=mode,
         calibration_method="temperature_scaling",
+        selection_objective=selection_objective,
+        temperature_selection=temperature_selection,
         temperature=global_decision.temperature,
         buy_threshold=global_decision.buy_threshold,
         sell_threshold=global_decision.sell_threshold,
-        calibration_score=float(metrics[selection_metric]),
+        calibration_score=float(metrics["requested_objective_value"]),
         calibration_metrics=metrics,
         regime_thresholds=regime_thresholds,
     )
@@ -583,6 +677,11 @@ def result_row(
     metrics = action_metrics(y_true, pred)
     metrics["action_rate"] = float(np.mean(np.isin(pred, [0, 2])))
     metrics["hold_rate"] = float(np.mean(pred == 1))
+    metrics["buy_sell_mean_f1"] = float(0.5 * (metrics["buy_f1"] + metrics["sell_f1"]))
+    metrics["buy_sell_hmean_f1"] = float(
+        2.0 * metrics["buy_f1"] * metrics["sell_f1"] / (metrics["buy_f1"] + metrics["sell_f1"] + 1e-12)
+    )
+    metrics["min_buy_sell_f1"] = float(min(metrics["buy_f1"], metrics["sell_f1"]))
     return {
         "outer_fold_id": int(ranges.outer_fold.fold_id),
         "random_state": int(random_state),
@@ -598,6 +697,8 @@ def result_row(
         "class_weight": "none" if class_weight is None else str(class_weight),
         "action_horizon": int(action_horizon),
         "calibration_method": decision.calibration_method,
+        "selection_objective": decision.selection_objective,
+        "temperature_selection": decision.temperature_selection,
         "temperature": float(decision.temperature),
         "threshold_mode": decision.mode,
         "selected_buy_threshold": decision.buy_threshold,
@@ -623,9 +724,25 @@ def build_feature_matrices(
     lm_train: np.ndarray,
     lm_calib: np.ndarray,
     lm_val: np.ndarray,
+    regime_train: np.ndarray,
+    regime_calib: np.ndarray,
+    regime_val: np.ndarray,
 ) -> tuple[Any, Any, Any]:
     if feature_set == "lm_only":
         return lm_train, lm_calib, lm_val
+    if feature_set == "lm_regime":
+        scalar_width = 18
+        return (
+            np.hstack([lm_train[:, :scalar_width], regime_train]),
+            np.hstack([lm_calib[:, :scalar_width], regime_calib]),
+            np.hstack([lm_val[:, :scalar_width], regime_val]),
+        )
+    if feature_set == "lm_regime_proba":
+        return (
+            np.hstack([lm_train, regime_train]),
+            np.hstack([lm_calib, regime_calib]),
+            np.hstack([lm_val, regime_val]),
+        )
     if feature_set == "base_lm_proba":
         return _append(base_train, lm_train), _append(base_calib, lm_calib), _append(base_val, lm_val)
     if feature_set == "base":
@@ -680,6 +797,40 @@ def build_regime_labels(
     }
 
 
+def build_regime_feature_matrix(
+    df: pd.DataFrame,
+    train_indices: np.ndarray,
+    target_indices: np.ndarray,
+    lm_train: np.ndarray,
+    lm_target: np.ndarray,
+) -> np.ndarray:
+    """Build past/current regime features using train-fitted thresholds only."""
+
+    vol, trend, hours = _past_regime_arrays(df)
+    vol_labels = _three_bucket(vol[train_indices], vol[target_indices], ("low_vol", "mid_vol", "high_vol"))
+    trend_labels = _three_bucket(trend[train_indices], trend[target_indices], ("downtrend", "flat", "uptrend"))
+    session_labels = _session_labels(hours[target_indices])
+    entropy_labels = _three_bucket(lm_train[:, 3], lm_target[:, 3], ("low_entropy", "mid_entropy", "high_entropy"))
+    continuous = np.column_stack(
+        [
+            _train_standardize(vol[train_indices], vol[target_indices]),
+            _train_standardize(trend[train_indices], trend[target_indices]),
+            _train_standardize(lm_train[:, 3], lm_target[:, 3]),
+            _train_standardize(lm_train[:, 0], lm_target[:, 0]),
+            _train_standardize(lm_train[:, 2], lm_target[:, 2]),
+        ]
+    )
+    return np.hstack(
+        [
+            _one_hot(vol_labels, ("low_vol", "mid_vol", "high_vol")),
+            _one_hot(trend_labels, ("downtrend", "flat", "uptrend")),
+            _one_hot(session_labels, ("early", "middle", "late")),
+            _one_hot(entropy_labels, ("low_entropy", "mid_entropy", "high_entropy")),
+            continuous,
+        ]
+    ).astype(float)
+
+
 def regime_rows_for_predictions(
     regime_labels: dict[str, np.ndarray],
     y_true: np.ndarray,
@@ -715,6 +866,26 @@ def _three_bucket(train_values: np.ndarray, target_values: np.ndarray, names: tu
     return labels
 
 
+def _one_hot(labels: np.ndarray, names: tuple[str, ...]) -> np.ndarray:
+    result = np.zeros((len(labels), len(names)), dtype=float)
+    label_to_idx = {name: idx for idx, name in enumerate(names)}
+    for row_idx, label in enumerate(labels):
+        idx = label_to_idx.get(str(label))
+        if idx is not None:
+            result[row_idx, idx] = 1.0
+    return result
+
+
+def _train_standardize(train_values: np.ndarray, target_values: np.ndarray) -> np.ndarray:
+    train = np.asarray(train_values, dtype=float)
+    target = np.asarray(target_values, dtype=float)
+    train = train[np.isfinite(train)]
+    mean = float(train.mean()) if len(train) else 0.0
+    std = float(train.std(ddof=0)) if len(train) else 1.0
+    std = max(std, 1e-12)
+    return np.nan_to_num((target - mean) / std, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def _session_labels(hours: np.ndarray) -> np.ndarray:
     labels = np.full(len(hours), "middle", dtype=object)
     labels[hours < 12] = "early"
@@ -724,6 +895,8 @@ def _session_labels(hours: np.ndarray) -> np.ndarray:
 
 def _score_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     metrics = action_metrics(y_true, y_pred)
+    buy_sell_mean = 0.5 * (metrics["buy_f1"] + metrics["sell_f1"])
+    buy_sell_hmean = 2.0 * metrics["buy_f1"] * metrics["sell_f1"] / (metrics["buy_f1"] + metrics["sell_f1"] + 1e-12)
     return {
         "macro_f1": metrics["macro_f1"],
         "accuracy": metrics["accuracy"],
@@ -731,8 +904,30 @@ def _score_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
         "buy_f1": metrics["buy_f1"],
         "sell_f1": metrics["sell_f1"],
         "hold_f1": metrics["hold_f1"],
+        "buy_sell_mean_f1": float(buy_sell_mean),
+        "buy_sell_hmean_f1": float(buy_sell_hmean),
+        "min_buy_sell_f1": float(min(metrics["buy_f1"], metrics["sell_f1"])),
         "action_rate": float(np.mean(np.isin(y_pred, [0, 2]))),
     }
+
+
+def objective_value(
+    metrics: dict[str, float],
+    objective: str,
+    *,
+    target_action_rate: float,
+    action_rate_penalty: float,
+) -> float:
+    if objective in metrics:
+        return float(metrics[objective])
+    if objective == "macro_f1_action_penalty":
+        return float(metrics["macro_f1"] - action_rate_penalty * abs(metrics["action_rate"] - target_action_rate))
+    raise ValueError(f"Unsupported selection objective: {objective}")
+
+
+def negative_log_likelihood(y_true: np.ndarray, proba: np.ndarray) -> float:
+    y_true = np.asarray(y_true, dtype=int)
+    return float(-np.log(np.maximum(proba[np.arange(len(y_true)), y_true], 1e-12)).mean()) if len(y_true) else 0.0
 
 
 def _require_proba(proba: np.ndarray | None) -> np.ndarray:
@@ -772,6 +967,8 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["class_weight"],
             row["action_horizon"],
             row["threshold_mode"],
+            row["selection_objective"],
+            row["temperature_selection"],
             row["calibration_method"],
             row["is_oracle"],
         )
@@ -781,6 +978,9 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         macro = np.asarray([item["metrics"]["macro_f1"] for item in items], dtype=float)
         buy = np.asarray([item["metrics"]["buy_f1"] for item in items], dtype=float)
         sell = np.asarray([item["metrics"]["sell_f1"] for item in items], dtype=float)
+        buy_sell_mean = np.asarray([item["metrics"]["buy_sell_mean_f1"] for item in items], dtype=float)
+        buy_sell_hmean = np.asarray([item["metrics"]["buy_sell_hmean_f1"] for item in items], dtype=float)
+        min_buy_sell = np.asarray([item["metrics"]["min_buy_sell_f1"] for item in items], dtype=float)
         action_rate = np.asarray([item["metrics"]["action_rate"] for item in items], dtype=float)
         result.append(
             {
@@ -790,14 +990,19 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "class_weight": key[3],
                 "action_horizon": int(key[4]),
                 "threshold_mode": key[5],
-                "calibration_method": key[6],
-                "is_oracle": bool(key[7]),
+                "selection_objective": key[6],
+                "temperature_selection": key[7],
+                "calibration_method": key[8],
+                "is_oracle": bool(key[9]),
                 "folds": int(len(items)),
                 "outer_val_macro_f1_mean": float(macro.mean()),
                 "outer_val_macro_f1_std": float(macro.std(ddof=0)),
                 "outer_val_macro_f1_worst": float(macro.min()),
                 "buy_f1_mean": float(buy.mean()),
                 "sell_f1_mean": float(sell.mean()),
+                "buy_sell_mean_f1": float(buy_sell_mean.mean()),
+                "buy_sell_hmean_f1": float(buy_sell_hmean.mean()),
+                "min_buy_sell_f1": float(min_buy_sell.mean()),
                 "mean_action_rate": float(action_rate.mean()),
             }
         )
@@ -832,6 +1037,8 @@ def compact_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "class_weight": row["class_weight"],
                 "action_horizon": row["action_horizon"],
                 "calibration_method": row["calibration_method"],
+                "selection_objective": row["selection_objective"],
+                "temperature_selection": row["temperature_selection"],
                 "temperature": row["temperature"],
                 "threshold_mode": row["threshold_mode"],
                 "selected_buy_threshold": row["selected_buy_threshold"],
@@ -844,6 +1051,9 @@ def compact_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "buy_f1": metrics["buy_f1"],
                 "sell_f1": metrics["sell_f1"],
                 "hold_f1": metrics["hold_f1"],
+                "buy_sell_mean_f1": metrics["buy_sell_mean_f1"],
+                "buy_sell_hmean_f1": metrics["buy_sell_hmean_f1"],
+                "min_buy_sell_f1": metrics["min_buy_sell_f1"],
                 "action_rate": metrics["action_rate"],
             }
         )
@@ -878,12 +1088,12 @@ def _jsonable(value: Any) -> Any:
 
 
 def print_summary(aggregates: list[dict[str, Any]]) -> None:
-    print("vocabulary | horizon | class_weight | mode | oracle | macro-F1 | worst | BUY F1 | SELL F1 | action_rate")
-    print("--- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---:")
+    print("vocabulary | features | weight | objective | mode | oracle | macro-F1 | worst | BUY F1 | SELL F1 | action_rate")
+    print("--- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---:")
     for row in aggregates[:16]:
         print(
-            f"{row['vocabulary']} | {row['action_horizon']} | {row['class_weight']} | "
-            f"{row['threshold_mode']} | {row['is_oracle']} | {row['outer_val_macro_f1_mean']:.4f} | "
+            f"{row['vocabulary']} | {row['feature_set']} | {row['class_weight']} | "
+            f"{row['selection_objective']} | {row['threshold_mode']} | {row['is_oracle']} | {row['outer_val_macro_f1_mean']:.4f} | "
             f"{row['outer_val_macro_f1_worst']:.4f} | {row['buy_f1_mean']:.4f} | "
             f"{row['sell_f1_mean']:.4f} | {row['mean_action_rate']:.4f}"
         )
@@ -917,6 +1127,10 @@ def main() -> int:
     parser.add_argument("--temperature-grid", default="0.75,1.0,1.25,1.5,2.0")
     parser.add_argument("--threshold-modes", default="argmax,global,regime_volatility,regime_trend")
     parser.add_argument("--selection-metric", choices=["macro_f1", "balanced_accuracy", "buy_f1", "sell_f1"], default="macro_f1")
+    parser.add_argument("--selection-objectives", default="")
+    parser.add_argument("--temperature-selection", choices=["nll", "macro_f1", "objective"], default="objective")
+    parser.add_argument("--target-action-rate", type=float, default=0.50)
+    parser.add_argument("--action-rate-penalty", type=float, default=0.10)
     parser.add_argument("--min-regime-calibration-samples", type=int, default=300)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--quick", action="store_true")
@@ -941,6 +1155,7 @@ def main() -> int:
     threshold_grid = parse_float_list(args.threshold_grid)
     temperature_grid = parse_float_list(args.temperature_grid)
     threshold_modes = parse_list(args.threshold_modes)
+    selection_objectives = parse_list(args.selection_objectives) if args.selection_objectives else [args.selection_metric]
     shape_cache = {config.shape_variant: candle_shape_matrix(df, variant=config.shape_variant)[0] for config in vocab_configs}
 
     rows: list[dict[str, Any]] = []
@@ -978,6 +1193,10 @@ def main() -> int:
                         temperature_grid=temperature_grid,
                         threshold_modes=threshold_modes,
                         selection_metric=args.selection_metric,
+                        selection_objectives=selection_objectives,
+                        temperature_selection=args.temperature_selection,
+                        target_action_rate=args.target_action_rate,
+                        action_rate_penalty=args.action_rate_penalty,
                         min_regime_calibration_samples=args.min_regime_calibration_samples,
                         random_state=args.random_state,
                     )
@@ -999,6 +1218,10 @@ def main() -> int:
         "action_horizons": action_horizons,
         "threshold_grid": threshold_grid,
         "temperature_grid": temperature_grid,
+        "selection_objectives": selection_objectives,
+        "temperature_selection": args.temperature_selection,
+        "target_action_rate": args.target_action_rate,
+        "action_rate_penalty": args.action_rate_penalty,
         "threshold_modes": threshold_modes,
         "fold_results": rows,
         "aggregates": aggregates,
@@ -1014,7 +1237,8 @@ def main() -> int:
         print(
             "Лучший честный config: "
             f"{best_honest['vocabulary']} | horizon={best_honest['action_horizon']} | "
-            f"{best_honest['class_weight']} | {best_honest['threshold_mode']}"
+            f"{best_honest['feature_set']} | {best_honest['class_weight']} | "
+            f"{best_honest['selection_objective']} | {best_honest['threshold_mode']}"
         )
     print(f"Записан JSON: {output_json}")
     print(f"Записан CSV: {output_csv}")

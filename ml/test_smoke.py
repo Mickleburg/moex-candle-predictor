@@ -508,11 +508,15 @@ def test_nested_threshold_invariants():
 
         from sber_action_nested_thresholds import (
             apply_temperature,
+            build_regime_feature_matrix,
             nested_range,
+            objective_value,
+            resolve_class_weight,
             select_global_thresholds,
             select_regime_thresholds,
             threshold_predictions,
         )
+        from src.data.fixtures import generate_mock_candles
         from src.data.split import WalkForwardRange
 
         fold = WalkForwardRange(fold_id=1, train_start=0, train_end=80, val_start=80, val_end=110)
@@ -541,7 +545,17 @@ def test_nested_threshold_invariants():
         y = np.array([0, 1, 2, 1])
         grid = [0.25, 0.30, 0.35]
         temps = [0.75, 1.0]
-        decision = select_global_thresholds(y, proba, grid, temps, selection_metric="macro_f1", mode="global")
+        decision = select_global_thresholds(
+            y,
+            proba,
+            grid,
+            temps,
+            selection_objective="macro_f1",
+            temperature_selection="objective",
+            target_action_rate=0.5,
+            action_rate_penalty=0.1,
+            mode="global",
+        )
         assert not decision.is_oracle
         assert decision.buy_threshold in grid
         assert decision.sell_threshold in grid
@@ -554,7 +568,10 @@ def test_nested_threshold_invariants():
             regimes,
             grid,
             temps,
-            selection_metric="macro_f1",
+            selection_objective="macro_f1",
+            temperature_selection="objective",
+            target_action_rate=0.5,
+            action_rate_penalty=0.1,
             mode="regime_test",
             min_regime_calibration_samples=3,
         )
@@ -562,8 +579,38 @@ def test_nested_threshold_invariants():
         assert regime_decision.regime_thresholds["a"]["fallback"]
         assert regime_decision.regime_thresholds["b"]["fallback"]
 
-        oracle = select_global_thresholds(y, proba, grid, temps, selection_metric="macro_f1", mode="oracle_global", is_oracle=True)
+        oracle = select_global_thresholds(
+            y,
+            proba,
+            grid,
+            temps,
+            selection_objective="macro_f1",
+            temperature_selection="objective",
+            target_action_rate=0.5,
+            action_rate_penalty=0.1,
+            mode="oracle_global",
+            is_oracle=True,
+        )
         assert oracle.is_oracle
+        metrics = {"macro_f1": 0.4, "buy_f1": 0.3, "sell_f1": 0.2, "buy_sell_mean_f1": 0.25, "action_rate": 0.7}
+        assert objective_value(metrics, "buy_sell_mean_f1", target_action_rate=0.5, action_rate_penalty=0.1) == 0.25
+        assert objective_value(metrics, "macro_f1_action_penalty", target_action_rate=0.5, action_rate_penalty=0.1) < metrics["macro_f1"]
+        assert resolve_class_weight("action_boost_1.2") == {0: 1.2, 1: 0.8, 2: 1.2}
+
+        df = generate_mock_candles(n=80, ticker="SBER", timeframe="1H", seed=42)
+        train_indices = np.arange(20, 50)
+        target_indices = np.arange(50, 65)
+        lm_train = np.zeros((len(train_indices), 18), dtype=float)
+        lm_target = np.zeros((len(target_indices), 18), dtype=float)
+        lm_train[:, 0] = np.linspace(0.2, 0.8, len(train_indices))
+        lm_train[:, 2] = np.linspace(0.4, 0.9, len(train_indices))
+        lm_train[:, 3] = np.linspace(0.1, 1.0, len(train_indices))
+        lm_target[:, 0] = 0.5
+        lm_target[:, 2] = 0.7
+        lm_target[:, 3] = np.linspace(0.2, 0.8, len(target_indices))
+        regime_features = build_regime_feature_matrix(df, train_indices, target_indices, lm_train, lm_target)
+        assert regime_features.shape[0] == len(target_indices)
+        assert np.all(np.isfinite(regime_features))
         print("  PASS Nested threshold selection helpers")
         return True
     except Exception as exc:
