@@ -423,6 +423,81 @@ def test_lm_action_feature_invariants():
         return False
 
 
+def test_action_lm_robustness_invariants():
+    """Test action LM robustness helpers stay leakage-safe on mock data."""
+
+    print("\nTesting action LM robustness invariants...")
+
+    try:
+        import numpy as np
+
+        from sber_action_lm_features_walk_forward import (
+            calibration_diagnostics,
+            parse_int_list,
+            regime_error_analysis,
+            threshold_sweep,
+        )
+        from src.data.fixtures import generate_mock_candles
+        from src.data.split import walk_forward_ranges
+        from src.nlp import make_action_labels, make_sentence_samples
+
+        assert parse_int_list("7,13,42") == [7, 13, 42]
+        folds_a = walk_forward_ranges(120, n_splits=2, initial_train_size=60, val_size=20, min_train_size=40)
+        folds_b = walk_forward_ranges(120, n_splits=2, initial_train_size=60, val_size=20, min_train_size=40)
+        assert [fold.__dict__ for fold in folds_a] == [fold.__dict__ for fold in folds_b]
+
+        y_true = np.array([0, 1, 2, 1, 2, 0])
+        y_pred = np.array([0, 1, 1, 1, 2, 2])
+        proba = np.array(
+            [
+                [0.70, 0.20, 0.10],
+                [0.10, 0.75, 0.15],
+                [0.20, 0.45, 0.35],
+                [0.15, 0.60, 0.25],
+                [0.10, 0.20, 0.70],
+                [0.40, 0.20, 0.40],
+            ],
+            dtype=float,
+        )
+        assert np.allclose(proba.sum(axis=1), 1.0)
+        calibration = calibration_diagnostics(y_true, y_pred, proba)
+        assert calibration["available"]
+        assert len(calibration["reliability_table"]) == 6
+        sweep = threshold_sweep(y_true, proba)
+        assert sweep["available"]
+        assert len(sweep["rows"]) == 25
+
+        df = generate_mock_candles(n=140, ticker="SBER", timeframe="1H", seed=42)
+        labels, future_returns, _ = make_action_labels(df, horizon=1, commission=0.0005)
+        word_tokens = [f"w{i % 5:03d}" for i in range(len(df))]
+        train_samples = make_sentence_samples(word_tokens, labels, future_returns, 0, 90, 8, 1)
+        val_samples = make_sentence_samples(word_tokens, labels, future_returns, 90, 130, 8, 1)
+        fake_val_pred = val_samples.y.copy()
+        fake_proba = np.full((val_samples.size, 3), 1.0 / 3.0)
+        train_lm_scalar = np.zeros((train_samples.size, 18), dtype=float)
+        val_lm_scalar = np.zeros((val_samples.size, 18), dtype=float)
+        train_lm_scalar[:, 3] = np.linspace(0.1, 1.0, train_samples.size)
+        val_lm_scalar[:, 3] = np.linspace(0.1, 1.0, val_samples.size)
+        val_lm_scalar[:, 0] = 0.4
+        regimes = regime_error_analysis(
+            df,
+            train_samples,
+            val_samples,
+            fake_val_pred,
+            fake_proba,
+            train_lm_scalar,
+            val_lm_scalar,
+        )
+        assert {"volatility", "trend", "session", "lm_uncertainty"} <= set(regimes)
+        for rows in regimes.values():
+            assert sum(row["n_samples"] for row in rows) == val_samples.size
+        print("  PASS Action LM robustness helpers")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Action LM robustness invariant test failed: {exc}")
+        return False
+
+
 def test_vocabulary_selection_constraints():
     """Test vocabulary selection constraints and rejection reasons."""
 
@@ -537,6 +612,7 @@ def main():
         ("Walk-forward Invariants", test_walk_forward_invariants()),
         ("Word LM Invariants", test_word_lm_invariants()),
         ("LM Action Features", test_lm_action_feature_invariants()),
+        ("Action LM Robustness", test_action_lm_robustness_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
     ]
