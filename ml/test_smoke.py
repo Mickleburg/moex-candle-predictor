@@ -508,14 +508,17 @@ def test_nested_threshold_invariants():
 
         from sber_action_nested_thresholds import (
             apply_temperature,
+            aggregate_rows,
             build_regime_feature_matrix,
             nested_range,
             objective_value,
+            parse_int_list,
             resolve_class_weight,
             select_global_thresholds,
             select_regime_thresholds,
             threshold_predictions,
         )
+        from sber_action_final_evaluation import final_nested_range, parse_random_state_policy
         from src.data.fixtures import generate_mock_candles
         from src.data.split import WalkForwardRange
 
@@ -596,6 +599,72 @@ def test_nested_threshold_invariants():
         assert objective_value(metrics, "buy_sell_mean_f1", target_action_rate=0.5, action_rate_penalty=0.1) == 0.25
         assert objective_value(metrics, "macro_f1_action_penalty", target_action_rate=0.5, action_rate_penalty=0.1) < metrics["macro_f1"]
         assert resolve_class_weight("action_boost_1.2") == {0: 1.2, 1: 0.8, 2: 1.2}
+        assert parse_int_list("7,13,42") == [7, 13, 42]
+        assert parse_random_state_policy("fixed:42") == 42
+
+        final_range, holdout = final_nested_range(1000, calibration_size=100)
+        assert holdout["test"][0] == 850
+        assert final_range.inner_train_end == 750
+        assert final_range.calibration_start == 750
+        assert final_range.calibration_end == 850
+        assert final_range.outer_fold.val_start == 850
+
+        aggregate = aggregate_rows(
+            [
+                {
+                    "vocabulary": "shape/gmm_diag/20",
+                    "feature_set": "lm_regime",
+                    "classifier": "logreg",
+                    "class_weight": "action_boost_1.2",
+                    "action_horizon": 1,
+                    "threshold_mode": "argmax",
+                    "selection_objective": "argmax",
+                    "temperature_selection": "none",
+                    "calibration_method": "none",
+                    "is_oracle": False,
+                    "outer_fold_id": 1,
+                    "random_state": 7,
+                    "metrics": {
+                        "macro_f1": 0.4,
+                        "buy_f1": 0.3,
+                        "sell_f1": 0.2,
+                        "hold_f1": 0.5,
+                        "buy_sell_mean_f1": 0.25,
+                        "buy_sell_hmean_f1": 0.24,
+                        "min_buy_sell_f1": 0.2,
+                        "action_rate": 0.6,
+                    },
+                    "prediction_distribution": {"BUY": {"share": 0.3}, "SELL": {"share": 0.3}, "HOLD": {"share": 0.4}},
+                },
+                {
+                    "vocabulary": "shape/gmm_diag/20",
+                    "feature_set": "lm_regime",
+                    "classifier": "logreg",
+                    "class_weight": "action_boost_1.2",
+                    "action_horizon": 1,
+                    "threshold_mode": "argmax",
+                    "selection_objective": "argmax",
+                    "temperature_selection": "none",
+                    "calibration_method": "none",
+                    "is_oracle": False,
+                    "outer_fold_id": 1,
+                    "random_state": 13,
+                    "metrics": {
+                        "macro_f1": 0.42,
+                        "buy_f1": 0.31,
+                        "sell_f1": 0.21,
+                        "hold_f1": 0.52,
+                        "buy_sell_mean_f1": 0.26,
+                        "buy_sell_hmean_f1": 0.25,
+                        "min_buy_sell_f1": 0.21,
+                        "action_rate": 0.62,
+                    },
+                    "prediction_distribution": {"BUY": {"share": 0.32}, "SELL": {"share": 0.3}, "HOLD": {"share": 0.38}},
+                },
+            ]
+        )[0]
+        assert aggregate["random_states"] == [7, 13]
+        assert aggregate["macro_f1_std_across_seeds"] > 0
 
         df = generate_mock_candles(n=80, ticker="SBER", timeframe="1H", seed=42)
         train_indices = np.arange(20, 50)

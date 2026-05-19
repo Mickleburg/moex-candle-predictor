@@ -978,10 +978,19 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         macro = np.asarray([item["metrics"]["macro_f1"] for item in items], dtype=float)
         buy = np.asarray([item["metrics"]["buy_f1"] for item in items], dtype=float)
         sell = np.asarray([item["metrics"]["sell_f1"] for item in items], dtype=float)
+        hold = np.asarray([item["metrics"]["hold_f1"] for item in items], dtype=float)
         buy_sell_mean = np.asarray([item["metrics"]["buy_sell_mean_f1"] for item in items], dtype=float)
         buy_sell_hmean = np.asarray([item["metrics"]["buy_sell_hmean_f1"] for item in items], dtype=float)
         min_buy_sell = np.asarray([item["metrics"]["min_buy_sell_f1"] for item in items], dtype=float)
         action_rate = np.asarray([item["metrics"]["action_rate"] for item in items], dtype=float)
+        seed_means = _group_metric_mean(items, "random_state", "macro_f1")
+        fold_means = _group_metric_mean(items, "outer_fold_id", "macro_f1")
+        buy_seed_means = _group_metric_mean(items, "random_state", "buy_f1")
+        sell_seed_means = _group_metric_mean(items, "random_state", "sell_f1")
+        hold_seed_means = _group_metric_mean(items, "random_state", "hold_f1")
+        pred_buy = np.asarray([_label_share(item["prediction_distribution"], "BUY") for item in items], dtype=float)
+        pred_sell = np.asarray([_label_share(item["prediction_distribution"], "SELL") for item in items], dtype=float)
+        pred_hold = np.asarray([_label_share(item["prediction_distribution"], "HOLD") for item in items], dtype=float)
         result.append(
             {
                 "vocabulary": key[0],
@@ -994,19 +1003,52 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "temperature_selection": key[7],
                 "calibration_method": key[8],
                 "is_oracle": bool(key[9]),
-                "folds": int(len(items)),
+                "rows": int(len(items)),
+                "folds": int(len({item["outer_fold_id"] for item in items})),
+                "random_states": sorted({int(item["random_state"]) for item in items}),
                 "outer_val_macro_f1_mean": float(macro.mean()),
                 "outer_val_macro_f1_std": float(macro.std(ddof=0)),
                 "outer_val_macro_f1_worst": float(macro.min()),
+                "macro_f1_std_across_seeds": float(np.asarray(list(seed_means.values()), dtype=float).std(ddof=0)) if seed_means else 0.0,
+                "macro_f1_worst_seed_mean": float(min(seed_means.values())) if seed_means else float(macro.min()),
+                "macro_f1_worst_seed": str(min(seed_means, key=seed_means.get)) if seed_means else None,
+                "macro_f1_std_across_folds": float(np.asarray(list(fold_means.values()), dtype=float).std(ddof=0)) if fold_means else 0.0,
+                "macro_f1_worst_fold_mean": float(min(fold_means.values())) if fold_means else float(macro.min()),
+                "macro_f1_worst_fold": str(min(fold_means, key=fold_means.get)) if fold_means else None,
                 "buy_f1_mean": float(buy.mean()),
+                "buy_f1_std": float(buy.std(ddof=0)),
+                "buy_f1_std_across_seeds": float(np.asarray(list(buy_seed_means.values()), dtype=float).std(ddof=0)) if buy_seed_means else 0.0,
                 "sell_f1_mean": float(sell.mean()),
+                "sell_f1_std": float(sell.std(ddof=0)),
+                "sell_f1_std_across_seeds": float(np.asarray(list(sell_seed_means.values()), dtype=float).std(ddof=0)) if sell_seed_means else 0.0,
+                "hold_f1_mean": float(hold.mean()),
+                "hold_f1_std": float(hold.std(ddof=0)),
+                "hold_f1_std_across_seeds": float(np.asarray(list(hold_seed_means.values()), dtype=float).std(ddof=0)) if hold_seed_means else 0.0,
                 "buy_sell_mean_f1": float(buy_sell_mean.mean()),
                 "buy_sell_hmean_f1": float(buy_sell_hmean.mean()),
                 "min_buy_sell_f1": float(min_buy_sell.mean()),
                 "mean_action_rate": float(action_rate.mean()),
+                "action_rate_std": float(action_rate.std(ddof=0)),
+                "prediction_buy_share_mean": float(pred_buy.mean()),
+                "prediction_buy_share_std": float(pred_buy.std(ddof=0)),
+                "prediction_sell_share_mean": float(pred_sell.mean()),
+                "prediction_sell_share_std": float(pred_sell.std(ddof=0)),
+                "prediction_hold_share_mean": float(pred_hold.mean()),
+                "prediction_hold_share_std": float(pred_hold.std(ddof=0)),
             }
         )
     return sorted(result, key=lambda row: (row["is_oracle"], row["outer_val_macro_f1_mean"]), reverse=True)
+
+
+def _group_metric_mean(items: list[dict[str, Any]], group_key: str, metric_name: str) -> dict[Any, float]:
+    grouped: dict[Any, list[float]] = {}
+    for item in items:
+        grouped.setdefault(item[group_key], []).append(float(item["metrics"][metric_name]))
+    return {key: float(np.mean(values)) for key, values in grouped.items()}
+
+
+def _label_share(distribution: dict[str, Any], label: str) -> float:
+    return float(distribution.get(label, {}).get("share", 0.0))
 
 
 def select_best_honest(aggregates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1031,6 +1073,7 @@ def compact_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         compact.append(
             {
                 "outer_fold_id": row["outer_fold_id"],
+                "random_state": row["random_state"],
                 "vocabulary": row["vocabulary"],
                 "feature_set": row["feature_set"],
                 "classifier": row["classifier"],
@@ -1133,6 +1176,11 @@ def main() -> int:
     parser.add_argument("--action-rate-penalty", type=float, default=0.10)
     parser.add_argument("--min-regime-calibration-samples", type=int, default=300)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--random-states",
+        default="",
+        help="Comma-separated clusterer/classifier seeds. If omitted, --random-state is used.",
+    )
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--output-json", default="data/reports/sber_h1_action_nested_thresholds_rolling_20260515.json")
     parser.add_argument("--output-csv", default="data/reports/sber_h1_action_nested_thresholds_rolling_20260515.csv")
@@ -1156,51 +1204,55 @@ def main() -> int:
     temperature_grid = parse_float_list(args.temperature_grid)
     threshold_modes = parse_list(args.threshold_modes)
     selection_objectives = parse_list(args.selection_objectives) if args.selection_objectives else [args.selection_metric]
+    random_states = parse_int_list(args.random_states) if args.random_states else [int(args.random_state)]
     shape_cache = {config.shape_variant: candle_shape_matrix(df, variant=config.shape_variant)[0] for config in vocab_configs}
 
     rows: list[dict[str, Any]] = []
     print(f"Загружено свечей: {len(df)}; файл: {data_path}")
     print(f"Outer folds: {len(folds)}; режим: {args.fold_mode}; calibration_size={args.calibration_size}")
-    for fold in folds:
-        ranges = nested_range(fold, args.calibration_size)
-        print(
-            f"Fold {fold.fold_id}: inner=[{ranges.inner_train_start}:{ranges.inner_train_end}) "
-            f"calib=[{ranges.calibration_start}:{ranges.calibration_end}) val=[{fold.val_start}:{fold.val_end})"
-        )
-        for action_horizon in action_horizons:
-            labels, future_returns, threshold = make_action_labels(df, horizon=action_horizon, commission=0.0005)
-            print(f"  Action horizon {action_horizon}; label threshold={threshold:.6f}")
-            for vocab_config in vocab_configs:
-                print(f"    Vocabulary {vocab_config.label}")
-                rows.extend(
-                    run_nested_fold_vocab_horizon(
-                        df,
-                        shape_cache[vocab_config.shape_variant],
-                        labels,
-                        future_returns,
-                        ranges,
-                        vocab_config,
-                        feature_sets=feature_sets,
-                        classifiers=classifiers,
-                        class_weights=class_weights,
-                        context_size=args.context_size,
-                        action_window_size=args.action_window_size,
-                        action_horizon=action_horizon,
-                        lm_order=args.lm_order,
-                        lm_alpha=args.lm_alpha,
-                        lm_forecast_horizon=args.forecast_horizon,
-                        threshold_grid=threshold_grid,
-                        temperature_grid=temperature_grid,
-                        threshold_modes=threshold_modes,
-                        selection_metric=args.selection_metric,
-                        selection_objectives=selection_objectives,
-                        temperature_selection=args.temperature_selection,
-                        target_action_rate=args.target_action_rate,
-                        action_rate_penalty=args.action_rate_penalty,
-                        min_regime_calibration_samples=args.min_regime_calibration_samples,
-                        random_state=args.random_state,
+    print(f"Random states: {','.join(str(seed) for seed in random_states)}")
+    for random_state in random_states:
+        print(f"Seed {random_state}")
+        for fold in folds:
+            ranges = nested_range(fold, args.calibration_size)
+            print(
+                f"Fold {fold.fold_id}: inner=[{ranges.inner_train_start}:{ranges.inner_train_end}) "
+                f"calib=[{ranges.calibration_start}:{ranges.calibration_end}) val=[{fold.val_start}:{fold.val_end})"
+            )
+            for action_horizon in action_horizons:
+                labels, future_returns, threshold = make_action_labels(df, horizon=action_horizon, commission=0.0005)
+                print(f"  Action horizon {action_horizon}; label threshold={threshold:.6f}")
+                for vocab_config in vocab_configs:
+                    print(f"    Vocabulary {vocab_config.label}")
+                    rows.extend(
+                        run_nested_fold_vocab_horizon(
+                            df,
+                            shape_cache[vocab_config.shape_variant],
+                            labels,
+                            future_returns,
+                            ranges,
+                            vocab_config,
+                            feature_sets=feature_sets,
+                            classifiers=classifiers,
+                            class_weights=class_weights,
+                            context_size=args.context_size,
+                            action_window_size=args.action_window_size,
+                            action_horizon=action_horizon,
+                            lm_order=args.lm_order,
+                            lm_alpha=args.lm_alpha,
+                            lm_forecast_horizon=args.forecast_horizon,
+                            threshold_grid=threshold_grid,
+                            temperature_grid=temperature_grid,
+                            threshold_modes=threshold_modes,
+                            selection_metric=args.selection_metric,
+                            selection_objectives=selection_objectives,
+                            temperature_selection=args.temperature_selection,
+                            target_action_rate=args.target_action_rate,
+                            action_rate_penalty=args.action_rate_penalty,
+                            min_regime_calibration_samples=args.min_regime_calibration_samples,
+                            random_state=random_state,
+                        )
                     )
-                )
 
     aggregates = aggregate_rows(rows)
     best_honest = select_best_honest(aggregates)
@@ -1220,6 +1272,7 @@ def main() -> int:
         "temperature_grid": temperature_grid,
         "selection_objectives": selection_objectives,
         "temperature_selection": args.temperature_selection,
+        "random_states": random_states,
         "target_action_rate": args.target_action_rate,
         "action_rate_penalty": args.action_rate_penalty,
         "threshold_modes": threshold_modes,
