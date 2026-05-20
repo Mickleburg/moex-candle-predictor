@@ -262,3 +262,60 @@ python ml\scripts\sber_action_target_feature_research.py `
 ```
 
 Если full run подтвердит `continuous_regime + hist_gb` на 4 folds, следующий research step должен быть не test evaluation, а validation-only refinement continuous features/model regularization и target grid. Test уже использован для предыдущего frozen candidate и не должен участвовать в этом выборе.
+
+## 16. Полный локальный 4-fold validation run пользователя
+
+Пользователь локально запустил полный validation-only target/feature research на 4 rolling folds:
+
+```powershell
+python ml\scripts\sber_action_target_feature_research.py `
+  --target-modes return_threshold,volatility_adjusted_return,triple_barrier,neutral_zone_return `
+  --feature-sets lm_regime,continuous_regime,lm_regime_continuous `
+  --models logreg,hist_gb,extra_trees `
+  --vocab-config shape:gmm:20 `
+  --class-weights none,balanced,action_boost_1.2 `
+  --fold-mode rolling `
+  --train-size 12000 `
+  --val-size 3000 `
+  --step-size 3000 `
+  --max-folds 4 `
+  --calibration-size 2500 `
+  --no-test `
+  --output-json data/reports/sber_h1_target_feature_research_full_20260515.json `
+  --output-csv data/reports/sber_h1_target_feature_research_full_20260515.csv
+```
+
+Top validation rows:
+
+| rank | target | features | model | weight | macro-F1 | worst | BUY F1 | SELL F1 | HOLD F1 | action rate |
+|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | `return_threshold:h1` | `lm_regime_continuous` | `logreg` | `action_boost_1.2` | 0.4406 | 0.4371 | 0.4000 | 0.3342 | 0.5877 | 0.6008 |
+| 2 | `return_threshold:h1` | `continuous_regime` | `extra_trees` | `action_boost_1.2` | 0.4344 | 0.4216 | 0.3923 | 0.3225 | 0.5885 | 0.5694 |
+| 3 | `return_threshold:h1` | `continuous_regime` | `hist_gb` | `action_boost_1.2` | 0.4313 | 0.4150 | 0.3851 | 0.3585 | 0.5502 | 0.6231 |
+| 4 | `neutral_zone:h1:buy1.5:sell1.5` | `lm_regime_continuous` | `logreg` | `balanced` | 0.4293 | 0.4208 | 0.2747 | 0.2964 | 0.7168 | 0.3557 |
+| 5 | `triple_barrier:h3:w16:up1:down1` | `continuous_regime` | `extra_trees` | `none` | 0.4289 | 0.4170 | 0.4276 | 0.4441 | 0.4149 | 0.8018 |
+
+Главный вывод full run:
+
+```text
+new validation-primary candidate:
+return_threshold:h1 + lm_regime_continuous + logreg + action_boost_1.2
+macro-F1 = 0.4406
+```
+
+Сравнение со старой LM/action-threshold веткой:
+
+```text
+old LM validation zone: 0.4238-0.4265
+new full-run best:      0.4406
+```
+
+Что подтвердилось:
+
+- качество выросло не от очередного threshold tuning, а от связки `LM + continuous + regime`;
+- quick-гипотеза `continuous_regime + hist_gb` не подтвердилась как лучший full-run config: на 4 folds она просела до `0.4313`;
+- чистые continuous tree baselines полезны, но лучший результат дал `logreg` на объединенных признаках;
+- `triple_barrier` интересен по BUY/SELL F1 (`0.4276/0.4441`), но слишком action-heavy (`action_rate=0.8018`) и слаб по HOLD;
+- `neutral_zone` лучше сохраняет HOLD (`HOLD F1=0.7168`), но слабее по BUY/SELL.
+
+Test не использовался и не должен использоваться для выбора новых candidates. Следующий шаг - feature ablation, logreg regularization, return-threshold grid и узкая проверка triple-barrier без обращения к test.

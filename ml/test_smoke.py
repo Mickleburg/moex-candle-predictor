@@ -434,8 +434,20 @@ def test_target_feature_research_invariants():
         from src.data.fixtures import generate_mock_candles
         from src.nlp.action_features import make_continuous_past_features, standardize_by_train
         from src.nlp.targets import ActionTargetSpec, make_research_action_targets, past_return_volatility
+        from sber_action_target_feature_research import (
+            ModelConfig,
+            build_feature_set_matrices,
+            build_model_configs,
+            continuous_feature_mask,
+            fit_predict_model,
+        )
 
         df = generate_mock_candles(n=160, ticker="SBER", timeframe="1H", seed=42)
+        ret_lo = make_research_action_targets(df, ActionTargetSpec(mode="return_threshold", horizon=1, return_threshold_mult=0.75))
+        ret_hi = make_research_action_targets(df, ActionTargetSpec(mode="return_threshold", horizon=1, return_threshold_mult=1.5))
+        assert ret_lo.threshold < ret_hi.threshold
+        assert np.count_nonzero(ret_hi.labels == 1) >= np.count_nonzero(ret_lo.labels == 1)
+
         vol_target = make_research_action_targets(
             df,
             ActionTargetSpec(mode="volatility_adjusted_return", horizon=3, vol_window=16, vol_k=1.0),
@@ -455,12 +467,36 @@ def test_target_feature_research_invariants():
         assert features.shape[0] == len(df)
         assert features.shape[1] == len(names)
         assert np.all(np.isfinite(features))
+        full_mask = continuous_feature_mask("lm_regime_continuous", names)
+        no_session = continuous_feature_mask("lm_regime_continuous_no_session", names)
+        no_volume = continuous_feature_mask("lm_regime_continuous_no_volume", names)
+        assert full_mask.sum() == len(names)
+        assert no_session.sum() < full_mask.sum()
+        assert no_volume.sum() < full_mask.sum()
 
         train_idx = np.arange(32, 100)
         val_idx = np.arange(100, 130)
         X_val = standardize_by_train(features, train_idx, val_idx)
         assert X_val.shape == (len(val_idx), features.shape[1])
         assert np.all(np.isfinite(X_val))
+
+        train_small = np.arange(32, 80)
+        val_small = np.arange(80, 110)
+        X_train_small = standardize_by_train(features, train_small, train_small)
+        X_val_small = standardize_by_train(features, train_small, val_small)
+        y_train_small = ret_lo.labels[train_small]
+        valid = y_train_small >= 0
+        pred, proba, diag = fit_predict_model(
+            X_train_small[valid],
+            y_train_small[valid],
+            X_val_small,
+            model_config=ModelConfig("hist_gb", "hist_gb:test", {"max_iter": 5, "max_leaf_nodes": 7}),
+            class_weight="balanced",
+            random_state=42,
+        )
+        assert pred.shape == (len(val_small),)
+        assert proba is not None and np.allclose(proba.sum(axis=1), 1.0)
+        assert isinstance(diag, dict)
 
         df_changed = df.copy()
         df_changed.loc[120:, "close"] = df_changed.loc[120:, "close"] * 3.0
@@ -470,6 +506,55 @@ def test_target_feature_research_invariants():
 
         features_after, _ = make_continuous_past_features(df_changed)
         assert np.allclose(features[:100], features_after[:100])
+        class Args:
+            models = "logreg"
+            logreg_c_values = "0.3,1.0"
+            logreg_penalties = "l1,l2"
+            logreg_solvers = "lbfgs,liblinear"
+            hist_gb_learning_rates = "0.05"
+            hist_gb_max_leaf_nodes = "31"
+            hist_gb_l2 = "0.0"
+            hist_gb_max_iter = "10"
+            extra_trees_max_depths = "none"
+            extra_trees_min_samples_leaf = "5"
+            extra_trees_max_features = "sqrt"
+            extra_trees_n_estimators = 10
+
+        configs = build_model_configs(Args())
+        labels = {config.label for config in configs}
+        assert "logreg:C=0.3:penalty=l1:solver=liblinear" in labels
+        assert "logreg:C=0.3:penalty=l1:solver=lbfgs" not in labels
+
+        lm_train = np.zeros((4, 18))
+        regime_train = np.zeros((4, 17))
+        cont_train = np.zeros((4, len(names)))
+        X_a, _, _ = build_feature_set_matrices(
+            "lm_regime_continuous",
+            lm_train=lm_train,
+            lm_calib=lm_train,
+            lm_val=lm_train,
+            regime_train=regime_train,
+            regime_calib=regime_train,
+            regime_val=regime_train,
+            cont_train=cont_train,
+            cont_calib=cont_train,
+            cont_val=cont_train,
+            continuous_names=names,
+        )
+        X_b, _, _ = build_feature_set_matrices(
+            "lm_regime_continuous_no_session",
+            lm_train=lm_train,
+            lm_calib=lm_train,
+            lm_val=lm_train,
+            regime_train=regime_train,
+            regime_calib=regime_train,
+            regime_val=regime_train,
+            cont_train=cont_train,
+            cont_calib=cont_train,
+            cont_val=cont_train,
+            continuous_names=names,
+        )
+        assert X_b.shape[1] < X_a.shape[1]
         print("  PASS Alternative targets and continuous features")
         return True
     except Exception as exc:

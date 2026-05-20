@@ -7,7 +7,7 @@ import json
 import sys
 import time
 import warnings
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -60,9 +60,19 @@ from sber_action_nested_thresholds import (
 )
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """Resolved model config for compact CLI grids."""
+
+    name: str
+    label: str
+    params: dict[str, Any]
+
+
 def build_target_specs(args: argparse.Namespace) -> list[ActionTargetSpec]:
     specs: list[ActionTargetSpec] = []
     action_horizons = parse_int_list(args.action_horizons)
+    return_threshold_mults = parse_float_list(args.return_threshold_mults)
     vol_windows = parse_int_list(args.vol_windows)
     vol_ks = parse_float_list(args.vol_ks)
     barrier_horizons = parse_int_list(args.barrier_horizons)
@@ -74,13 +84,17 @@ def build_target_specs(args: argparse.Namespace) -> list[ActionTargetSpec]:
     for mode in parse_list(args.target_modes):
         if mode == "return_threshold":
             for horizon in action_horizons:
-                specs.append(ActionTargetSpec(mode=mode, horizon=horizon))
+                for threshold_mult in return_threshold_mults:
+                    specs.append(ActionTargetSpec(mode=mode, horizon=horizon, return_threshold_mult=threshold_mult))
         elif mode == "volatility_adjusted_return":
             for horizon in action_horizons:
                 for window in vol_windows:
                     for vol_k in vol_ks:
                         specs.append(ActionTargetSpec(mode=mode, horizon=horizon, vol_window=window, vol_k=vol_k))
         elif mode == "triple_barrier":
+            if args.barrier_k_values:
+                barrier_up_ks = parse_float_list(args.barrier_k_values)
+                barrier_down_ks = parse_float_list(args.barrier_k_values)
             for horizon in barrier_horizons:
                 for window in barrier_vol_windows:
                     for up_k in barrier_up_ks:
@@ -112,7 +126,91 @@ def build_target_specs(args: argparse.Namespace) -> list[ActionTargetSpec]:
 
 
 def uses_lm_features(feature_sets: list[str]) -> bool:
-    return any(name in {"lm_regime", "lm_regime_continuous"} for name in feature_sets)
+    return any(name.startswith("lm_regime") and not name.endswith("_no_lm") for name in feature_sets)
+
+
+def build_model_configs(args: argparse.Namespace) -> list[ModelConfig]:
+    configs: list[ModelConfig] = []
+    for model in parse_list(args.models):
+        model_lower = model.lower()
+        if model_lower == "logreg":
+            penalties = parse_list(args.logreg_penalties)
+            solvers = parse_list(args.logreg_solvers)
+            for c_value in parse_float_list(args.logreg_c_values):
+                for penalty in penalties:
+                    for solver in solvers:
+                        if not _valid_logreg_combo(penalty, solver):
+                            continue
+                        label = f"logreg:C={c_value:g}:penalty={penalty}:solver={solver}"
+                        configs.append(
+                            ModelConfig(
+                                name="logreg",
+                                label=label,
+                                params={"C": float(c_value), "penalty": penalty, "solver": solver, "max_iter": 2000},
+                            )
+                        )
+        elif model_lower == "hist_gb":
+            for learning_rate in parse_float_list(args.hist_gb_learning_rates):
+                for max_leaf_nodes in parse_int_list(args.hist_gb_max_leaf_nodes):
+                    for l2 in parse_float_list(args.hist_gb_l2):
+                        for max_iter in parse_int_list(args.hist_gb_max_iter):
+                            configs.append(
+                                ModelConfig(
+                                    name="hist_gb",
+                                    label=(
+                                        f"hist_gb:iter={max_iter}:lr={learning_rate:g}:"
+                                        f"leaf={max_leaf_nodes}:l2={l2:g}"
+                                    ),
+                                    params={
+                                        "max_iter": int(max_iter),
+                                        "learning_rate": float(learning_rate),
+                                        "max_leaf_nodes": int(max_leaf_nodes),
+                                        "l2_regularization": float(l2),
+                                    },
+                                )
+                            )
+        elif model_lower == "extra_trees":
+            for max_depth in _parse_optional_int_list(args.extra_trees_max_depths):
+                for min_leaf in parse_int_list(args.extra_trees_min_samples_leaf):
+                    for max_features in parse_list(args.extra_trees_max_features):
+                        label_depth = "none" if max_depth is None else str(max_depth)
+                        configs.append(
+                            ModelConfig(
+                                name="extra_trees",
+                                label=f"extra_trees:depth={label_depth}:leaf={min_leaf}:maxfeat={max_features}",
+                                params={
+                                    "n_estimators": int(args.extra_trees_n_estimators),
+                                    "max_depth": max_depth,
+                                    "min_samples_leaf": int(min_leaf),
+                                    "max_features": _parse_max_features(max_features),
+                                    "n_jobs": -1,
+                                },
+                            )
+                        )
+        else:
+            configs.append(ModelConfig(name=model_lower, label=model_lower, params={}))
+    if not configs:
+        raise ValueError("No valid model configs were generated")
+    return configs
+
+
+def _valid_logreg_combo(penalty: str, solver: str) -> bool:
+    if penalty == "l1":
+        return solver in {"liblinear", "saga"}
+    if penalty == "l2":
+        return solver in {"lbfgs", "liblinear", "saga"}
+    return False
+
+
+def _parse_optional_int_list(value: str) -> list[int | None]:
+    result: list[int | None] = []
+    for item in parse_list(value):
+        result.append(None if item.lower() in {"none", "null"} else int(item))
+    return result
+
+
+def _parse_max_features(value: str) -> str | float:
+    return value if value in {"sqrt", "log2"} else float(value)
 
 
 def build_feature_set_matrices(
@@ -127,40 +225,130 @@ def build_feature_set_matrices(
     cont_train: np.ndarray,
     cont_calib: np.ndarray,
     cont_val: np.ndarray,
+    continuous_names: list[str],
 ) -> tuple[Any, Any, Any]:
-    if feature_set == "continuous_regime":
-        return cont_train, cont_calib, cont_val
-    if feature_set == "lm_regime":
+    base_feature_set = _base_feature_set(feature_set)
+    cont_train_f, cont_calib_f, cont_val_f = _filter_continuous_features(
+        feature_set, cont_train, cont_calib, cont_val, continuous_names
+    )
+    if base_feature_set in {"continuous_regime", "lm_regime_continuous_no_lm"}:
+        return cont_train_f, cont_calib_f, cont_val_f
+    if base_feature_set == "lm_regime":
         if lm_train is None or regime_train is None:
             raise ValueError("lm_regime requires LM features")
+        reg_train, reg_calib, reg_val = _filter_regime_features(feature_set, regime_train, regime_calib, regime_val)
         scalar_width = 18
         return (
-            np.hstack([lm_train[:, :scalar_width], regime_train]),
-            np.hstack([lm_calib[:, :scalar_width], regime_calib]),
-            np.hstack([lm_val[:, :scalar_width], regime_val]),
+            np.hstack([lm_train[:, :scalar_width], reg_train]),
+            np.hstack([lm_calib[:, :scalar_width], reg_calib]),
+            np.hstack([lm_val[:, :scalar_width], reg_val]),
         )
-    if feature_set == "lm_regime_continuous":
+    if base_feature_set == "lm_regime_continuous":
         if lm_train is None or regime_train is None:
             raise ValueError("lm_regime_continuous requires LM features")
+        reg_train, reg_calib, reg_val = _filter_regime_features(feature_set, regime_train, regime_calib, regime_val)
         scalar_width = 18
         return (
-            np.hstack([lm_train[:, :scalar_width], regime_train, cont_train]),
-            np.hstack([lm_calib[:, :scalar_width], regime_calib, cont_calib]),
-            np.hstack([lm_val[:, :scalar_width], regime_val, cont_val]),
+            np.hstack([lm_train[:, :scalar_width], reg_train, cont_train_f]),
+            np.hstack([lm_calib[:, :scalar_width], reg_calib, cont_calib_f]),
+            np.hstack([lm_val[:, :scalar_width], reg_val, cont_val_f]),
         )
     raise ValueError(f"Unsupported feature set: {feature_set}")
+
+
+def _base_feature_set(feature_set: str) -> str:
+    if feature_set.startswith("lm_regime_continuous_no_"):
+        return "lm_regime_continuous_no_lm" if feature_set.endswith("_no_lm") else "lm_regime_continuous"
+    if feature_set.startswith("continuous_no_"):
+        return "continuous_regime"
+    return feature_set
+
+
+def _filter_continuous_features(
+    feature_set: str,
+    train: np.ndarray,
+    calib: np.ndarray,
+    val: np.ndarray,
+    names: list[str],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    keep = continuous_feature_mask(feature_set, names)
+    return train[:, keep], calib[:, keep], val[:, keep]
+
+
+def continuous_feature_mask(feature_set: str, names: list[str]) -> np.ndarray:
+    """Return selected continuous columns for an ablation feature set."""
+
+    remove_group = _removed_group(feature_set)
+    keep = np.ones(len(names), dtype=bool)
+    if remove_group is None:
+        return keep
+    for idx, name in enumerate(names):
+        if _continuous_group(name) == remove_group:
+            keep[idx] = False
+    if not np.any(keep):
+        raise ValueError(f"Ablation removed all continuous features: {feature_set}")
+    return keep
+
+
+def _removed_group(feature_set: str) -> str | None:
+    for suffix, group in {
+        "_no_session": "session",
+        "_no_volume": "volume",
+        "_no_returns": "returns",
+        "_no_volatility": "volatility",
+        "_no_candle_shape": "candle_shape",
+    }.items():
+        if feature_set.endswith(suffix):
+            return group
+    return None
+
+
+def _continuous_group(name: str) -> str:
+    if name.startswith("ret_") or name.startswith("ema_distance_"):
+        return "returns"
+    if name.startswith("vol_") or name.startswith("range_mean_"):
+        return "volatility"
+    if "volume" in name:
+        return "volume"
+    if name.startswith(("hour_", "dow_", "large_time_gap")):
+        return "session"
+    if name in {"body_signed", "body_abs", "range_to_open", "upper_shadow", "lower_shadow", "close_position_in_candle"}:
+        return "candle_shape"
+    return "other"
+
+
+def _filter_regime_features(
+    feature_set: str,
+    train: np.ndarray,
+    calib: np.ndarray,
+    val: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    remove_group = _removed_group(feature_set)
+    if remove_group is None:
+        return train, calib, val
+    keep = np.ones(train.shape[1], dtype=bool)
+    if remove_group == "volatility":
+        keep[0:3] = False
+    elif remove_group == "returns":
+        keep[3:6] = False
+    elif remove_group == "session":
+        keep[6:9] = False
+    if not np.any(keep):
+        raise ValueError(f"Ablation removed all regime features: {feature_set}")
+    return train[:, keep], calib[:, keep], val[:, keep]
 
 
 def run_fold_target(
     df: pd.DataFrame,
     shape_matrix: np.ndarray,
     continuous_matrix: np.ndarray,
+    continuous_names: list[str],
     target_spec: ActionTargetSpec,
     ranges: Any,
     vocab_config: Any,
     *,
     feature_sets: list[str],
-    models: list[str],
+    models: list[ModelConfig],
     class_weights: list[str | None],
     context_size: int,
     action_window_size: int,
@@ -279,14 +467,15 @@ def run_fold_target(
             cont_train=cont_train,
             cont_calib=cont_calib,
             cont_val=cont_val,
+            continuous_names=continuous_names,
         )
-        for model_name in models:
+        for model_config in models:
             for class_weight in class_weights:
-                pred, proba = fit_predict_model(
+                pred, proba, model_diagnostics = fit_predict_model(
                     X_train,
                     samples["inner_train"].y,
                     X_val,
-                    model_name=model_name,
+                    model_config=model_config,
                     class_weight=class_weight,
                     random_state=random_state,
                 )
@@ -302,7 +491,9 @@ def run_fold_target(
                         "target_label": target_spec.label,
                         "target_params": asdict(target_spec),
                         "feature_set": feature_set,
-                        "model": model_name,
+                        "model": model_config.label,
+                        "model_name": model_config.name,
+                        "model_params": model_config.params,
                         "class_weight": "none" if class_weight is None else str(class_weight),
                         "fold_id": int(ranges.outer_fold.fold_id),
                         "random_state": int(random_state),
@@ -314,6 +505,7 @@ def run_fold_target(
                         "prediction_distribution": label_distribution(pred),
                         "metrics": metrics,
                         "has_predict_proba": proba is not None,
+                        "model_diagnostics": model_diagnostics,
                         "target_analysis": target_analysis(target.labels, target.future_returns, target.metadata),
                     }
                 )
@@ -325,25 +517,23 @@ def fit_predict_model(
     y_train: np.ndarray,
     X_val: Any,
     *,
-    model_name: str,
+    model_config: ModelConfig,
     class_weight: str | None,
     random_state: int,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    params: dict[str, Any] = {}
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
+    params: dict[str, Any] = dict(model_config.params)
     fit_kwargs: dict[str, Any] = {}
     resolved_weight = resolve_class_weight(class_weight)
-    model_lower = model_name.lower()
+    model_lower = model_config.name.lower()
     if model_lower in {"logreg", "ridge", "extra_trees", "lightgbm"}:
         params["class_weight"] = resolved_weight
-    if model_lower == "extra_trees":
-        params.update({"n_estimators": 200, "min_samples_leaf": 2, "n_jobs": -1})
     if model_lower == "hist_gb":
         fit_kwargs["sample_weight"] = sample_weights(y_train, resolved_weight)
 
-    classifier = build_classifier(ClassifierSpec(model_name, params), random_state=random_state)
+    classifier = build_classifier(ClassifierSpec(model_config.name, params), random_state=random_state)
     fit_train = X_train
     fit_val = X_val
-    if classifier_requires_dense(ClassifierSpec(model_name)):
+    if classifier_requires_dense(ClassifierSpec(model_config.name)):
         fit_train = maybe_dense(fit_train)
         fit_val = maybe_dense(fit_val)
     with warnings.catch_warnings():
@@ -354,7 +544,13 @@ def fit_predict_model(
             classifier.fit(fit_train, y_train, sample_weight=fit_kwargs["sample_weight"])
     pred = classifier.predict(fit_val)
     proba = _proper_action_probabilities(classifier, fit_val)
-    return np.asarray(pred, dtype=int), proba
+    diagnostics: dict[str, Any] = {}
+    coef = getattr(classifier, "coef_", None)
+    if coef is not None:
+        coef_arr = np.asarray(coef, dtype=float)
+        diagnostics["coefficient_sparsity"] = float(np.mean(np.abs(coef_arr) < 1e-12))
+        diagnostics["n_coefficients"] = int(coef_arr.size)
+    return np.asarray(pred, dtype=int), proba, diagnostics
 
 
 def sample_weights(y: np.ndarray, class_weight: str | dict[int, float] | None) -> np.ndarray | None:
@@ -490,16 +686,29 @@ def main() -> int:
     parser.add_argument("--data", default="")
     parser.add_argument("--target-modes", default="return_threshold,volatility_adjusted_return")
     parser.add_argument("--action-horizons", default="1")
+    parser.add_argument("--return-threshold-mults", default="1.0")
     parser.add_argument("--vol-windows", default="16")
     parser.add_argument("--vol-ks", default="1.0")
     parser.add_argument("--barrier-horizons", default="3")
     parser.add_argument("--barrier-vol-windows", default="16")
     parser.add_argument("--barrier-up-ks", default="1.0")
     parser.add_argument("--barrier-down-ks", default="1.0")
+    parser.add_argument("--barrier-k-values", default="")
     parser.add_argument("--buy-threshold-mults", default="1.5")
     parser.add_argument("--sell-threshold-mults", default="1.5")
     parser.add_argument("--feature-sets", default="lm_regime,continuous_regime,lm_regime_continuous")
     parser.add_argument("--models", default="logreg,hist_gb")
+    parser.add_argument("--logreg-c-values", default="1.0")
+    parser.add_argument("--logreg-penalties", default="l2")
+    parser.add_argument("--logreg-solvers", default="lbfgs")
+    parser.add_argument("--hist-gb-max-iter", default="200")
+    parser.add_argument("--hist-gb-learning-rates", default="0.05")
+    parser.add_argument("--hist-gb-max-leaf-nodes", default="31")
+    parser.add_argument("--hist-gb-l2", default="0.0")
+    parser.add_argument("--extra-trees-n-estimators", type=int, default=300)
+    parser.add_argument("--extra-trees-max-depths", default="none")
+    parser.add_argument("--extra-trees-min-samples-leaf", default="5")
+    parser.add_argument("--extra-trees-max-features", default="sqrt")
     parser.add_argument("--vocab-config", default="shape:gmm:20")
     parser.add_argument("--class-weights", default="balanced,action_boost_1.2")
     parser.add_argument("--context-size", type=int, default=16)
@@ -534,7 +743,7 @@ def main() -> int:
     vocab_config = parse_vocab_configs(args.vocab_config)[0]
     target_specs = build_target_specs(args)
     feature_sets = parse_list(args.feature_sets)
-    models = parse_list(args.models)
+    models = build_model_configs(args)
     class_weights = parse_class_weights(args.class_weights)
     shape_matrix = candle_shape_matrix(df, variant=vocab_config.shape_variant)[0]
     continuous_matrix, continuous_names = make_continuous_past_features(df)
@@ -555,6 +764,7 @@ def main() -> int:
                     df,
                     shape_matrix,
                     continuous_matrix,
+                    continuous_names,
                     target_spec,
                     ranges,
                     vocab_config,
@@ -581,7 +791,7 @@ def main() -> int:
         "vocab_config": asdict(vocab_config),
         "target_specs": [asdict(spec) for spec in target_specs],
         "feature_sets": feature_sets,
-        "models": models,
+        "models": [asdict(model) for model in models],
         "class_weights": ["none" if item is None else item for item in class_weights],
         "continuous_feature_names": continuous_names,
         "fold_results": rows,

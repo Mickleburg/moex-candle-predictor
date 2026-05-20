@@ -25,6 +25,7 @@ class ActionTargetSpec:
     barrier_vol_window: int = 16
     barrier_up_k: float = 1.0
     barrier_down_k: float = 1.0
+    return_threshold_mult: float = 1.0
     buy_threshold_mult: float = 1.0
     sell_threshold_mult: float = 1.0
     params: dict[str, Any] = field(default_factory=dict)
@@ -33,7 +34,7 @@ class ActionTargetSpec:
     def label(self) -> str:
         mode = self.mode.lower()
         if mode == "return_threshold":
-            return f"return_threshold:h{self.horizon}"
+            return f"return_threshold:h{self.horizon}:m{self.return_threshold_mult:g}"
         if mode == "volatility_adjusted_return":
             return f"vol_adj:h{self.horizon}:w{self.vol_window}:k{self.vol_k:g}"
         if mode == "triple_barrier":
@@ -69,18 +70,18 @@ def make_research_action_targets(df: pd.DataFrame, spec: ActionTargetSpec) -> Ac
 
     mode = spec.mode.lower()
     if mode == "return_threshold":
-        labels, future_returns, threshold = make_action_labels(
-            df,
-            horizon=spec.horizon,
-            commission=spec.commission,
-            min_return=spec.min_return,
-        )
+        labels, future_returns, threshold = _return_threshold(df, spec)
         return ActionTargetResult(
             labels=labels,
             future_returns=future_returns,
             effective_horizon=spec.horizon,
             threshold=float(threshold),
-            metadata={"mode": mode, "base_threshold": float(threshold)},
+            metadata={
+                "mode": mode,
+                "base_threshold": float(2.0 * float(spec.commission)),
+                "return_threshold_mult": float(spec.return_threshold_mult),
+                "threshold": float(threshold),
+            },
         )
     if mode == "volatility_adjusted_return":
         return _volatility_adjusted_return(df, spec)
@@ -89,6 +90,18 @@ def make_research_action_targets(df: pd.DataFrame, spec: ActionTargetSpec) -> Ac
     if mode == "neutral_zone_return":
         return _neutral_zone_return(df, spec)
     raise ValueError(f"Unsupported target mode: {spec.mode}")
+
+
+def _return_threshold(df: pd.DataFrame, spec: ActionTargetSpec) -> tuple[np.ndarray, np.ndarray, float]:
+    close = df["close"].astype(float)
+    future_returns = (close.shift(-spec.horizon) / close - 1.0).to_numpy(dtype=float)
+    threshold = max(float(spec.min_return), 2.0 * float(spec.commission) * float(spec.return_threshold_mult))
+    labels = np.full(len(df), -1, dtype=int)
+    valid = np.isfinite(future_returns)
+    labels[valid] = 1
+    labels[valid & (future_returns > threshold)] = 2
+    labels[valid & (future_returns < -threshold)] = 0
+    return labels, future_returns.astype(float), float(threshold)
 
 
 def past_return_volatility(df: pd.DataFrame, window: int) -> np.ndarray:
