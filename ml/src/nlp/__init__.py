@@ -13,7 +13,7 @@ from .candles import (
     make_sentence_samples,
     split_ranges,
 )
-from .action_features import LMActionFeatures, make_lm_action_features
+from .action_features import LMActionFeatures, make_continuous_past_features, make_lm_action_features, standardize_by_train
 from .classifiers import ClassifierSpec, build_classifier
 from .clustering import CandleClusterer, ClusterSpec
 from .pipeline import ExperimentConfig, run_experiment
@@ -37,6 +37,7 @@ from .word_lm import (
     transition_quality_metrics,
     word_distribution_metrics,
 )
+from .targets import ActionTargetResult, ActionTargetSpec, make_research_action_targets, past_return_volatility, target_analysis
 
 __all__ = [
     "ACTION_LABELS",
@@ -45,8 +46,10 @@ __all__ = [
     "candle_shape_matrix",
     "label_distribution",
     "make_action_labels",
+    "make_continuous_past_features",
     "make_lm_action_features",
     "make_sentence_samples",
+    "standardize_by_train",
     "split_ranges",
     "ClassifierSpec",
     "build_classifier",
@@ -71,4 +74,9 @@ __all__ = [
     "transition_entropy",
     "transition_quality_metrics",
     "word_distribution_metrics",
+    "ActionTargetResult",
+    "ActionTargetSpec",
+    "make_research_action_targets",
+    "past_return_volatility",
+    "target_analysis",
 ]

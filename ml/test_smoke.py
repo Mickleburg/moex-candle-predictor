@@ -423,6 +423,60 @@ def test_lm_action_feature_invariants():
         return False
 
 
+def test_target_feature_research_invariants():
+    """Test alternative targets and continuous features stay past-only/aligned."""
+
+    print("\nTesting target/continuous feature research invariants...")
+
+    try:
+        import numpy as np
+
+        from src.data.fixtures import generate_mock_candles
+        from src.nlp.action_features import make_continuous_past_features, standardize_by_train
+        from src.nlp.targets import ActionTargetSpec, make_research_action_targets, past_return_volatility
+
+        df = generate_mock_candles(n=160, ticker="SBER", timeframe="1H", seed=42)
+        vol_target = make_research_action_targets(
+            df,
+            ActionTargetSpec(mode="volatility_adjusted_return", horizon=3, vol_window=16, vol_k=1.0),
+        )
+        assert vol_target.effective_horizon == 3
+        assert np.all(vol_target.labels[-3:] == -1)
+        assert "past_volatility" not in make_continuous_past_features.__code__.co_varnames
+
+        barrier = make_research_action_targets(
+            df,
+            ActionTargetSpec(mode="triple_barrier", barrier_horizon=6, barrier_vol_window=16, barrier_up_k=1.0, barrier_down_k=1.0),
+        )
+        assert barrier.effective_horizon == 6
+        assert np.all(barrier.labels[-6:] == -1)
+
+        features, names = make_continuous_past_features(df)
+        assert features.shape[0] == len(df)
+        assert features.shape[1] == len(names)
+        assert np.all(np.isfinite(features))
+
+        train_idx = np.arange(32, 100)
+        val_idx = np.arange(100, 130)
+        X_val = standardize_by_train(features, train_idx, val_idx)
+        assert X_val.shape == (len(val_idx), features.shape[1])
+        assert np.all(np.isfinite(X_val))
+
+        df_changed = df.copy()
+        df_changed.loc[120:, "close"] = df_changed.loc[120:, "close"] * 3.0
+        vol_before = past_return_volatility(df, 16)
+        vol_after = past_return_volatility(df_changed, 16)
+        assert np.allclose(vol_before[:100], vol_after[:100])
+
+        features_after, _ = make_continuous_past_features(df_changed)
+        assert np.allclose(features[:100], features_after[:100])
+        print("  PASS Alternative targets and continuous features")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Target/feature research invariant test failed: {exc}")
+        return False
+
+
 def test_action_lm_robustness_invariants():
     """Test action LM robustness helpers stay leakage-safe on mock data."""
 
@@ -801,6 +855,7 @@ def main():
         ("Walk-forward Invariants", test_walk_forward_invariants()),
         ("Word LM Invariants", test_word_lm_invariants()),
         ("LM Action Features", test_lm_action_feature_invariants()),
+        ("Target/Feature Research", test_target_feature_research_invariants()),
         ("Action LM Robustness", test_action_lm_robustness_invariants()),
         ("Nested Thresholds", test_nested_threshold_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),

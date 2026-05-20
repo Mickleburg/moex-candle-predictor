@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
+import pandas as pd
 
 from .word_lm import NGramBackoffLanguageModel
 
@@ -134,3 +135,95 @@ def _rollout_mean_entropy(model: NGramBackoffLanguageModel, context: np.ndarray,
         entropies.append(float(-np.sum(positive * np.log(positive))))
         running.append(int(np.argmax(proba)))
     return float(np.mean(entropies)) if entropies else 0.0
+
+
+def make_continuous_past_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
+    """Build leakage-safe continuous features known at the close of candle t."""
+
+    required = ["open", "high", "low", "close", "volume"]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    open_ = df["open"].astype(float)
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
+    volume = df["volume"].astype(float)
+    safe_open = open_.where(open_.abs() > 1e-12, np.nan)
+    safe_close = close.where(close.abs() > 1e-12, np.nan)
+    candle_range = (high - low).where((high - low).abs() > 1e-12, np.nan)
+    ret1 = close.pct_change()
+
+    features: dict[str, pd.Series] = {}
+    for period in (1, 3, 6, 12, 24):
+        features[f"ret_{period}"] = close.pct_change(period)
+    for window in (8, 16, 32):
+        features[f"vol_{window}"] = ret1.rolling(window=window, min_periods=max(2, min(4, window))).std()
+        features[f"range_mean_{window}"] = ((high - low) / safe_close).rolling(
+            window=window, min_periods=max(2, min(4, window))
+        ).mean()
+        ema = close.ewm(span=window, adjust=False).mean()
+        features[f"ema_distance_{window}"] = (close - ema) / ema.where(ema.abs() > 1e-12, np.nan)
+
+    body_signed = (close - open_) / safe_open
+    features["body_signed"] = body_signed
+    features["body_abs"] = body_signed.abs()
+    features["range_to_open"] = (high - low) / safe_open
+    features["upper_shadow"] = (high - pd.concat([open_, close], axis=1).max(axis=1)) / safe_open
+    features["lower_shadow"] = (pd.concat([open_, close], axis=1).min(axis=1) - low) / safe_open
+    features["close_position_in_candle"] = (close - low) / candle_range
+
+    prev_volume_mean = volume.shift(1).rolling(window=20, min_periods=4).mean()
+    prev_volume_std = volume.shift(1).rolling(window=20, min_periods=4).std()
+    features["volume_ratio_20"] = volume / prev_volume_mean.where(prev_volume_mean.abs() > 1e-12, np.nan)
+    features["volume_z_20"] = (volume - prev_volume_mean) / prev_volume_std.where(prev_volume_std.abs() > 1e-12, np.nan)
+
+    if "begin" in df.columns:
+        begin = pd.to_datetime(df["begin"])
+        hour = begin.dt.hour.astype(float)
+        dow = begin.dt.dayofweek.astype(float)
+        features["hour_sin"] = np.sin(2.0 * np.pi * hour / 24.0)
+        features["hour_cos"] = np.cos(2.0 * np.pi * hour / 24.0)
+        features["dow_sin"] = np.sin(2.0 * np.pi * dow / 7.0)
+        features["dow_cos"] = np.cos(2.0 * np.pi * dow / 7.0)
+        hour_gap = begin.diff().dt.total_seconds().div(3600.0)
+        features["large_time_gap_flag"] = (hour_gap > 3.0).astype(float)
+    else:
+        zeros = pd.Series(np.zeros(len(df), dtype=float), index=df.index)
+        features["hour_sin"] = zeros
+        features["hour_cos"] = zeros
+        features["dow_sin"] = zeros
+        features["dow_cos"] = zeros
+        features["large_time_gap_flag"] = zeros
+
+    names = list(features)
+    matrix = pd.DataFrame(features, index=df.index)[names].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    X = matrix.to_numpy(dtype=float)
+    if not np.all(np.isfinite(X)):
+        raise ValueError("Continuous past features contain non-finite values")
+    return X, names
+
+
+def standardize_by_train(
+    feature_matrix: np.ndarray,
+    train_indices: Sequence[int],
+    target_indices: Sequence[int],
+) -> np.ndarray:
+    """Select target rows and standardize them using train target rows only."""
+
+    X = np.asarray(feature_matrix, dtype=float)
+    train_indices = np.asarray(train_indices, dtype=int)
+    target_indices = np.asarray(target_indices, dtype=int)
+    train = X[train_indices]
+    target = X[target_indices]
+    mean = np.nanmean(train, axis=0)
+    std = np.nanstd(train, axis=0)
+    mean = np.nan_to_num(mean, nan=0.0, posinf=0.0, neginf=0.0)
+    std = np.nan_to_num(std, nan=1.0, posinf=1.0, neginf=1.0)
+    std = np.where(std < 1e-12, 1.0, std)
+    result = (target - mean) / std
+    result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+    if not np.all(np.isfinite(result)):
+        raise ValueError("Standardized continuous features contain non-finite values")
+    return result
