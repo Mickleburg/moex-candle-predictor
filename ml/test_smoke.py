@@ -433,13 +433,16 @@ def test_target_feature_research_invariants():
 
         from src.data.fixtures import generate_mock_candles
         from src.nlp.action_features import make_continuous_past_features, standardize_by_train
-        from src.nlp.targets import ActionTargetSpec, make_research_action_targets, past_return_volatility
+        from src.nlp.targets import ActionTargetSpec, make_research_action_targets, past_return_volatility, triple_barrier_details
         from sber_action_target_feature_research import (
             ModelConfig,
+            aggregate_rows,
             build_feature_set_matrices,
             build_model_configs,
             continuous_feature_mask,
+            economic_sanity,
             fit_predict_model,
+            target_audit_summary,
         )
 
         df = generate_mock_candles(n=160, ticker="SBER", timeframe="1H", seed=42)
@@ -462,6 +465,17 @@ def test_target_feature_research_invariants():
         )
         assert barrier.effective_horizon == 6
         assert np.all(barrier.labels[-6:] == -1)
+        barrier_spec = ActionTargetSpec(mode="triple_barrier", barrier_horizon=6, barrier_vol_window=16, barrier_up_k=1.0, barrier_down_k=1.0)
+        details = triple_barrier_details(df, barrier_spec)
+        idx = np.arange(32, 60)
+        assert np.allclose(details["upper_barrier"][idx], details["close"][idx] * (1.0 + details["upper_return"][idx]))
+        assert np.allclose(details["lower_barrier"][idx], details["close"][idx] * (1.0 - details["lower_return"][idx]))
+        assert np.allclose(details["past_volatility"][:80], triple_barrier_details(df.iloc[:100].copy(), barrier_spec)["past_volatility"][:80])
+        audit = target_audit_summary(details, idx, barrier.labels[idx])
+        assert "share_upper_first" in audit and "mean_mfe" in audit["by_label"]["BUY"]
+        econ = economic_sanity(barrier.labels[idx], barrier.labels[idx], idx, barrier.future_returns, details)
+        assert "mean_realized_return_by_prediction" in econ
+        assert "predicted_action_barrier_hit_rate" in econ
 
         features, names = make_continuous_past_features(df)
         assert features.shape[0] == len(df)
@@ -555,6 +569,54 @@ def test_target_feature_research_invariants():
             continuous_names=names,
         )
         assert X_b.shape[1] < X_a.shape[1]
+        aggregate = aggregate_rows(
+            [
+                {
+                    "target_label": "a",
+                    "target_mode": "triple_barrier",
+                    "feature_set": "continuous_regime",
+                    "model": "extra_trees",
+                    "class_weight": "balanced",
+                    "fold_id": 1,
+                    "random_state": 42,
+                    "prediction_distribution": {"BUY": {"share": 0.2}, "SELL": {"share": 0.3}, "HOLD": {"share": 0.5}},
+                    "metrics": {
+                        "macro_f1": 0.4,
+                        "accuracy": 0.5,
+                        "balanced_accuracy": 0.4,
+                        "buy_f1": 0.3,
+                        "sell_f1": 0.4,
+                        "hold_f1": 0.5,
+                        "action_rate": 0.5,
+                        "hold_rate": 0.5,
+                        "buy_sell_hmean_f1": 0.34,
+                    },
+                },
+                {
+                    "target_label": "a",
+                    "target_mode": "triple_barrier",
+                    "feature_set": "continuous_regime",
+                    "model": "extra_trees",
+                    "class_weight": "balanced",
+                    "fold_id": 2,
+                    "random_state": 42,
+                    "prediction_distribution": {"BUY": {"share": 0.25}, "SELL": {"share": 0.25}, "HOLD": {"share": 0.5}},
+                    "metrics": {
+                        "macro_f1": 0.6,
+                        "accuracy": 0.6,
+                        "balanced_accuracy": 0.6,
+                        "buy_f1": 0.5,
+                        "sell_f1": 0.6,
+                        "hold_f1": 0.7,
+                        "action_rate": 0.5,
+                        "hold_rate": 0.5,
+                        "buy_sell_hmean_f1": 0.54,
+                    },
+                },
+            ]
+        )[0]
+        assert aggregate["mean_macro_f1"] == 0.5
+        assert aggregate["worst_macro_f1"] == 0.4
         print("  PASS Alternative targets and continuous features")
         return True
     except Exception as exc:

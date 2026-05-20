@@ -199,6 +199,39 @@ def _neutral_zone_return(df: pd.DataFrame, spec: ActionTargetSpec) -> ActionTarg
 
 
 def _triple_barrier(df: pd.DataFrame, spec: ActionTargetSpec) -> ActionTargetResult:
+    details = triple_barrier_details(df, spec)
+    labels = details["labels"]
+    valid = labels >= 0
+    outcomes = details["outcome"]
+    ambiguous = int(np.count_nonzero(outcomes == "ambiguous"))
+    no_touch = int(np.count_nonzero(outcomes == "vertical_timeout"))
+    return ActionTargetResult(
+        labels=labels,
+        future_returns=details["future_return"],
+        effective_horizon=int(spec.barrier_horizon),
+        threshold={"upper": details["upper_return"], "lower": details["lower_return"]},
+        metadata={
+            "mode": "triple_barrier",
+            "base_threshold": float(details["base_threshold"]),
+            "barrier_horizon": int(spec.barrier_horizon),
+            "barrier_vol_window": int(spec.barrier_vol_window),
+            "barrier_up_k": float(spec.barrier_up_k),
+            "barrier_down_k": float(spec.barrier_down_k),
+            "ambiguous_samples": int(ambiguous),
+            "ambiguous_share": float(ambiguous / max(1, np.count_nonzero(valid))),
+            "no_touch_samples": int(no_touch),
+            "no_touch_share": float(no_touch / max(1, np.count_nonzero(valid))),
+        },
+    )
+
+
+def triple_barrier_details(df: pd.DataFrame, spec: ActionTargetSpec) -> dict[str, Any]:
+    """Return per-row triple-barrier target/evaluation diagnostics.
+
+    Future high/low paths are used here only for labels and diagnostics, never
+    for model features.
+    """
+
     close = df["close"].astype(float).to_numpy()
     high = df["high"].astype(float).to_numpy()
     low = df["low"].astype(float).to_numpy()
@@ -209,8 +242,10 @@ def _triple_barrier(df: pd.DataFrame, spec: ActionTargetSpec) -> ActionTargetRes
     lower_returns = np.maximum(base_threshold, float(spec.barrier_down_k) * past_vol)
     labels = np.full(len(df), -1, dtype=int)
     future_returns = np.full(len(df), np.nan, dtype=float)
-    ambiguous = 0
-    no_touch = 0
+    outcome = np.full(len(df), "invalid", dtype=object)
+    time_to_barrier = np.full(len(df), np.nan, dtype=float)
+    mfe = np.full(len(df), np.nan, dtype=float)
+    mae = np.full(len(df), np.nan, dtype=float)
     for idx in range(0, len(df) - horizon):
         if close[idx] <= 0 or not np.isfinite(close[idx]):
             continue
@@ -218,40 +253,45 @@ def _triple_barrier(df: pd.DataFrame, spec: ActionTargetSpec) -> ActionTargetRes
         upper = close[idx] * (1.0 + upper_returns[idx])
         lower = close[idx] * (1.0 - lower_returns[idx])
         labels[idx] = 1
+        future_high = high[idx + 1 : idx + horizon + 1]
+        future_low = low[idx + 1 : idx + horizon + 1]
+        mfe[idx] = float(np.max(future_high) / close[idx] - 1.0)
+        mae[idx] = float(np.min(future_low) / close[idx] - 1.0)
+        outcome[idx] = "vertical_timeout"
+        time_to_barrier[idx] = float(horizon)
         for step in range(1, horizon + 1):
             hit_up = high[idx + step] >= upper
             hit_down = low[idx + step] <= lower
             if hit_up and hit_down:
                 labels[idx] = 1
-                ambiguous += 1
+                outcome[idx] = "ambiguous"
+                time_to_barrier[idx] = float(step)
                 break
             if hit_up:
                 labels[idx] = 2
+                outcome[idx] = "upper_first"
+                time_to_barrier[idx] = float(step)
                 break
             if hit_down:
                 labels[idx] = 0
+                outcome[idx] = "lower_first"
+                time_to_barrier[idx] = float(step)
                 break
-        if labels[idx] == 1:
-            no_touch += 1
-    valid = labels >= 0
-    return ActionTargetResult(
-        labels=labels,
-        future_returns=future_returns,
-        effective_horizon=horizon,
-        threshold={"upper": upper_returns, "lower": lower_returns},
-        metadata={
-            "mode": "triple_barrier",
-            "base_threshold": float(base_threshold),
-            "barrier_horizon": int(horizon),
-            "barrier_vol_window": int(spec.barrier_vol_window),
-            "barrier_up_k": float(spec.barrier_up_k),
-            "barrier_down_k": float(spec.barrier_down_k),
-            "ambiguous_samples": int(ambiguous),
-            "ambiguous_share": float(ambiguous / max(1, np.count_nonzero(valid))),
-            "no_touch_samples": int(no_touch),
-            "no_touch_share": float(no_touch / max(1, np.count_nonzero(valid))),
-        },
-    )
+    return {
+        "labels": labels,
+        "future_return": future_returns,
+        "past_volatility": past_vol,
+        "upper_return": upper_returns,
+        "lower_return": lower_returns,
+        "upper_barrier": close * (1.0 + upper_returns),
+        "lower_barrier": close * (1.0 - lower_returns),
+        "outcome": outcome,
+        "time_to_barrier": time_to_barrier,
+        "mfe": mfe,
+        "mae": mae,
+        "close": close,
+        "base_threshold": float(base_threshold),
+    }
 
 
 def _label_distribution(labels: np.ndarray) -> dict[str, Any]:

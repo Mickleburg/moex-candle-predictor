@@ -31,6 +31,7 @@ from src.nlp import (
     make_sentence_samples,
     standardize_by_train,
     target_analysis,
+    triple_barrier_details,
 )
 from src.nlp.classifiers import build_classifier, classifier_requires_dense, maybe_dense
 from src.nlp.vectorizers import build_vectorizer
@@ -77,8 +78,8 @@ def build_target_specs(args: argparse.Namespace) -> list[ActionTargetSpec]:
     vol_ks = parse_float_list(args.vol_ks)
     barrier_horizons = parse_int_list(args.barrier_horizons)
     barrier_vol_windows = parse_int_list(args.barrier_vol_windows)
-    barrier_up_ks = parse_float_list(args.barrier_up_ks)
-    barrier_down_ks = parse_float_list(args.barrier_down_ks)
+    barrier_up_ks = parse_float_list(args.barrier_up_k_values or args.barrier_up_ks)
+    barrier_down_ks = parse_float_list(args.barrier_down_k_values or args.barrier_down_ks)
     neutral_buy = parse_float_list(args.buy_threshold_mults)
     neutral_sell = parse_float_list(args.sell_threshold_mults)
     for mode in parse_list(args.target_modes):
@@ -192,6 +193,10 @@ def build_model_configs(args: argparse.Namespace) -> list[ModelConfig]:
     if not configs:
         raise ValueError("No valid model configs were generated")
     return configs
+
+
+def parse_random_states(args: argparse.Namespace) -> list[int]:
+    return parse_int_list(args.random_states) if args.random_states else [int(args.random_state)]
 
 
 def _valid_logreg_combo(penalty: str, solver: str) -> bool:
@@ -356,8 +361,12 @@ def run_fold_target(
     lm_alpha: float,
     lm_forecast_horizon: int,
     random_state: int,
+    include_target_audit: bool = False,
+    include_economic_sanity: bool = False,
+    dump_target_audit_samples: int = 0,
 ) -> list[dict[str, Any]]:
     target = make_research_action_targets(df, target_spec)
+    target_detail = triple_barrier_details(df, target_spec) if target_spec.mode == "triple_barrier" else None
     dummy_tokens = ["w000"] * len(df)
     word_ids = None
     clusterer = None
@@ -501,15 +510,158 @@ def run_fold_target(
                         "n_calibration": int(samples["calibration"].size),
                         "n_validation": int(samples["outer_val"].size),
                         "target_distribution_train": label_distribution(samples["inner_train"].y),
+                        "target_distribution_calibration": label_distribution(samples["calibration"].y),
                         "target_distribution_val": label_distribution(samples["outer_val"].y),
                         "prediction_distribution": label_distribution(pred),
                         "metrics": metrics,
                         "has_predict_proba": proba is not None,
                         "model_diagnostics": model_diagnostics,
                         "target_analysis": target_analysis(target.labels, target.future_returns, target.metadata),
+                        "target_audit": (
+                            target_audit_for_indices(target_detail, samples, df, max_samples=dump_target_audit_samples)
+                            if include_target_audit and target_detail is not None
+                            else {}
+                        ),
+                        "economic_sanity": (
+                            economic_sanity(samples["outer_val"].y, pred, samples["outer_val"].target_indices, target.future_returns, target_detail)
+                            if include_economic_sanity
+                            else {}
+                        ),
                     }
                 )
     return rows
+
+
+def target_audit_for_indices(
+    detail: dict[str, Any],
+    samples: dict[str, Any],
+    df: pd.DataFrame,
+    *,
+    max_samples: int = 0,
+) -> dict[str, Any]:
+    result = {
+        "train": target_audit_summary(detail, samples["inner_train"].target_indices, samples["inner_train"].y),
+        "calibration": target_audit_summary(detail, samples["calibration"].target_indices, samples["calibration"].y),
+        "validation": target_audit_summary(detail, samples["outer_val"].target_indices, samples["outer_val"].y),
+    }
+    if max_samples > 0:
+        result["sample_dump"] = target_audit_sample_dump(detail, df, samples["outer_val"].target_indices[:max_samples])
+    return result
+
+
+def target_audit_summary(detail: dict[str, Any], indices: np.ndarray, labels: np.ndarray) -> dict[str, Any]:
+    idx = np.asarray(indices, dtype=int)
+    labels = np.asarray(labels, dtype=int)
+    outcomes = np.asarray(detail["outcome"], dtype=object)[idx]
+    time_to = np.asarray(detail["time_to_barrier"], dtype=float)[idx]
+    future_return = np.asarray(detail["future_return"], dtype=float)[idx]
+    mfe = np.asarray(detail["mfe"], dtype=float)[idx]
+    mae = np.asarray(detail["mae"], dtype=float)[idx]
+    valid_time = np.isfinite(time_to)
+    result: dict[str, Any] = {
+        "target_distribution": label_distribution(labels),
+        "share_upper_first": float(np.mean(outcomes == "upper_first")) if len(outcomes) else 0.0,
+        "share_lower_first": float(np.mean(outcomes == "lower_first")) if len(outcomes) else 0.0,
+        "share_vertical_timeout": float(np.mean(outcomes == "vertical_timeout")) if len(outcomes) else 0.0,
+        "share_ambiguous": float(np.mean(outcomes == "ambiguous")) if len(outcomes) else 0.0,
+        "mean_time_to_barrier": float(np.nanmean(time_to[valid_time])) if np.any(valid_time) else 0.0,
+        "median_time_to_barrier": float(np.nanmedian(time_to[valid_time])) if np.any(valid_time) else 0.0,
+    }
+    per_label: dict[str, Any] = {}
+    for label_id, label_name in {0: "SELL", 1: "HOLD", 2: "BUY"}.items():
+        mask = labels == label_id
+        per_label[label_name] = {
+            "count": int(np.count_nonzero(mask)),
+            "mean_time_to_barrier": _safe_mean(time_to[mask]),
+            "median_time_to_barrier": _safe_median(time_to[mask]),
+            "mean_future_return": _safe_mean(future_return[mask]),
+            "median_future_return": _safe_median(future_return[mask]),
+            "mean_mfe": _safe_mean(mfe[mask]),
+            "mean_mae": _safe_mean(mae[mask]),
+        }
+    result["by_label"] = per_label
+    return result
+
+
+def target_audit_sample_dump(detail: dict[str, Any], df: pd.DataFrame, indices: np.ndarray) -> list[dict[str, Any]]:
+    begin = pd.to_datetime(df["begin"]) if "begin" in df.columns else pd.Series(np.arange(len(df)))
+    rows = []
+    horizon = 0
+    for idx in np.asarray(indices, dtype=int):
+        time_to = detail["time_to_barrier"][idx]
+        horizon = max(horizon, int(time_to) if np.isfinite(time_to) else 0)
+    horizon = max(horizon, 1)
+    for idx in np.asarray(indices, dtype=int):
+        future_slice = slice(idx + 1, min(len(df), idx + horizon + 1))
+        rows.append(
+            {
+                "sample_idx": int(idx),
+                "decision_time": str(begin.iloc[idx]),
+                "close_t": float(detail["close"][idx]),
+                "past_vol_t": float(detail["past_volatility"][idx]),
+                "upper_barrier": float(detail["upper_barrier"][idx]),
+                "lower_barrier": float(detail["lower_barrier"][idx]),
+                "future_highs": [float(x) for x in df["high"].astype(float).to_numpy()[future_slice]],
+                "future_lows": [float(x) for x in df["low"].astype(float).to_numpy()[future_slice]],
+                "future_timestamps": [str(x) for x in begin.iloc[future_slice].tolist()],
+                "label": int(detail["labels"][idx]),
+                "outcome": str(detail["outcome"][idx]),
+                "time_to_barrier": float(detail["time_to_barrier"][idx]) if np.isfinite(detail["time_to_barrier"][idx]) else None,
+                "max_feature_time": str(begin.iloc[idx]),
+            }
+        )
+    return rows
+
+
+def economic_sanity(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    target_indices: np.ndarray,
+    future_returns: np.ndarray,
+    target_detail: dict[str, Any] | None,
+) -> dict[str, Any]:
+    idx = np.asarray(target_indices, dtype=int)
+    pred = np.asarray(y_pred, dtype=int)
+    returns = np.asarray(future_returns, dtype=float)[idx]
+    result: dict[str, Any] = {
+        "mean_realized_return_by_prediction": {},
+        "median_realized_return_by_prediction": {},
+    }
+    for label_id, label_name in {0: "SELL", 1: "HOLD", 2: "BUY"}.items():
+        mask = pred == label_id
+        result["mean_realized_return_by_prediction"][label_name] = _safe_mean(returns[mask])
+        result["median_realized_return_by_prediction"][label_name] = _safe_median(returns[mask])
+        result[f"{label_name.lower()}_prediction"] = {
+            "count": int(np.count_nonzero(mask)),
+            "mean_realized_return": _safe_mean(returns[mask]),
+            "median_realized_return": _safe_median(returns[mask]),
+        }
+    buy_mask = pred == 2
+    sell_mask = pred == 0
+    result["directional_hit_rate_for_BUY"] = float(np.mean(returns[buy_mask] > 0.0)) if np.any(buy_mask) else 0.0
+    result["directional_hit_rate_for_SELL"] = float(np.mean(returns[sell_mask] < 0.0)) if np.any(sell_mask) else 0.0
+    result["hold_mean_abs_future_return"] = _safe_mean(np.abs(returns[pred == 1]))
+    if target_detail is not None:
+        outcomes = np.asarray(target_detail["outcome"], dtype=object)[idx]
+        result["predicted_BUY_upper_hit_rate"] = float(np.mean(outcomes[buy_mask] == "upper_first")) if np.any(buy_mask) else 0.0
+        result["predicted_SELL_lower_hit_rate"] = float(np.mean(outcomes[sell_mask] == "lower_first")) if np.any(sell_mask) else 0.0
+        action_mask = np.isin(pred, [0, 2])
+        result["predicted_action_barrier_hit_rate"] = float(
+            np.mean(np.isin(outcomes[action_mask], ["upper_first", "lower_first"]))
+        ) if np.any(action_mask) else 0.0
+    return result
+
+
+def _safe_mean(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    return float(values.mean()) if len(values) else 0.0
+
+
+def _safe_median(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    return float(np.median(values)) if len(values) else 0.0
 
 
 def fit_predict_model(
@@ -593,38 +745,69 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for key, items in grouped.items():
         macro = np.asarray([item["metrics"]["macro_f1"] for item in items], dtype=float)
+        accuracy = np.asarray([item["metrics"]["accuracy"] for item in items], dtype=float)
+        balanced = np.asarray([item["metrics"]["balanced_accuracy"] for item in items], dtype=float)
         buy = np.asarray([item["metrics"]["buy_f1"] for item in items], dtype=float)
         sell = np.asarray([item["metrics"]["sell_f1"] for item in items], dtype=float)
         hold = np.asarray([item["metrics"]["hold_f1"] for item in items], dtype=float)
         action = np.asarray([item["metrics"]["action_rate"] for item in items], dtype=float)
+        hold_rate = np.asarray([item["metrics"]["hold_rate"] for item in items], dtype=float)
         hmean = np.asarray([item["metrics"]["buy_sell_hmean_f1"] for item in items], dtype=float)
+        pred_buy = np.asarray([_label_share(item["prediction_distribution"], "BUY") for item in items], dtype=float)
+        pred_sell = np.asarray([_label_share(item["prediction_distribution"], "SELL") for item in items], dtype=float)
+        pred_hold = np.asarray([_label_share(item["prediction_distribution"], "HOLD") for item in items], dtype=float)
+        seed_means = _group_metric_mean(items, "random_state", "macro_f1")
+        fold_means = _group_metric_mean(items, "fold_id", "macro_f1")
         result.append(
             {
                 "target_label": key[0],
+                "target_mode": items[0]["target_mode"],
                 "feature_set": key[1],
                 "model": key[2],
                 "class_weight": key[3],
-                "folds": int(len(items)),
-                "macro_f1_mean": float(macro.mean()),
-                "macro_f1_std": float(macro.std(ddof=0)),
-                "macro_f1_worst": float(macro.min()),
-                "buy_f1_mean": float(buy.mean()),
-                "sell_f1_mean": float(sell.mean()),
-                "hold_f1_mean": float(hold.mean()),
-                "buy_sell_hmean_f1": float(hmean.mean()),
-                "action_rate_mean": float(action.mean()),
+                "n_folds": int(len({item["fold_id"] for item in items})),
+                "n_rows": int(len(items)),
+                "random_states": sorted({int(item["random_state"]) for item in items}),
+                "mean_macro_f1": float(macro.mean()),
+                "std_macro_f1": float(macro.std(ddof=0)),
+                "worst_macro_f1": float(macro.min()),
+                "std_across_folds": float(np.asarray(list(fold_means.values()), dtype=float).std(ddof=0)) if fold_means else 0.0,
+                "std_across_seeds": float(np.asarray(list(seed_means.values()), dtype=float).std(ddof=0)) if seed_means else 0.0,
+                "mean_accuracy": float(accuracy.mean()),
+                "mean_balanced_accuracy": float(balanced.mean()),
+                "mean_buy_f1": float(buy.mean()),
+                "mean_sell_f1": float(sell.mean()),
+                "mean_hold_f1": float(hold.mean()),
+                "buy_sell_hmean": float(hmean.mean()),
+                "mean_action_rate": float(action.mean()),
+                "std_action_rate": float(action.std(ddof=0)),
+                "mean_hold_rate": float(hold_rate.mean()),
+                "mean_prediction_buy_share": float(pred_buy.mean()),
+                "mean_prediction_sell_share": float(pred_sell.mean()),
+                "mean_prediction_hold_share": float(pred_hold.mean()),
             }
         )
     return sorted(
         result,
         key=lambda row: (
-            row["macro_f1_mean"],
-            row["macro_f1_worst"],
-            row["buy_sell_hmean_f1"],
-            -abs(row["action_rate_mean"] - 0.5),
+            row["mean_macro_f1"],
+            row["worst_macro_f1"],
+            row["buy_sell_hmean"],
+            -abs(row["mean_action_rate"] - 0.5),
         ),
         reverse=True,
     )
+
+
+def _group_metric_mean(items: list[dict[str, Any]], group_key: str, metric_name: str) -> dict[Any, float]:
+    grouped: dict[Any, list[float]] = {}
+    for item in items:
+        grouped.setdefault(item[group_key], []).append(float(item["metrics"][metric_name]))
+    return {key: float(np.mean(values)) for key, values in grouped.items()}
+
+
+def _label_share(distribution: dict[str, Any], label: str) -> float:
+    return float(distribution.get(label, {}).get("share", 0.0))
 
 
 def compact_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -639,6 +822,7 @@ def compact_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "model": row["model"],
                 "class_weight": row["class_weight"],
                 "fold_id": row["fold_id"],
+                "random_state": row["random_state"],
                 "n_train": row["n_train"],
                 "n_calibration": row["n_calibration"],
                 "n_validation": row["n_validation"],
@@ -668,13 +852,14 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 
 def print_summary(aggregates: list[dict[str, Any]]) -> None:
+    print("AGGREGATE RESULTS, not fold-level rows")
     print("target | features | model | weight | macro-F1 | worst | BUY F1 | SELL F1 | HOLD F1 | action_rate")
     print("--- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---:")
     for row in aggregates[:16]:
         print(
             f"{row['target_label']} | {row['feature_set']} | {row['model']} | {row['class_weight']} | "
-            f"{row['macro_f1_mean']:.4f} | {row['macro_f1_worst']:.4f} | {row['buy_f1_mean']:.4f} | "
-            f"{row['sell_f1_mean']:.4f} | {row['hold_f1_mean']:.4f} | {row['action_rate_mean']:.4f}"
+            f"{row['mean_macro_f1']:.4f} | {row['worst_macro_f1']:.4f} | {row['mean_buy_f1']:.4f} | "
+            f"{row['mean_sell_f1']:.4f} | {row['mean_hold_f1']:.4f} | {row['mean_action_rate']:.4f}"
         )
 
 
@@ -693,6 +878,8 @@ def main() -> int:
     parser.add_argument("--barrier-vol-windows", default="16")
     parser.add_argument("--barrier-up-ks", default="1.0")
     parser.add_argument("--barrier-down-ks", default="1.0")
+    parser.add_argument("--barrier-up-k-values", default="")
+    parser.add_argument("--barrier-down-k-values", default="")
     parser.add_argument("--barrier-k-values", default="")
     parser.add_argument("--buy-threshold-mults", default="1.5")
     parser.add_argument("--sell-threshold-mults", default="1.5")
@@ -725,10 +912,15 @@ def main() -> int:
     parser.add_argument("--gap", type=int, default=0)
     parser.add_argument("--calibration-size", type=int, default=2500)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument("--random-states", default="")
+    parser.add_argument("--include-target-audit", action="store_true")
+    parser.add_argument("--include-economic-sanity", action="store_true")
+    parser.add_argument("--dump-target-audit-samples", type=int, default=0)
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--no-test", action="store_true", help="Kept for explicit research-only CLI calls; test is never used.")
     parser.add_argument("--output-json", default="data/reports/sber_h1_target_feature_research_20260515.json")
     parser.add_argument("--output-csv", default="data/reports/sber_h1_target_feature_research_20260515.csv")
+    parser.add_argument("--output-aggregate-csv", default="")
     args = parser.parse_args()
 
     if args.quick:
@@ -745,40 +937,46 @@ def main() -> int:
     feature_sets = parse_list(args.feature_sets)
     models = build_model_configs(args)
     class_weights = parse_class_weights(args.class_weights)
+    random_states = parse_random_states(args)
     shape_matrix = candle_shape_matrix(df, variant=vocab_config.shape_variant)[0]
     continuous_matrix, continuous_names = make_continuous_past_features(df)
 
     rows: list[dict[str, Any]] = []
     print(f"Загружено свечей: {len(df)}; файл: {data_path}")
-    print(f"Folds: {len(folds)}; test не используется; target specs: {len(target_specs)}")
-    for fold in folds:
-        ranges = nested_range(fold, args.calibration_size)
-        print(
-            f"Fold {fold.fold_id}: inner=[{ranges.inner_train_start}:{ranges.inner_train_end}) "
-            f"calib=[{ranges.calibration_start}:{ranges.calibration_end}) val=[{fold.val_start}:{fold.val_end})"
-        )
-        for target_spec in target_specs:
-            print(f"  Target {target_spec.label}")
-            rows.extend(
-                run_fold_target(
-                    df,
-                    shape_matrix,
-                    continuous_matrix,
-                    continuous_names,
-                    target_spec,
-                    ranges,
-                    vocab_config,
-                    feature_sets=feature_sets,
-                    models=models,
-                    class_weights=class_weights,
-                    context_size=args.context_size,
-                    action_window_size=args.action_window_size,
-                    lm_order=args.lm_order,
-                    lm_alpha=args.lm_alpha,
-                    lm_forecast_horizon=args.forecast_horizon,
-                    random_state=args.random_state,
-                )
+    print(f"Folds: {len(folds)}; test не используется; target specs: {len(target_specs)}; random_states: {random_states}")
+    for random_state in random_states:
+        print(f"Random state {random_state}")
+        for fold in folds:
+            ranges = nested_range(fold, args.calibration_size)
+            print(
+                f"Fold {fold.fold_id}: inner=[{ranges.inner_train_start}:{ranges.inner_train_end}) "
+                f"calib=[{ranges.calibration_start}:{ranges.calibration_end}) val=[{fold.val_start}:{fold.val_end})"
             )
+            for target_spec in target_specs:
+                print(f"  Target {target_spec.label}")
+                rows.extend(
+                    run_fold_target(
+                        df,
+                        shape_matrix,
+                        continuous_matrix,
+                        continuous_names,
+                        target_spec,
+                        ranges,
+                        vocab_config,
+                        feature_sets=feature_sets,
+                        models=models,
+                        class_weights=class_weights,
+                        context_size=args.context_size,
+                        action_window_size=args.action_window_size,
+                        lm_order=args.lm_order,
+                        lm_alpha=args.lm_alpha,
+                        lm_forecast_horizon=args.forecast_horizon,
+                        random_state=random_state,
+                        include_target_audit=args.include_target_audit,
+                        include_economic_sanity=args.include_economic_sanity,
+                        dump_target_audit_samples=args.dump_target_audit_samples,
+                    )
+                )
 
     aggregates = aggregate_rows(rows)
     best = aggregates[0] if aggregates else None
@@ -793,6 +991,7 @@ def main() -> int:
         "feature_sets": feature_sets,
         "models": [asdict(model) for model in models],
         "class_weights": ["none" if item is None else item for item in class_weights],
+        "random_states": random_states,
         "continuous_feature_names": continuous_names,
         "fold_results": rows,
         "aggregates": aggregates,
@@ -802,17 +1001,24 @@ def main() -> int:
     }
     output_json = REPO_ROOT / args.output_json
     output_csv = REPO_ROOT / args.output_csv
+    output_aggregate_csv = (
+        REPO_ROOT / args.output_aggregate_csv
+        if args.output_aggregate_csv
+        else output_csv.with_name(f"{output_csv.stem}.aggregate{output_csv.suffix}")
+    )
     write_json(payload, output_json)
     write_csv(compact_csv_rows(rows), output_csv)
+    write_csv(aggregates, output_aggregate_csv)
     print_summary(aggregates)
     if best:
         print(
-            "Лучший validation-only config: "
+            "Лучший validation-only aggregate config: "
             f"{best['target_label']} | {best['feature_set']} | {best['model']} | {best['class_weight']} | "
-            f"macro-F1={best['macro_f1_mean']:.4f}"
+            f"mean macro-F1={best['mean_macro_f1']:.4f}; worst={best['worst_macro_f1']:.4f}"
         )
     print(f"JSON: {output_json}")
-    print(f"CSV: {output_csv}")
+    print(f"Fold-level CSV: {output_csv}")
+    print(f"Aggregate CSV: {output_aggregate_csv}")
     return 0
 
 

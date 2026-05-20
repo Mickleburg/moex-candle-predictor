@@ -37,7 +37,14 @@ from .word_lm import (
     transition_quality_metrics,
     word_distribution_metrics,
 )
-from .targets import ActionTargetResult, ActionTargetSpec, make_research_action_targets, past_return_volatility, target_analysis
+from .targets import (
+    ActionTargetResult,
+    ActionTargetSpec,
+    make_research_action_targets,
+    past_return_volatility,
+    target_analysis,
+    triple_barrier_details,
+)
 
 __all__ = [
     "ACTION_LABELS",
@@ -79,4 +86,5 @@ __all__ = [
     "make_research_action_targets",
     "past_return_volatility",
     "target_analysis",
+    "triple_barrier_details",
 ]
