@@ -354,7 +354,7 @@ Research artifacts:
 ```text
 data/reports/sber_h1_nlp_research_*.json
 data/reports/sber_h1_nlp_research_*.csv
-docs/sber_h1_nlp_research_2026-05-04.md
+ml/docs/research/sber_h1_nlp_research_2026-05-04.md
 ```
 
 `data/reports/*.json` и `*.csv` игнорируются git, потому что они воспроизводимы и могут быть большими. Итоговые выводы фиксируются в `docs/`.

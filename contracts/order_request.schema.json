@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OrderRequest",
+  "type": "object",
+  "required": ["ticker", "side", "quantity_lots", "order_type", "client_order_id"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "side": { "type": "string", "enum": ["BUY", "SELL"] },
+    "quantity_lots": { "type": "integer", "minimum": 1 },
+    "order_type": { "type": "string", "enum": ["LIMIT"] },
+    "limit_price": { "type": ["number", "null"] },
+    "client_order_id": { "type": "string" }
+  }
+}

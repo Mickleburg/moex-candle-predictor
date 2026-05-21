@@ -43,7 +43,7 @@ action_rate: 0.5983
 Ключевые локальные validation-only выводы зафиксированы отдельно:
 
 ```text
-docs/sber_h1_local_validation_runs_2026-05-15.md
+ml/docs/research/sber_h1_local_validation_runs_2026-05-15.md
 ```
 
 Final untouched test уже был выполнен один раз для frozen candidate:

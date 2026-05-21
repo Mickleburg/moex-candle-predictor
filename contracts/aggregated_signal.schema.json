@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AggregatedSignal",
+  "type": "object",
+  "required": ["ticker", "timeframe", "as_of", "combined_probabilities", "raw_decision", "expected_edge", "confidence", "components"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "timeframe": { "type": "string" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "combined_probabilities": {
+      "type": "object",
+      "required": ["buy", "hold", "sell"],
+      "properties": {
+        "buy": { "type": "number" },
+        "hold": { "type": "number" },
+        "sell": { "type": "number" }
+      }
+    },
+    "raw_decision": { "type": "string", "enum": ["BUY", "HOLD", "SELL"] },
+    "expected_edge": { "type": "number" },
+    "confidence": { "type": "number" },
+    "components": {
+      "type": "object",
+      "required": ["ml_weight", "llm_weight"],
+      "properties": {
+        "ml_weight": { "type": "number" },
+        "llm_weight": { "type": "number" }
+      }
+    }
+  }
+}

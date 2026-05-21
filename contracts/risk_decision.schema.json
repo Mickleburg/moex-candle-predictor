@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskDecision",
+  "type": "object",
+  "required": ["ticker", "requested_action", "approved_action", "approved", "position_context", "risk_checks", "order_intent", "blocked_reason"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "requested_action": { "type": "string" },
+    "approved_action": { "type": "string" },
+    "approved": { "type": "boolean" },
+    "position_context": { "type": "object", "additionalProperties": true },
+    "risk_checks": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "order_intent": { "type": ["object", "null"], "additionalProperties": true },
+    "blocked_reason": { "type": ["string", "null"] }
+  }
+}

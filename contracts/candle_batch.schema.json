@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CandleBatch",
+  "type": "object",
+  "required": ["ticker", "timeframe", "candles"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "timeframe": { "type": "string" },
+    "candles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["begin", "open", "high", "low", "close", "volume"],
+        "properties": {
+          "begin": { "type": "string", "format": "date-time" },
+          "open": { "type": "number" },
+          "high": { "type": "number" },
+          "low": { "type": "number" },
+          "close": { "type": "number" },
+          "volume": { "type": "number" }
+        }
+      }
+    }
+  }
+}
