@@ -1,0 +1,15 @@
+{
+  "as_of": "2026-05-15T15:00:00+03:00",
+  "cash": 50000.0,
+  "equity": 100000.0,
+  "positions": [
+    {
+      "ticker": "SBER",
+      "lots": 10,
+      "avg_price": 298.0,
+      "market_price": 301.5,
+      "market_value": 30150.0,
+      "unrealized_pnl": 350.0
+    }
+  ]
+}

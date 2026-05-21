@@ -1,0 +1,29 @@
+{
+  "as_of": "2026-05-15T15:00:00+03:00",
+  "mode": "paper",
+  "evaluated_tickers": ["SBER", "GAZP", "LKOH"],
+  "selected_orders": [
+    {
+      "ticker": "SBER",
+      "side": "BUY",
+      "quantity_lots": 2,
+      "order_type": "LIMIT",
+      "limit_price": 301.5,
+      "client_order_id": "demo-20260515-SBER-001"
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "ticker": "GAZP",
+      "reason": "edge below threshold"
+    },
+    {
+      "ticker": "LKOH",
+      "reason": "cooldown active"
+    }
+  ],
+  "risk_summary": {
+    "cash_available": 50000.0,
+    "max_daily_loss_reached": false
+  }
+}

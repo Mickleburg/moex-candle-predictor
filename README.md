@@ -57,6 +57,20 @@ python -m compileall -q ml\src ml\scripts ml\test_smoke.py
 python ml\test_smoke.py
 ```
 
+## Проверка contracts и backend
+
+```powershell
+python scripts\validate_contracts.py
+```
+
+Если менялся Go backend:
+
+```powershell
+Set-Location backend
+go test ./...
+Set-Location ..
+```
+
 ## Документация
 
 - ML research reports: `ml/docs/research/`

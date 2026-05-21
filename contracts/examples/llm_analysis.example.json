@@ -1,0 +1,19 @@
+{
+  "ticker": "SBER",
+  "timeframe": "1H",
+  "as_of": "2026-05-15T15:00:00+03:00",
+  "technical_view": "moderately_bullish",
+  "probabilities": {
+    "buy": 0.42,
+    "hold": 0.38,
+    "sell": 0.20
+  },
+  "confidence": 0.55,
+  "key_reasons": [
+    "price above EMA20",
+    "volume above average"
+  ],
+  "risk_notes": [
+    "near resistance"
+  ]
+}

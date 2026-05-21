@@ -5,12 +5,22 @@
   "required": ["ticker", "requested_action", "approved_action", "approved", "position_context", "risk_checks", "order_intent", "blocked_reason"],
   "properties": {
     "ticker": { "type": "string" },
-    "requested_action": { "type": "string" },
-    "approved_action": { "type": "string" },
+    "requested_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
+    "approved_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
     "approved": { "type": "boolean" },
     "position_context": { "type": "object", "additionalProperties": true },
     "risk_checks": { "type": "object", "additionalProperties": { "type": "boolean" } },
-    "order_intent": { "type": ["object", "null"], "additionalProperties": true },
+    "order_intent": {
+      "type": ["object", "null"],
+      "required": ["side", "quantity_lots", "order_type", "limit_price"],
+      "properties": {
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity_lots": { "type": "integer", "minimum": 1 },
+        "order_type": { "type": "string", "enum": ["LIMIT"] },
+        "limit_price": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
     "blocked_reason": { "type": ["string", "null"] }
   }
 }

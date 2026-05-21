@@ -1,0 +1,20 @@
+{
+  "ticker": "SBER",
+  "timeframe": "1H",
+  "as_of": "2026-05-15T15:00:00+03:00",
+  "model_version": "research-triple-barrier-2026-05-15",
+  "model_family": "triple_barrier_extra_trees",
+  "target": "triple_barrier:h3:w12:up1.25:down1.25",
+  "probabilities": {
+    "buy": 0.36,
+    "hold": 0.34,
+    "sell": 0.30
+  },
+  "confidence": 0.52,
+  "expected_return": null,
+  "diagnostics": {
+    "feature_set": "continuous_regime",
+    "validation_macro_f1": 0.4695,
+    "is_production": false
+  }
+}

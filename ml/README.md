@@ -65,6 +65,12 @@ python -m compileall -q ml\src ml\scripts ml\test_smoke.py
 python ml\test_smoke.py
 ```
 
+Общие architecture contracts проверяются из корня проекта:
+
+```powershell
+python scripts\validate_contracts.py
+```
+
 ## Документы
 
 - `ml/docs/research/` - SBER H1 research reports.
