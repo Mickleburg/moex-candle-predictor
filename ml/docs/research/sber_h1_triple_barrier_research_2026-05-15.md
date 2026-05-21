@@ -257,16 +257,22 @@ Selection выполняется только по aggregate validation metrics.
 
 ## Лучший validation-only candidate на текущий момент
 
-Пока primary direction:
+Текущий validation-only primary direction после полного focused run:
 
 ```text
-triple_barrier:h3:w16:up1.25:down1.5
+triple_barrier:h3:w12:up1.25:down1.25
 features = continuous_regime
-model = extra_trees:depth=none:leaf=5:maxfeat=sqrt
-class_weight = balanced
+model = extra_trees:depth=none:leaf=20:maxfeat=sqrt
+class_weight = none
+mean macro-F1 = 0.4695
+worst fold = 0.4548
+BUY F1 = 0.4064
+SELL F1 = 0.4387
+HOLD F1 = 0.5632
+action_rate = 0.6725
 ```
 
-Он лучше return-threshold ветки по aggregate macro-F1, но имеет высокий `action_rate` около `0.6955`. Перед любым frozen candidate нужны focused grid, seed robustness и target audit.
+Он лучше return-threshold ветки по aggregate macro-F1, но остается validation-only результатом. Перед любым frozen candidate нужны seed robustness, target audit и отдельный frozen evaluation protocol.
 
 ## Ограничения
 
@@ -279,6 +285,6 @@ class_weight = balanced
 ## Следующий шаг
 
 1. Запустить focused triple-barrier full run и анализировать только aggregate CSV.
-2. Запустить ExtraTrees seed robustness вокруг `h3/w16/up1.25/down1.5`.
+2. Запустить ExtraTrees seed robustness вокруг `h3/w12/up1.25/down1.25`.
 3. Проверить, сохраняется ли преимущество при разумном `HOLD F1 >= 0.50` и `action_rate` в зоне `0.55-0.75`.
 4. Только после этого решать, становится ли triple-barrier новым primary target direction.
