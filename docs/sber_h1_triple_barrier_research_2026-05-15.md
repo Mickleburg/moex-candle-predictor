@@ -84,6 +84,95 @@ action_rate:   0.6955
 
 Fold-level top row около `0.4886` на `fold_id=2` является только диагностикой. Это не aggregate result и не selection metric.
 
+## Полный focused triple-barrier full run пользователя
+
+Пользователь локально запустил focused validation-only triple-barrier grid. Выбор выполнялся только по aggregate CSV, не по fold-level строкам.
+
+Команда запуска:
+
+```powershell
+python ml\scripts\sber_triple_barrier_research.py `
+  --barrier-horizons 3,4,6 `
+  --barrier-vol-windows 12,16,24,32 `
+  --barrier-up-k-values 1.0,1.25,1.5 `
+  --barrier-down-k-values 1.25,1.5,1.75,2.0 `
+  --feature-sets continuous_regime,continuous_no_session,continuous_no_volatility,lm_regime_continuous `
+  --models extra_trees `
+  --class-weights balanced,none `
+  --extra-trees-n-estimators 300 `
+  --extra-trees-min-samples-leaf 5,10,20 `
+  --extra-trees-max-depths none,12 `
+  --extra-trees-max-features sqrt,0.7 `
+  --fold-mode rolling `
+  --train-size 12000 `
+  --val-size 3000 `
+  --step-size 3000 `
+  --max-folds 4 `
+  --calibration-size 2500 `
+  --no-test `
+  --include-target-audit `
+  --include-economic-sanity `
+  --output-json data/reports/sber_h1_triple_barrier_research_full_20260515.json `
+  --output-csv data/reports/sber_h1_triple_barrier_research_full_folds_20260515.csv `
+  --output-aggregate-csv data/reports/sber_h1_triple_barrier_research_full_aggregate_20260515.csv
+```
+
+Ожидаемые файлы отчета:
+
+- `data/reports/sber_h1_triple_barrier_research_full_20260515.json`;
+- `data/reports/sber_h1_triple_barrier_research_full_folds_20260515.csv`;
+- `data/reports/sber_h1_triple_barrier_research_full_aggregate_20260515.csv`.
+
+Новый лучший validation-only aggregate config:
+
+```text
+target:       triple_barrier:h3:w12:up1.25:down1.25
+features:     continuous_regime
+model:        extra_trees:depth=none:leaf=20:maxfeat=sqrt
+class_weight: none
+random_state: 42
+n_folds:      4
+
+mean macro-F1:      0.4694586125565165
+std macro-F1:       0.009063228583320601
+worst macro-F1:     0.4547935587339986
+mean accuracy:      0.4720161834120027
+balanced accuracy:  0.4697147728103302
+BUY F1:             0.4064398078493485
+SELL F1:            0.43872171796117804
+HOLD F1:            0.563214311859023
+BUY/SELL hmean:     0.42120448193929483
+action rate:        0.6725387727579231
+hold rate:          0.3274612272420769
+prediction BUY:     0.30917060013486175
+prediction SELL:    0.3633681726230614
+prediction HOLD:    0.3274612272420769
+```
+
+Сравнение с предыдущими validation-only результатами:
+
+```text
+old LM/action baseline:       0.4238-0.4265
+return-threshold best:        0.4419
+previous triple-barrier best:  0.4589
+new triple-barrier best:       0.4695
+```
+
+Интерпретация:
+
+- focused triple-barrier стал новым лучшим validation-only направлением;
+- улучшение пришло не от очередного threshold tuning, а от другой постановки target;
+- `HOLD F1` остается выше 0.50, то есть target не полностью разваливает нейтральный класс;
+- `action_rate` высокий, но пока находится в заранее допустимой исследовательской зоне `0.55-0.75`.
+
+Риски:
+
+- результат пока только для `random_state=42`;
+- это validation-only результат, test не использовался;
+- fold-level строки не являются selection metric;
+- action rate около `0.67` требует отдельной проверки экономического смысла и устойчивости;
+- перед frozen candidate нужен seed robustness для ExtraTrees и повторная проверка target/economic audit.
+
 ## Target audit
 
 Для `triple_barrier` добавлен audit по каждому target config/fold:
