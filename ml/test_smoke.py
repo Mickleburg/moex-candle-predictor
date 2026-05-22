@@ -992,14 +992,21 @@ def test_ml_prediction_contract_invariants():
     try:
         import json
         import math
+        import pickle
+        import tempfile
         from datetime import datetime, timedelta
 
+        import numpy as np
+        from sklearn.dummy import DummyClassifier
+
+        from src.nlp import make_continuous_past_features
         from src.service.contracts import (
             build_artifact_missing_response,
             build_ml_prediction_response,
             candle_batch_to_dataframe,
             load_candle_batch_json,
         )
+        from src.service.research_artifact import build_artifact_prediction_response, load_research_artifact, predict_with_artifact
 
         base = datetime(2026, 5, 15, 10)
         payload = {
@@ -1041,6 +1048,67 @@ def test_ml_prediction_contract_invariants():
         assert missing["probabilities"] == {"buy": 0.0, "hold": 1.0, "sell": 0.0}
         assert missing["confidence"] == 0.0
         json.dumps(missing)
+
+        feature_matrix, feature_names = make_continuous_past_features(df)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            model = DummyClassifier(strategy="prior")
+            model.fit(np.zeros((3, len(feature_names))), np.asarray([0, 1, 2], dtype=int))
+            with (tmp_path / "model.pkl").open("wb") as handle:
+                pickle.dump(model, handle)
+            (tmp_path / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_id": "smoke",
+                        "model_version": "smoke",
+                        "artifact_type": "research",
+                        "is_production": False,
+                        "model_family": "triple_barrier_extra_trees",
+                        "target": "triple_barrier:h3:w12:up1.25:down1.25",
+                        "feature_set": "continuous_regime",
+                        "class_weight": "none",
+                        "validation_macro_f1_mean": 0.1,
+                        "min_candles_for_prediction": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "feature_config.json").write_text(
+                json.dumps(
+                    {
+                        "feature_set": "continuous_regime",
+                        "feature_columns": feature_names,
+                        "standardization_mean": [0.0] * len(feature_names),
+                        "standardization_std": [1.0] * len(feature_names),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "target_config.json").write_text(
+                json.dumps({"target_mode": "triple_barrier", "label_order": ["SELL", "HOLD", "BUY"]}),
+                encoding="utf-8",
+            )
+            (tmp_path / "label_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "internal_to_contract": {"SELL": "sell", "HOLD": "hold", "BUY": "buy"},
+                        "contract_to_internal": {"sell": "SELL", "hold": "HOLD", "buy": "BUY"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "schema_version.json").write_text(json.dumps({"artifact_schema_version": 1}), encoding="utf-8")
+            (tmp_path / "feature_columns.json").write_text(json.dumps(feature_names), encoding="utf-8")
+
+            artifact = load_research_artifact(tmp_path)
+            artifact_response = build_artifact_prediction_response(batch=batch, df=df, artifact=artifact)
+            assert artifact_response["diagnostics"]["artifact_missing"] is False
+            assert artifact_response["diagnostics"]["is_production"] is False
+            assert math.isclose(sum(artifact_response["probabilities"].values()), 1.0, abs_tol=1e-6)
+
+            insufficient = predict_with_artifact(artifact, df.head(1))
+            assert insufficient.diagnostics["error"] == "insufficient_history"
+            assert insufficient.probabilities == {"buy": 0.0, "hold": 1.0, "sell": 0.0}
         print("  PASS ML prediction contract helpers")
         return True
     except Exception as exc:

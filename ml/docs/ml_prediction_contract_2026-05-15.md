@@ -93,7 +93,7 @@ mean macro-F1: 0.4695
 
 Это не production artifact. Test split не используется для выбора новых candidates. Перед production artifact нужны seed robustness, frozen evaluation protocol, backtest и paper trading.
 
-## Artifact missing mode
+## Режим без artifact
 
 На момент этого документа fitted production artifact для `triple_barrier_extra_trees` не зафиксирован. Поэтому `ml/scripts/predict_from_json.py` возвращает валидный `ml_prediction` JSON с:
 
@@ -114,6 +114,59 @@ mean macro-F1: 0.4695
 
 Это не прогноз. Это честный contract-compatible placeholder, который позволяет интеграционным блокам работать с форматом ответа без имитации качества модели.
 
+## Research artifact mode
+
+После seed robustness frozen candidate можно собрать как локальный research artifact:
+
+```powershell
+python ml\scripts\train_research_artifact.py `
+  --ticker SBER `
+  --timeframe 1H `
+  --target-mode triple_barrier `
+  --barrier-horizon 3 `
+  --barrier-vol-window 12 `
+  --barrier-up-k 1.25 `
+  --barrier-down-k 1.25 `
+  --feature-set continuous_regime `
+  --model extra_trees `
+  --n-estimators 300 `
+  --min-samples-leaf 20 `
+  --max-depth none `
+  --max-features sqrt `
+  --class-weight none `
+  --random-state 42 `
+  --training-protocol development_only `
+  --output-dir ml\artifacts\research_triple_barrier_sber_h1
+```
+
+Training protocol:
+
+```text
+development_only = fit on first 85% chronological data
+final 15% tail remains untouched
+no final test evaluation
+no test tuning
+```
+
+Inference with artifact:
+
+```powershell
+python ml\scripts\predict_from_json.py `
+  --input-json contracts\examples\candle_batch.example.json `
+  --artifact-dir ml\artifacts\research_triple_barrier_sber_h1 `
+  --output-json data\reports\ml_prediction_example_with_artifact.json
+```
+
+В этом режиме `diagnostics.artifact_missing=false`, а `probabilities.buy/hold/sell` строятся через `ExtraTreesClassifier.predict_proba`.
+
+Важно:
+
+- artifact является research-only;
+- `diagnostics.is_production=false`;
+- probabilities пока не калиброваны;
+- target `triple_barrier:h3:w12:up1.25:down1.25` не является прямым прогнозом цены;
+- этот режим нужен для integration testing будущих `aggregator/risk/agent` блоков, а не для торговли.
+
 ## CLI
 
 ```powershell
@@ -122,18 +175,19 @@ python ml\scripts\predict_from_json.py `
   --output-json data\reports\ml_prediction_example.json
 ```
 
-## Будущий artifact bundle
+## Artifact bundle
 
-Для настоящего `triple_barrier_extra_trees` inference нужен bundle:
+Для `triple_barrier_extra_trees` inference используется bundle:
 
 ```text
 model.pkl
-feature_pipeline.pkl или feature_config.json
+feature_config.json
 target_config.json
 metadata.json
 label_mapping.json
-calibration.json, если появится
-schema_version
+schema_version.json
+feature_columns.json
+training_summary.json
 ```
 
 Минимальная metadata:

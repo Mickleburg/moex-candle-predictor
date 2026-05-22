@@ -1,6 +1,6 @@
 # MOEX Candle Predictor
 
-`moex-candle-predictor` на ветке `demo` оформлен как модульная research-платформа для будущего торгового агента на MOEX. Сейчас рабочим и проверенным блоком остается ML research; остальные блоки являются архитектурным scaffold без live trading и без production-интеграций.
+`moex-candle-predictor` оформлен как модульная research-платформа для будущего торгового агента на MOEX. Сейчас рабочим и проверенным блоком остается ML research; остальные блоки являются архитектурным scaffold без live trading и без production-интеграций.
 
 ## Текущий статус
 
@@ -65,7 +65,7 @@ python ml\scripts\predict_from_json.py `
   --output-json data\reports\ml_prediction_example.json
 ```
 
-Пока fitted production artifact для лучшего triple-barrier candidate не создан, CLI возвращает `diagnostics.artifact_missing=true` и не имитирует реальный прогноз.
+Без artifact CLI возвращает `diagnostics.artifact_missing=true` и не имитирует реальный прогноз. На ветке `ml-expirement` добавлен research-only artifact path: локально можно обучить frozen triple-barrier artifact и передать его через `--artifact-dir`, чтобы получить реальные `predict_proba` probabilities по `ml_prediction` contract. Это все еще не production/live trading artifact.
 
 ## Проверка contracts и backend
 

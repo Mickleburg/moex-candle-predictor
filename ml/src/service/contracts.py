@@ -47,7 +47,7 @@ CURRENT_RESEARCH_DEFAULT = ModelContractMetadata(
     model_family="triple_barrier_extra_trees",
     target="triple_barrier:h3:w12:up1.25:down1.25",
     feature_set="continuous_regime",
-    validation_macro_f1=0.4695,
+    validation_macro_f1=0.4685,
     is_production=False,
     class_weight="none",
 )

@@ -23,6 +23,7 @@ mean macro-F1=0.4695
 ## Новый отчет
 
 - `sber_h1_triple_barrier_seed_robustness_2026-05-15.md` - проверка устойчивости текущего triple-barrier candidate по seeds `7,13,21,42,100`.
+- `sber_h1_research_artifact_2026-05-15.md` - protocol локального research artifact bundle и JSON inference path для frozen candidate.
 
 Seed robustness подтвердил, что `random_state=42` не был случайным выбросом:
 
