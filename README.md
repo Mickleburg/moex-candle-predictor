@@ -57,6 +57,16 @@ python -m compileall -q ml\src ml\scripts ml\test_smoke.py
 python ml\test_smoke.py
 ```
 
+ML-блок также имеет contract-compatible CLI:
+
+```powershell
+python ml\scripts\predict_from_json.py `
+  --input-json contracts\examples\candle_batch.example.json `
+  --output-json data\reports\ml_prediction_example.json
+```
+
+Пока fitted production artifact для лучшего triple-barrier candidate не создан, CLI возвращает `diagnostics.artifact_missing=true` и не имитирует реальный прогноз.
+
 ## Проверка contracts и backend
 
 ```powershell

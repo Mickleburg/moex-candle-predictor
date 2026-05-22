@@ -71,6 +71,32 @@ python ml\test_smoke.py
 python scripts\validate_contracts.py
 ```
 
+## ML prediction JSON contract
+
+ML-блок умеет принимать `candle_batch` JSON и записывать `ml_prediction` JSON:
+
+```powershell
+python ml\scripts\predict_from_json.py `
+  --input-json contracts\examples\candle_batch.example.json `
+  --output-json data\reports\ml_prediction_example.json
+```
+
+Входной контракт:
+
+```text
+contracts/candle_batch.schema.json
+```
+
+Выходной контракт:
+
+```text
+contracts/ml_prediction.schema.json
+```
+
+Текущий лучший research candidate (`triple_barrier:h3:w12:up1.25:down1.25`) пока не имеет fitted production artifact bundle. Поэтому CLI возвращает валидный JSON в режиме `diagnostics.artifact_missing=true`, а не настоящий прогноз.
+
+Подробности: `ml/docs/ml_prediction_contract_2026-05-15.md`.
+
 ## Документы
 
 - `ml/docs/research/` - SBER H1 research reports.

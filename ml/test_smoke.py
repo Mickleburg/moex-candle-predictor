@@ -984,6 +984,70 @@ def test_predictor_input_validation():
         return False
 
 
+def test_ml_prediction_contract_invariants():
+    """Test candle_batch -> ml_prediction contract helpers."""
+
+    print("\nTesting ML prediction JSON contract invariants...")
+
+    try:
+        import json
+        import math
+        from datetime import datetime, timedelta
+
+        from src.service.contracts import (
+            build_artifact_missing_response,
+            build_ml_prediction_response,
+            candle_batch_to_dataframe,
+            load_candle_batch_json,
+        )
+
+        base = datetime(2026, 5, 15, 10)
+        payload = {
+            "ticker": "SBER",
+            "timeframe": "1H",
+            "candles": [
+                {"begin": (base + timedelta(hours=2)).isoformat(), "open": 300, "high": 302, "low": 299, "close": 301, "volume": 100},
+                {"begin": base.isoformat(), "open": 298, "high": 301, "low": 297, "close": 300, "volume": 120},
+                {"begin": (base + timedelta(hours=1)).isoformat(), "open": 300, "high": 303, "low": 299, "close": 302, "volume": 110},
+            ],
+        }
+        batch = load_candle_batch_json(payload)
+        df = candle_batch_to_dataframe(batch)
+        assert df["begin"].is_monotonic_increasing
+        assert df["ticker"].nunique() == 1
+        assert df["timeframe"].nunique() == 1
+
+        duplicate = dict(payload)
+        duplicate["candles"] = [payload["candles"][0], payload["candles"][0]]
+        try:
+            candle_batch_to_dataframe(load_candle_batch_json(duplicate))
+            raise AssertionError("duplicate begin was accepted")
+        except ValueError:
+            pass
+
+        response = build_ml_prediction_response(
+            ticker="SBER",
+            timeframe="1H",
+            as_of=df["begin"].iloc[-1].isoformat(),
+            probabilities={"buy": 0.2, "hold": 0.5, "sell": 0.3},
+            confidence=0.5,
+        )
+        assert set(response["probabilities"]) == {"buy", "hold", "sell"}
+        assert math.isclose(sum(response["probabilities"].values()), 1.0, abs_tol=1e-6)
+        assert response["diagnostics"]["feature_set"] == "continuous_regime"
+
+        missing = build_artifact_missing_response(batch=batch, df=df, artifact_dir="missing")
+        assert missing["diagnostics"]["artifact_missing"] is True
+        assert missing["probabilities"] == {"buy": 0.0, "hold": 1.0, "sell": 0.0}
+        assert missing["confidence"] == 0.0
+        json.dumps(missing)
+        print("  PASS ML prediction contract helpers")
+        return True
+    except Exception as exc:
+        print(f"  FAIL ML prediction contract test failed: {exc}")
+        return False
+
+
 def main():
     """Run all smoke tests."""
 
@@ -1007,6 +1071,7 @@ def main():
         ("Nested Thresholds", test_nested_threshold_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
+        ("ML Prediction Contract", test_ml_prediction_contract_invariants()),
     ]
 
     print("\n" + "=" * 50)
