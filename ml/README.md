@@ -50,13 +50,26 @@ mean macro-F1: 0.4695
 
 Это не production artifact и не разрешение на торговлю. Test split не использовался для выбора этого candidate.
 
-Перед production research artifact нужны:
+Seed robustness для этого candidate проведен на seeds `7,13,21,42,100`:
 
-1. seed robustness для ExtraTrees;
-2. frozen candidate protocol;
-3. одна честная final evaluation, если protocol разрешает;
-4. backtest и paper trading;
-5. явный risk layer.
+```text
+mean macro-F1 over seeds: 0.4685
+worst seed macro-F1:     0.4676
+worst fold macro-F1:     0.4522
+BUY F1:                  0.4044
+SELL F1:                 0.4377
+HOLD F1:                 0.5634
+action rate:             0.6708
+```
+
+По этой проверке candidate можно считать frozen research candidate для следующего этапа artifact bundle protocol. Сам artifact bundle пока не создан, а `predict_from_json.py` по-прежнему возвращает `diagnostics.artifact_missing=true`.
+
+После seed robustness перед production research artifact все еще нужны:
+
+1. frozen candidate protocol;
+2. одна честная final evaluation, если protocol разрешает;
+3. backtest и paper trading;
+4. явный risk layer.
 
 ## Команды проверки
 

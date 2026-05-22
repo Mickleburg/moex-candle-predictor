@@ -758,6 +758,8 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         pred_hold = np.asarray([_label_share(item["prediction_distribution"], "HOLD") for item in items], dtype=float)
         seed_means = _group_metric_mean(items, "random_state", "macro_f1")
         fold_means = _group_metric_mean(items, "fold_id", "macro_f1")
+        seed_mean_values = np.asarray(list(seed_means.values()), dtype=float)
+        fold_mean_values = np.asarray(list(fold_means.values()), dtype=float)
         result.append(
             {
                 "target_label": key[0],
@@ -771,8 +773,11 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "mean_macro_f1": float(macro.mean()),
                 "std_macro_f1": float(macro.std(ddof=0)),
                 "worst_macro_f1": float(macro.min()),
-                "std_across_folds": float(np.asarray(list(fold_means.values()), dtype=float).std(ddof=0)) if fold_means else 0.0,
-                "std_across_seeds": float(np.asarray(list(seed_means.values()), dtype=float).std(ddof=0)) if seed_means else 0.0,
+                "std_across_folds": float(fold_mean_values.std(ddof=0)) if fold_means else 0.0,
+                "std_across_seeds": float(seed_mean_values.std(ddof=0)) if seed_means else 0.0,
+                "mean_by_seed": {str(key): float(value) for key, value in sorted(seed_means.items())},
+                "worst_seed_macro_f1": float(seed_mean_values.min()) if seed_means else float(macro.min()),
+                "best_seed_macro_f1": float(seed_mean_values.max()) if seed_means else float(macro.max()),
                 "mean_accuracy": float(accuracy.mean()),
                 "mean_balanced_accuracy": float(balanced.mean()),
                 "mean_buy_f1": float(buy.mean()),
