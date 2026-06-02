@@ -8,3 +8,8 @@ data/predictions/*.parquet
 data/reports/*.csv
 data/reports/*.json
 data/reports/*.jsonl
+
+CLAUDE.md
+ml/SKILL.md
+
+data/backend.exe
