@@ -68,20 +68,26 @@ git status
 
 ## Шаг 5. Создай виртуальное окружение
 
+**Важно**: на корпоративных PC Windows AppLocker может блокировать DLL-файлы Python-пакетов
+внутри папки проекта. Чтобы избежать этой ошибки, создавай venv в домашней папке пользователя:
+
 ```powershell
-python -m venv ml\.venv-win
+python -m venv $env:USERPROFILE\ml-venv-moex
 ```
 
 Активируй:
 ```powershell
-ml\.venv-win\Scripts\Activate.ps1
+$env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
 ```
 
 Если PowerShell блокирует выполнение скриптов:
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-ml\.venv-win\Scripts\Activate.ps1
+$env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
 ```
+
+> **Альтернатива** (если и `%USERPROFILE%` заблокирован): попробуй `C:\Temp\ml-venv-moex` или
+> обратись к системному администратору за разрешением на запуск Python-расширений (.pyd).
 
 ---
 
@@ -195,6 +201,26 @@ Get-ChildItem ml\docs\research\sber_h1_transformer_results_*.json | Sort-Object 
 ---
 
 ## Что делать если что-то пошло не так
+
+### ImportError: DLL load failed — "Политика управления приложениями заблокировала"
+
+Windows AppLocker/WDAC блокирует Cython-расширения scikit-learn в папке проекта.
+Создай venv в домашней папке — AppLocker обычно разрешает выполнение оттуда:
+
+```powershell
+# Деактивируй текущий venv (если активирован)
+deactivate
+
+# Создай новый venv в профиле пользователя
+python -m venv $env:USERPROFILE\ml-venv-moex
+$env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
+
+# Переустанови зависимости
+pip install -r ml/requirements_research.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+Если и это не помогло — попробуй `C:\Temp\ml-venv-moex` или обратись к администратору.
 
 ### PowerShell запрещает скрипты
 ```powershell
