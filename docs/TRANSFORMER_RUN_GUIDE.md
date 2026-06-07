@@ -69,14 +69,11 @@ git status
 ## Шаг 5. Создай виртуальное окружение
 
 **Важно**: на корпоративных PC Windows AppLocker может блокировать DLL-файлы Python-пакетов
-внутри папки проекта. Чтобы избежать этой ошибки, создавай venv в домашней папке пользователя:
+внутри папки проекта. Чтобы избежать этой ошибки, создавай venv в домашней папке пользователя.
 
+**PowerShell:**
 ```powershell
 python -m venv $env:USERPROFILE\ml-venv-moex
-```
-
-Активируй:
-```powershell
 $env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
 ```
 
@@ -84,6 +81,12 @@ $env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 $env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
+```
+
+**CMD (Command Prompt):**
+```cmd
+python -m venv %USERPROFILE%\ml-venv-moex
+%USERPROFILE%\ml-venv-moex\Scripts\activate.bat
 ```
 
 > **Альтернатива** (если и `%USERPROFILE%` заблокирован): попробуй `C:\Temp\ml-venv-moex` или
@@ -145,8 +148,15 @@ print('Диапазон:', df['begin'].min(), '-', df['begin'].max())
 
 ## Шаг 8. Запусти эксперимент
 
+**PowerShell:**
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"
+python ml/scripts/sber_transformer_research.py
+```
+
+**CMD:**
+```cmd
+set PYTHONIOENCODING=utf-8
 python ml/scripts/sber_transformer_research.py
 ```
 
@@ -207,15 +217,20 @@ Get-ChildItem ml\docs\research\sber_h1_transformer_results_*.json | Sort-Object 
 Windows AppLocker/WDAC блокирует Cython-расширения scikit-learn в папке проекта.
 Создай venv в домашней папке — AppLocker обычно разрешает выполнение оттуда:
 
+**PowerShell:**
 ```powershell
-# Деактивируй текущий venv (если активирован)
 deactivate
-
-# Создай новый venv в профиле пользователя
 python -m venv $env:USERPROFILE\ml-venv-moex
 $env:USERPROFILE\ml-venv-moex\Scripts\Activate.ps1
+pip install -r ml/requirements_research.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
 
-# Переустанови зависимости
+**CMD:**
+```cmd
+deactivate
+python -m venv %USERPROFILE%\ml-venv-moex
+%USERPROFILE%\ml-venv-moex\Scripts\activate.bat
 pip install -r ml/requirements_research.txt
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
