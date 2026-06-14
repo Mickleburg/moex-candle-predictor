@@ -1,0 +1,160 @@
+{
+  "experiment": "sber_h1_sell_diag_tb_exit",
+  "timestamp": "20260614_124152",
+  "git_branch": "ml-expirement",
+  "config": {
+    "fee_one_way": 0.0005,
+    "prod_threshold": 0.5,
+    "target": "triple_barrier:h3:w12:up1.25:down1.25"
+  },
+  "sell_diagnosis": {
+    "per_class": {
+      "SELL": {
+        "count": 3058,
+        "share": 0.38846544715447157,
+        "mean_conf": 0.4170319437980652,
+        "max_conf": 0.4845092296600342,
+        "n_gt_045": 352,
+        "n_gt_050": 0,
+        "n_gt_055": 0
+      },
+      "HOLD": {
+        "count": 2524,
+        "share": 0.320630081300813,
+        "mean_conf": 0.5952738523483276,
+        "max_conf": 0.9627016186714172,
+        "n_gt_045": 2072,
+        "n_gt_050": 1804,
+        "n_gt_055": 1553
+      },
+      "BUY": {
+        "count": 2290,
+        "share": 0.29090447154471544,
+        "mean_conf": 0.4148932993412018,
+        "max_conf": 0.6970748901367188,
+        "n_gt_045": 258,
+        "n_gt_050": 78,
+        "n_gt_055": 31
+      }
+    },
+    "realized_val_labels": {
+      "SELL": {
+        "count": 2640,
+        "share": 0.3353658536585366
+      },
+      "HOLD": {
+        "count": 2692,
+        "share": 0.34197154471544716
+      },
+      "BUY": {
+        "count": 2540,
+        "share": 0.3226626016260163
+      }
+    },
+    "sell_short_edge": {
+      "conf>0.00": {
+        "fixed_3h": {
+          "n_trades": 3058,
+          "total_return": -0.9327173207069672,
+          "sharpe": -3.15758711444502,
+          "win_rate": 0.4316546762589928,
+          "avg_trade_ret": -0.0008603507147701926,
+          "max_drawdown": -0.9350513677055938,
+          "mean_hold_h": 3.0
+        },
+        "triple_barrier": {
+          "n_trades": 3058,
+          "total_return": -0.9555794721019372,
+          "sharpe": -9.362720261151214,
+          "win_rate": 0.4682799215173316,
+          "avg_trade_ret": -0.0010116735221941662,
+          "max_drawdown": -0.9557443861315241,
+          "mean_hold_h": 1.6661216481360366
+        }
+      },
+      "conf>0.40": {
+        "fixed_3h": {
+          "n_trades": 2240,
+          "total_return": -0.8922121213587937,
+          "sharpe": -3.5913809497107727,
+          "win_rate": 0.4232142857142857,
+          "avg_trade_ret": -0.0009724158680950005,
+          "max_drawdown": -0.8946869381892067,
+          "mean_hold_h": 3.0
+        },
+        "triple_barrier": {
+          "n_trades": 2240,
+          "total_return": -0.8916879472543574,
+          "sharpe": -9.485462041369036,
+          "win_rate": 0.4758928571428571,
+          "avg_trade_ret": -0.0009861142544035253,
+          "max_drawdown": -0.8923155700319257,
+          "mean_hold_h": 1.6642857142857144
+        }
+      },
+      "conf>0.45": {
+        "fixed_3h": {
+          "n_trades": 352,
+          "total_return": -0.34020843652734223,
+          "sharpe": -4.320967787183037,
+          "win_rate": 0.39488636363636365,
+          "avg_trade_ret": -0.00115960473622766,
+          "max_drawdown": -0.34757898962168177,
+          "mean_hold_h": 3.0
+        },
+        "triple_barrier": {
+          "n_trades": 352,
+          "total_return": -0.34544212198744995,
+          "sharpe": -11.737764624705585,
+          "win_rate": 0.46875,
+          "avg_trade_ret": -0.0011973831319137334,
+          "max_drawdown": -0.34644272146335686,
+          "mean_hold_h": 1.5568181818181819
+        }
+      }
+    }
+  },
+  "buy_exit_comparison": {
+    "1h": {
+      "n_trades": 78,
+      "total_return": 0.050729324862724745,
+      "sharpe": 6.380885118199815,
+      "win_rate": 0.3974358974358974,
+      "avg_trade_ret": 0.0006435151587316618,
+      "max_drawdown": -0.020642421673988998,
+      "mean_hold_h": 1.0,
+      "outcome_counts": {
+        "fixed1h": 78
+      }
+    },
+    "3h": {
+      "n_trades": 49,
+      "total_return": 0.16075380948696583,
+      "sharpe": 9.559100182081256,
+      "win_rate": 0.7142857142857143,
+      "avg_trade_ret": 0.0030769228283829956,
+      "max_drawdown": -0.021555877637304155,
+      "mean_hold_h": 3.0,
+      "outcome_counts": {
+        "fixed3h": 49
+      }
+    },
+    "tb": {
+      "n_trades": 52,
+      "total_return": 0.070985645427456,
+      "sharpe": 7.67533092051134,
+      "win_rate": 0.6923076923076923,
+      "avg_trade_ret": 0.001331332494728373,
+      "max_drawdown": -0.011527802159978728,
+      "mean_hold_h": 2.25,
+      "outcome_counts": {
+        "timeout": 10,
+        "stop_ambiguous": 4,
+        "stop": 8,
+        "win_barrier": 30
+      }
+    }
+  },
+  "n_val_predictions": 7872,
+  "total_seconds": 4.0
+}
