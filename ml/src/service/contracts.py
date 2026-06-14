@@ -150,8 +150,15 @@ def build_ml_prediction_response(
     expected_return: float | None = None,
     metadata: ModelContractMetadata = CURRENT_RESEARCH_DEFAULT,
     diagnostics: dict[str, Any] | None = None,
+    signal_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a JSON object compatible with ``ml_prediction.schema.json``."""
+    """Build a JSON object compatible with ``ml_prediction.schema.json``.
+
+    ``signal_context`` is optional prediction-intrinsic forecast context (horizon,
+    volatility-scaled barrier levels, calibration flag). It is INFORMATION for the
+    downstream aggregator/risk_manager — never a trading command. Omitted from the
+    response when not provided.
+    """
 
     probabilities = dict(probabilities or {"buy": 0.0, "hold": 1.0, "sell": 0.0})
     _validate_probability_dict(probabilities)
@@ -170,7 +177,7 @@ def build_ml_prediction_response(
     if diagnostics:
         base_diagnostics.update(diagnostics)
 
-    return {
+    response: dict[str, Any] = {
         "ticker": ticker,
         "timeframe": timeframe,
         "as_of": as_of,
@@ -182,6 +189,9 @@ def build_ml_prediction_response(
         "expected_return": expected_return,
         "diagnostics": base_diagnostics,
     }
+    if signal_context is not None:
+        response["signal_context"] = dict(signal_context)
+    return response
 
 
 def build_artifact_missing_response(

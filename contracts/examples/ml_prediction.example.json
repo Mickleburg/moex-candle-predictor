@@ -11,7 +11,18 @@
     "sell": 0.30
   },
   "confidence": 0.52,
-  "expected_return": null,
+  "expected_return": 0.0021,
+  "signal_context": {
+    "horizon_bars": 3,
+    "horizon_timeframe": "1H",
+    "upper_return": 0.0125,
+    "lower_return": 0.0125,
+    "upper_barrier": 304.76,
+    "lower_barrier": 297.24,
+    "volatility": 0.01,
+    "reference_close": 301.0,
+    "calibrated": false
+  },
   "diagnostics": {
     "feature_set": "continuous_regime",
     "validation_macro_f1": 0.4695,

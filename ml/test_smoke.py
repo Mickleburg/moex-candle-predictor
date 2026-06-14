@@ -1106,6 +1106,16 @@ def test_ml_prediction_contract_invariants():
             assert artifact_response["diagnostics"]["is_production"] is False
             assert math.isclose(sum(artifact_response["probabilities"].values()), 1.0, abs_tol=1e-6)
 
+            # New contract info: expected_return + signal_context (informational, not commands)
+            assert isinstance(artifact_response["expected_return"], float)
+            ctx = artifact_response["signal_context"]
+            assert ctx["horizon_bars"] == 3
+            assert ctx["horizon_timeframe"] == "1H"
+            assert ctx["upper_return"] >= 0.001 and ctx["lower_return"] >= 0.001
+            assert ctx["upper_barrier"] > ctx["reference_close"] > ctx["lower_barrier"]
+            assert ctx["calibrated"] is False
+            json.dumps(artifact_response)
+
             insufficient = predict_with_artifact(artifact, df.head(1))
             assert insufficient.diagnostics["error"] == "insufficient_history"
             assert insufficient.probabilities == {"buy": 0.0, "hold": 1.0, "sell": 0.0}

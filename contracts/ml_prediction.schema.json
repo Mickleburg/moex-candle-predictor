@@ -20,7 +20,26 @@
       }
     },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-    "expected_return": { "type": ["number", "null"] },
+    "expected_return": {
+      "type": ["number", "null"],
+      "description": "Probability-weighted expected forward return over the prediction horizon (gross of fees). E[r] = P(buy)*upper_return - P(sell)*lower_return; HOLD contributes 0. Lets the aggregator compute risk-adjusted expected edge. null when not computable (non triple-barrier target or insufficient history)."
+    },
+    "signal_context": {
+      "type": "object",
+      "description": "Prediction-intrinsic forecast context — INFORMATION for downstream, not trading commands. The aggregator/risk_manager decide entry threshold, stop, position size and portfolio; this block only forecasts. Optional (absent when not computable).",
+      "properties": {
+        "horizon_bars": { "type": "integer", "description": "Bars the prediction looks ahead (triple-barrier h)." },
+        "horizon_timeframe": { "type": "string", "description": "Bar timeframe, e.g. 1H." },
+        "upper_return": { "type": "number", "description": "Relative upper-barrier distance (volatility-scaled) — expected up-move magnitude." },
+        "lower_return": { "type": "number", "description": "Relative lower-barrier distance — downside magnitude; a natural stop reference for risk_manager." },
+        "upper_barrier": { "type": ["number", "null"], "description": "Absolute upper-barrier price = reference_close*(1+upper_return)." },
+        "lower_barrier": { "type": ["number", "null"], "description": "Absolute lower-barrier price = reference_close*(1-lower_return)." },
+        "volatility": { "type": "number", "description": "Past realized return volatility used to size the barriers." },
+        "reference_close": { "type": ["number", "null"], "description": "Last candle close the barriers are computed from." },
+        "calibrated": { "type": "boolean", "description": "Whether the emitted probabilities are calibrated." }
+      },
+      "additionalProperties": true
+    },
     "diagnostics": {
       "type": "object",
       "properties": {

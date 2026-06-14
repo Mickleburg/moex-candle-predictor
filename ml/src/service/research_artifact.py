@@ -37,6 +37,80 @@ def _check_torch() -> bool:
     return _TORCH_AVAILABLE
 
 
+_BASE_BARRIER_THRESHOLD = 0.001   # 2 * 0.0005 commission, matches triple_barrier_details
+
+
+def _parse_triple_barrier_params(target_str: str | None) -> dict[str, float] | None:
+    """Parse 'triple_barrier:h3:w12:up1.25:down1.25' -> barrier params, else None."""
+    if not target_str or not str(target_str).startswith("triple_barrier"):
+        return None
+    params = {"horizon": 3, "vol_window": 12, "up_k": 1.25, "down_k": 1.25}
+    for tok in str(target_str).split(":")[1:]:
+        try:
+            if tok.startswith("h"):
+                params["horizon"] = int(tok[1:])
+            elif tok.startswith("w"):
+                params["vol_window"] = int(tok[1:])
+            elif tok.startswith("up"):
+                params["up_k"] = float(tok[2:])
+            elif tok.startswith("down"):
+                params["down_k"] = float(tok[4:])
+        except (ValueError, IndexError):
+            continue
+    return params
+
+
+def _compute_signal_context(
+    artifact: "ResearchArtifact",
+    candle_batch_df: pd.DataFrame,
+    probabilities: dict[str, float],
+) -> tuple[float | None, dict[str, Any] | None]:
+    """Compute prediction-intrinsic forecast context (expected_return + signal_context).
+
+    Informational only — downstream owns thresholds/stops/sizing. Returns (None, None)
+    for non triple-barrier targets or when history is too short for volatility.
+    """
+    target_str = str(artifact.metadata.get("target", "")) or str(
+        artifact.target_config.get("target_label", "")
+    )
+    params = _parse_triple_barrier_params(target_str)
+    if params is None or candle_batch_df.empty:
+        return None, None
+
+    from src.nlp.targets import past_return_volatility
+
+    try:
+        vol_arr = past_return_volatility(candle_batch_df, int(params["vol_window"]))
+    except Exception:
+        return None, None
+    vol = float(vol_arr[-1]) if len(vol_arr) else 0.0
+
+    up_ret = max(_BASE_BARRIER_THRESHOLD, float(params["up_k"]) * vol)
+    dn_ret = max(_BASE_BARRIER_THRESHOLD, float(params["down_k"]) * vol)
+    close = float(candle_batch_df["close"].iloc[-1])
+
+    p_buy = float(probabilities.get("buy", 0.0))
+    p_sell = float(probabilities.get("sell", 0.0))
+    expected_return = p_buy * up_ret - p_sell * dn_ret
+
+    timeframe = ""
+    if "timeframe" in candle_batch_df.columns and len(candle_batch_df):
+        timeframe = str(candle_batch_df["timeframe"].iloc[-1])
+
+    context = {
+        "horizon_bars": int(params["horizon"]),
+        "horizon_timeframe": timeframe,
+        "upper_return": up_ret,
+        "lower_return": dn_ret,
+        "upper_barrier": close * (1.0 + up_ret),
+        "lower_barrier": close * (1.0 - dn_ret),
+        "volatility": vol,
+        "reference_close": close,
+        "calibrated": bool(artifact.metadata.get("probabilities_calibrated", False)),
+    }
+    return float(expected_return), context
+
+
 REQUIRED_ARTIFACT_FILES = (
     "feature_config.json",
     "target_config.json",
@@ -74,6 +148,8 @@ class ArtifactPrediction:
     probabilities: dict[str, float]
     confidence: float
     diagnostics: dict[str, Any]
+    expected_return: float | None = None
+    signal_context: dict[str, Any] | None = None
 
 
 def artifact_bundle_available(path: str | Path) -> bool:
@@ -206,7 +282,11 @@ def _predict_with_et(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame) 
         "probabilities_calibrated": bool(artifact.metadata.get("probabilities_calibrated", False)),
         "feature_columns_count": int(len(artifact.feature_columns)),
     })
-    return ArtifactPrediction(probabilities=probabilities, confidence=confidence, diagnostics=diagnostics)
+    expected_return, signal_context = _compute_signal_context(artifact, candle_batch_df, probabilities)
+    return ArtifactPrediction(
+        probabilities=probabilities, confidence=confidence, diagnostics=diagnostics,
+        expected_return=expected_return, signal_context=signal_context,
+    )
 
 
 def _predict_with_lstm(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame) -> ArtifactPrediction:
@@ -254,10 +334,13 @@ def _predict_with_lstm(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame
         "prediction_mode": "research_artifact_lstm",
         "probabilities_calibrated": bool(artifact.metadata.get("probabilities_calibrated", False)),
         "seq_len": seq_len,
-        "production_threshold": 0.50,
-        "note": "Trade only when confidence > 0.50 (backtest Sharpe=6.38 at this threshold)",
+        "note": "Entry threshold/hold/stop are risk_manager concerns; see signal_context for barriers.",
     })
-    return ArtifactPrediction(probabilities=probabilities, confidence=confidence, diagnostics=diagnostics)
+    expected_return, signal_context = _compute_signal_context(artifact, candle_batch_df, probabilities)
+    return ArtifactPrediction(
+        probabilities=probabilities, confidence=confidence, diagnostics=diagnostics,
+        expected_return=expected_return, signal_context=signal_context,
+    )
 
 
 def build_artifact_prediction_response(
@@ -276,9 +359,10 @@ def build_artifact_prediction_response(
         as_of=dataframe_as_of(df),
         probabilities=prediction.probabilities,
         confidence=prediction.confidence,
-        expected_return=None,
+        expected_return=prediction.expected_return,
         metadata=metadata,
         diagnostics=prediction.diagnostics,
+        signal_context=prediction.signal_context,
     )
 
 
