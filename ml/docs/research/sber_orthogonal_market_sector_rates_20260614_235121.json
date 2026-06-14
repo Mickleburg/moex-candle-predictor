@@ -1,0 +1,47 @@
+{
+  "experiment": "orthogonal_lstm",
+  "ticker": "SBER",
+  "groups": [
+    "market",
+    "sector",
+    "rates"
+  ],
+  "timestamp": "20260614_235121",
+  "git_branch": "ml-expirement",
+  "input_dim": 32,
+  "orthogonal_feature_names": [
+    "IMOEX_ret_1h",
+    "IMOEX_ret_3h",
+    "IMOEX_ret_d",
+    "IMOEX_vol",
+    "RTSI_ret_1h",
+    "RTSI_ret_3h",
+    "RTSI_ret_d",
+    "RTSI_vol",
+    "rtsi_imoex_spread_ret",
+    "MOEXFN_ret_1h",
+    "MOEXFN_ret_3h",
+    "MOEXFN_ret_d",
+    "MOEXFN_vol",
+    "rs_vs_MOEXFN",
+    "RGBI_ret_1h",
+    "RGBI_ret_3h",
+    "RGBI_ret_d",
+    "RGBI_vol"
+  ],
+  "wf_macro_f1": 0.47303179291589376,
+  "backtest": {
+    "n": 49,
+    "total_return": 0.1771850280411833,
+    "win_rate": 0.6530612244897959,
+    "sharpe": 11.0189792362842,
+    "mean_ret": 0.003363649067301885
+  },
+  "ohlcv_baseline": {
+    "return": 0.1896,
+    "sharpe": 14.95,
+    "win_rate": 0.732,
+    "trades": 41
+  },
+  "total_seconds": 1160.3
+}
