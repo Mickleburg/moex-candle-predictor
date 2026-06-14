@@ -1126,6 +1126,86 @@ def test_ml_prediction_contract_invariants():
         return False
 
 
+def test_ticker_model_router():
+    """Test per-ticker routing: known ticker -> model, unknown ticker -> artifact_missing."""
+
+    print("\nTesting per-ticker model router...")
+
+    try:
+        import json
+        import pickle
+        import tempfile
+        from datetime import datetime, timedelta
+
+        import numpy as np
+        from sklearn.dummy import DummyClassifier
+
+        from src.nlp import make_continuous_past_features
+        from src.service.contracts import candle_batch_to_dataframe, load_candle_batch_json
+        from src.service.model_registry import TickerModelRouter, resolve_artifact_dir
+
+        base = datetime(2026, 5, 15, 10)
+        candles = [
+            {"begin": (base + timedelta(hours=i)).isoformat(), "open": 300 + i, "high": 303 + i,
+             "low": 298 + i, "close": 301 + i, "volume": 100 + i}
+            for i in range(40)
+        ]
+
+        def make_batch(ticker):
+            return load_candle_batch_json({"ticker": ticker, "timeframe": "1H", "candles": candles})
+
+        df_for_names = candle_batch_to_dataframe(make_batch("SBER"))
+        _, feature_names = make_continuous_past_features(df_for_names)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Build a minimal ET artifact for SBER under the ET template name.
+            art = root / "research_triple_barrier_sber_h1"
+            art.mkdir(parents=True)
+            model = DummyClassifier(strategy="prior")
+            model.fit(np.zeros((3, len(feature_names))), np.asarray([0, 1, 2], dtype=int))
+            with (art / "model.pkl").open("wb") as handle:
+                pickle.dump(model, handle)
+            (art / "metadata.json").write_text(json.dumps({
+                "artifact_id": "smoke_sber", "model_version": "smoke_sber", "ticker": "SBER",
+                "timeframe": "1H", "model_family": "triple_barrier_extra_trees",
+                "target": "triple_barrier:h3:w12:up1.25:down1.25", "feature_set": "continuous_regime",
+                "class_weight": "none", "validation_macro_f1_mean": 0.1, "min_candles_for_prediction": 2,
+            }), encoding="utf-8")
+            (art / "feature_config.json").write_text(json.dumps({
+                "feature_set": "continuous_regime", "feature_columns": feature_names,
+                "standardization_mean": [0.0] * len(feature_names),
+                "standardization_std": [1.0] * len(feature_names),
+            }), encoding="utf-8")
+            (art / "target_config.json").write_text(json.dumps(
+                {"target_mode": "triple_barrier", "label_order": ["SELL", "HOLD", "BUY"]}), encoding="utf-8")
+            (art / "label_mapping.json").write_text(json.dumps({
+                "internal_to_contract": {"SELL": "sell", "HOLD": "hold", "BUY": "buy"},
+                "contract_to_internal": {"sell": "SELL", "hold": "HOLD", "buy": "BUY"},
+            }), encoding="utf-8")
+            (art / "schema_version.json").write_text(json.dumps({"artifact_schema_version": 1}), encoding="utf-8")
+            (art / "feature_columns.json").write_text(json.dumps(feature_names), encoding="utf-8")
+
+            router = TickerModelRouter(artifact_root=root)
+            assert router.available_tickers() == ["SBER"], router.available_tickers()
+            assert resolve_artifact_dir("SBER", root) == art
+            assert resolve_artifact_dir("GAZP", root) is None
+
+            sber_resp = router.predict(make_batch("SBER"))
+            assert sber_resp["diagnostics"]["artifact_missing"] is False
+            assert sber_resp["ticker"] == "SBER"
+
+            gazp_resp = router.predict(make_batch("GAZP"))
+            assert gazp_resp["diagnostics"]["artifact_missing"] is True
+            assert gazp_resp["ticker"] == "GAZP"
+            json.dumps(gazp_resp)
+        print("  PASS Per-ticker routing (SBER->model, GAZP->artifact_missing)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Ticker model router test failed: {exc}")
+        return False
+
+
 def main():
     """Run all smoke tests."""
 
@@ -1150,6 +1230,7 @@ def main():
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
         ("ML Prediction Contract", test_ml_prediction_contract_invariants()),
+        ("Ticker Model Router", test_ticker_model_router()),
     ]
 
     print("\n" + "=" * 50)
