@@ -1126,6 +1126,39 @@ def test_ml_prediction_contract_invariants():
         return False
 
 
+def test_timezone_canonicalization():
+    """Test MSK timezone fix preserves wall-clock hour/dow while correcting the tz label."""
+
+    print("\nTesting timezone canonicalization...")
+
+    try:
+        import pandas as pd
+
+        from src.data.load import MOEX_TZ, to_moscow_time
+
+        # Legacy: MSK wall-clock mislabelled as UTC.
+        legacy = pd.Series(pd.to_datetime(
+            ["2020-01-03 09:00:00", "2025-03-14 22:00:00"], utc=True))
+        fixed = to_moscow_time(legacy)
+        assert str(fixed.dt.tz) == MOEX_TZ
+        # Wall-clock hour/dow unchanged -> models stay valid.
+        assert list(fixed.dt.hour) == list(legacy.dt.hour) == [9, 22]
+        assert list(fixed.dt.dayofweek) == list(legacy.dt.dayofweek)
+        # Correct label is +03:00.
+        assert fixed.iloc[0].utcoffset().total_seconds() == 3 * 3600
+
+        # Naive input is localised, not shifted.
+        naive = pd.Series(pd.to_datetime(["2025-03-14 22:00:00"]))
+        fixed_naive = to_moscow_time(naive)
+        assert list(fixed_naive.dt.hour) == [22]
+        assert str(fixed_naive.dt.tz) == MOEX_TZ
+        print("  PASS Timezone canonicalization (wall-clock preserved, label corrected to MSK)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Timezone canonicalization test failed: {exc}")
+        return False
+
+
 def test_ticker_model_router():
     """Test per-ticker routing: known ticker -> model, unknown ticker -> artifact_missing."""
 
@@ -1230,6 +1263,7 @@ def main():
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
         ("ML Prediction Contract", test_ml_prediction_contract_invariants()),
+        ("Timezone Canonicalization", test_timezone_canonicalization()),
         ("Ticker Model Router", test_ticker_model_router()),
     ]
 

@@ -93,8 +93,9 @@ class TickerData:
     """Features, labels and timestamps for one ticker (full history, test excluded)."""
 
     def __init__(self, ticker: str):
-        df = load_candles(str(DATA_DIR), ticker=ticker, timeframe="1H")
-        df["begin"] = pd.to_datetime(df["begin"], utc=True)
+        # tz_aware=True -> correctly-labelled MSK (wall-clock preserved, so hour/dow and all
+        # downstream features/caches are numerically unchanged; only the tz label is fixed).
+        df = load_candles(str(DATA_DIR), ticker=ticker, timeframe="1H", tz_aware=True)
         df = df.sort_values("begin").reset_index(drop=True)
         self.ticker = ticker
         self.df = df
