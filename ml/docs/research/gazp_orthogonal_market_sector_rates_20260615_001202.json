@@ -1,0 +1,42 @@
+{
+  "experiment": "orthogonal_lstm",
+  "ticker": "GAZP",
+  "groups": [
+    "market",
+    "sector",
+    "rates"
+  ],
+  "timestamp": "20260615_001202",
+  "git_branch": "ml-expirement",
+  "input_dim": 32,
+  "orthogonal_feature_names": [
+    "IMOEX_ret_1h",
+    "IMOEX_ret_3h",
+    "IMOEX_ret_d",
+    "IMOEX_vol",
+    "RTSI_ret_1h",
+    "RTSI_ret_3h",
+    "RTSI_ret_d",
+    "RTSI_vol",
+    "rtsi_imoex_spread_ret",
+    "MOEXOG_ret_1h",
+    "MOEXOG_ret_3h",
+    "MOEXOG_ret_d",
+    "MOEXOG_vol",
+    "rs_vs_MOEXOG",
+    "RGBI_ret_1h",
+    "RGBI_ret_3h",
+    "RGBI_ret_d",
+    "RGBI_vol"
+  ],
+  "wf_macro_f1": 0.4526962807727864,
+  "backtest": {
+    "n": 224,
+    "total_return": -0.10652746064463248,
+    "win_rate": 0.38839285714285715,
+    "sharpe": -1.630159935905593,
+    "mean_ret": -0.0004730464261849465
+  },
+  "ohlcv_baseline": null,
+  "total_seconds": 1489.1
+}
