@@ -1,8 +1,15 @@
 """Download OHLCV candles from MOEX ISS API and save as parquet.
 
+Supports shares, indices, currency and futures via an instrument registry, so the same
+script fetches the SBER/GAZP/LKOH candles AND orthogonal drivers (IMOEX, RTSI, sector
+indices, RGBI bonds, CNY/RUB, Brent futures, ...).
+
 Usage:
-    python scripts/download_candles.py --ticker SBER --timeframe 1H --from 2020-01-01 --to 2026-06-01
-    python scripts/download_candles.py --ticker LKOH --timeframe 1H --from 2020-01-01 --to 2026-06-01
+    python scripts/download_candles.py --ticker SBER  --timeframe 1H --from 2020-01-01
+    python scripts/download_candles.py --ticker IMOEX --timeframe 1H --from 2020-01-01
+    python scripts/download_candles.py --ticker RGBI  --timeframe 1H --from 2020-01-01
+    # explicit override for an unregistered security:
+    python scripts/download_candles.py --ticker BRZ5 --engine futures --market forts
 """
 
 from __future__ import annotations
@@ -29,13 +36,57 @@ INTERVAL_MAP = {
     "1D": 24,
 }
 
+# Instrument registry: ticker -> (engine, market, board or None).
+# board=None omits the /boards/<board> path segment (indices, currency, futures).
+INSTRUMENT_REGISTRY: dict[str, tuple[str, str, str | None]] = {
+    # Shares (TQBR board)
+    "SBER": ("stock", "shares", "TQBR"),
+    "GAZP": ("stock", "shares", "TQBR"),
+    "LKOH": ("stock", "shares", "TQBR"),
+    # Broad-market + sector indices (no board)
+    "IMOEX": ("stock", "index", None),   # MOEX Russia Index (RUB)
+    "RTSI": ("stock", "index", None),    # RTS Index (USD) -> RTSI-IMOEX ~= USD/RUB driver
+    "MOEXFN": ("stock", "index", None),  # Financials sector (SBER)
+    "MOEXOG": ("stock", "index", None),  # Oil & Gas sector (LKOH/GAZP)
+    "MOEXMM": ("stock", "index", None),  # Metals & Mining sector
+    "RGBI": ("stock", "index", None),    # Russian Govt Bond Index (rates -> banks)
+    # Currency
+    "CNYRUB_TOM": ("currency", "selt", None),
+    "USD000UTSTOM": ("currency", "selt", None),  # USD/RUB spot (suspended mid-2024)
+}
 
-def fetch_page(session: requests.Session, ticker: str, timeframe: str, date_from: str, date_to: str, start: int) -> list[dict]:
-    interval = INTERVAL_MAP[timeframe.upper()]
-    url = (
-        f"{MOEX_ISS_BASE}/iss/engines/stock/markets/shares/boards/TQBR"
-        f"/securities/{ticker}/candles.json"
+
+def resolve_instrument(ticker: str, engine: str | None, market: str | None, board: str | None):
+    """Return (engine, market, board) from explicit args or the registry."""
+    if engine and market:
+        return engine, market, (board or None)
+    if ticker in INSTRUMENT_REGISTRY:
+        return INSTRUMENT_REGISTRY[ticker]
+    raise ValueError(
+        f"Unknown instrument {ticker!r}. Add it to INSTRUMENT_REGISTRY or pass "
+        f"--engine/--market (and optional --board)."
     )
+
+
+def _candles_url(engine: str, market: str, board: str | None, ticker: str) -> str:
+    if board:
+        return (f"{MOEX_ISS_BASE}/iss/engines/{engine}/markets/{market}"
+                f"/boards/{board}/securities/{ticker}/candles.json")
+    return (f"{MOEX_ISS_BASE}/iss/engines/{engine}/markets/{market}"
+            f"/securities/{ticker}/candles.json")
+
+
+def _safe_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fetch_page(session: requests.Session, ticker: str, engine: str, market: str,
+               board: str | None, timeframe: str, date_from: str, date_to: str, start: int) -> list[dict]:
+    interval = INTERVAL_MAP[timeframe.upper()]
+    url = _candles_url(engine, market, board, ticker)
     params = {
         "iss.meta": "off",
         "iss.only": "candles",
@@ -46,7 +97,7 @@ def fetch_page(session: requests.Session, ticker: str, timeframe: str, date_from
     if start > 0:
         params["start"] = start
 
-    resp = session.get(url, params=params, timeout=15)
+    resp = session.get(url, params=params, timeout=20)
     resp.raise_for_status()
     data = resp.json()
 
@@ -57,28 +108,24 @@ def fetch_page(session: requests.Session, ticker: str, timeframe: str, date_from
         return []
 
     col_idx = {col: idx for idx, col in enumerate(columns)}
-    required = ["begin", "end", "open", "high", "low", "close", "volume", "value"]
-    for field in required:
+    # OHLC + begin/end are mandatory; volume/value are optional (indices have no volume).
+    for field in ("begin", "end", "open", "high", "low", "close"):
         if field not in col_idx:
-            raise ValueError(f"MOEX response missing column: {field}")
+            raise ValueError(f"MOEX response missing column: {field} (have {columns})")
 
     candles = []
     for row in rows:
-        begin_str = row[col_idx["begin"]]
-        end_str = row[col_idx["end"]]
-        begin = _parse_moex_dt(begin_str)
-        end = _parse_moex_dt(end_str)
         candles.append({
             "ticker": ticker,
             "timeframe": timeframe,
-            "begin": begin,
-            "end": end,
-            "open": float(row[col_idx["open"]]),
-            "high": float(row[col_idx["high"]]),
-            "low": float(row[col_idx["low"]]),
-            "close": float(row[col_idx["close"]]),
-            "volume": float(row[col_idx["volume"]]),
-            "value": float(row[col_idx["value"]]),
+            "begin": _parse_moex_dt(row[col_idx["begin"]]),
+            "end": _parse_moex_dt(row[col_idx["end"]]),
+            "open": _safe_float(row[col_idx["open"]]),
+            "high": _safe_float(row[col_idx["high"]]),
+            "low": _safe_float(row[col_idx["low"]]),
+            "close": _safe_float(row[col_idx["close"]]),
+            "volume": _safe_float(row[col_idx["volume"]]) if "volume" in col_idx else 0.0,
+            "value": _safe_float(row[col_idx["value"]]) if "value" in col_idx else 0.0,
             "source": "moex",
         })
     return candles
@@ -93,16 +140,17 @@ def _parse_moex_dt(value: str) -> datetime:
     raise ValueError(f"Cannot parse MOEX datetime: {value!r}")
 
 
-def download_candles(ticker: str, timeframe: str, date_from: str, date_to: str) -> pd.DataFrame:
+def download_candles(ticker: str, timeframe: str, date_from: str, date_to: str,
+                     engine: str, market: str, board: str | None) -> pd.DataFrame:
     session = requests.Session()
-    session.headers["User-Agent"] = "moex-candle-predictor-download/0.1"
+    session.headers["User-Agent"] = "moex-candle-predictor-download/0.2"
 
     all_candles: list[dict] = []
     start = 0
-
     while True:
-        print(f"  Fetching {ticker} {timeframe} from={date_from} to={date_to} start={start}...", end=" ")
-        page = fetch_page(session, ticker, timeframe, date_from, date_to, start)
+        print(f"  Fetching {ticker} {timeframe} ({engine}/{market}/{board or '-'}) "
+              f"from={date_from} to={date_to} start={start}...", end=" ")
+        page = fetch_page(session, ticker, engine, market, board, timeframe, date_from, date_to, start)
         print(f"{len(page)} candles")
         all_candles.extend(page)
         if len(page) < PAGE_SIZE:
@@ -132,18 +180,22 @@ def save_parquet(df: pd.DataFrame, ticker: str, timeframe: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ticker", required=True, help="e.g. SBER, LKOH, GAZP")
+    parser.add_argument("--ticker", required=True, help="e.g. SBER, IMOEX, RGBI, CNYRUB_TOM")
     parser.add_argument("--timeframe", default="1H", help="1H, 1D, 1M, 10M")
     parser.add_argument("--from", dest="date_from", default="2020-01-01")
     parser.add_argument("--to", dest="date_to", default=None)
+    parser.add_argument("--engine", default=None, help="Override ISS engine (e.g. stock, currency, futures)")
+    parser.add_argument("--market", default=None, help="Override ISS market (e.g. shares, index, selt, forts)")
+    parser.add_argument("--board", default=None, help="Override ISS board (omit for indices/currency)")
     args = parser.parse_args()
 
     date_to = args.date_to or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    ticker = args.ticker.upper()
+    ticker = args.ticker.upper() if args.ticker.isupper() or "_" not in args.ticker else args.ticker
+    engine, market, board = resolve_instrument(ticker, args.engine, args.market, args.board)
 
-    print(f"Downloading {ticker} {args.timeframe} {args.date_from} -> {date_to}")
-    df = download_candles(ticker, args.timeframe, args.date_from, date_to)
-    print(f"Downloaded {len(df)} candles: {df['begin'].min()} → {df['begin'].max()}")
+    print(f"Downloading {ticker} {args.timeframe} {args.date_from} -> {date_to}  ({engine}/{market}/{board or '-'})")
+    df = download_candles(ticker, args.timeframe, args.date_from, date_to, engine, market, board)
+    print(f"Downloaded {len(df)} candles: {df['begin'].min()} .. {df['begin'].max()}")
 
     path = save_parquet(df, ticker, args.timeframe)
     print(f"Saved: {path}")
