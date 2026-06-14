@@ -1,9 +1,10 @@
 """Build an ML prediction contract response from a candle_batch JSON file.
 
-This CLI is intentionally contract-first. Without ``--artifact-dir`` it writes
-a valid ``ml_prediction`` JSON with ``diagnostics.artifact_missing=true``. With
-a complete research artifact bundle it runs real ``predict_proba`` inference
-for integration testing. The artifact is still research-only, not production.
+This CLI is contract-first. By default it ROUTES BY TICKER: the candle_batch's
+``ticker`` selects the ticker-specific artifact via ``TickerModelRouter`` (SBER
+resolves to its model; tickers without a packaged model return
+``diagnostics.artifact_missing=true``). Pass ``--artifact-dir`` to force a specific
+artifact bundle (integration testing). Artifacts are research-only, not production.
 """
 
 from __future__ import annotations
@@ -20,11 +21,10 @@ if str(ML_DIR) not in sys.path:
     sys.path.insert(0, str(ML_DIR))
 
 from src.service.contracts import (  # noqa: E402
-    CURRENT_RESEARCH_DEFAULT,
-    build_artifact_missing_response,
     candle_batch_to_dataframe,
     load_candle_batch_json,
 )
+from src.service.model_registry import TickerModelRouter  # noqa: E402
 from src.service.research_artifact import (  # noqa: E402
     build_artifact_prediction_response,
     load_research_artifact,
@@ -33,18 +33,17 @@ from src.utils.io import ensure_dir  # noqa: E402
 
 
 def predict_contract_from_json(input_json: str | Path, artifact_dir: str | Path | None = None) -> dict[str, Any]:
-    """Load a candle batch and produce an ml_prediction contract response."""
+    """Load a candle batch and produce an ml_prediction contract response.
+
+    Default: route by ticker via ``TickerModelRouter``. With ``artifact_dir``: force
+    that specific artifact (skips routing) for integration testing.
+    """
 
     batch = load_candle_batch_json(input_json)
     df = candle_batch_to_dataframe(batch)
 
     if artifact_dir is None:
-        return build_artifact_missing_response(
-            batch=batch,
-            df=df,
-            artifact_dir=ML_DIR / "artifacts" / "research_triple_barrier_sber_h1",
-            metadata=CURRENT_RESEARCH_DEFAULT,
-        )
+        return TickerModelRouter().predict(batch, df)
 
     artifact = load_research_artifact(artifact_dir)
     return build_artifact_prediction_response(batch=batch, df=df, artifact=artifact)
