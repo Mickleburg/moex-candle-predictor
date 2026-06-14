@@ -28,16 +28,24 @@ import pandas as pd
 
 from ..data.load import load_candles
 
-ORTHO_TICKERS = ("IMOEX", "RTSI", "MOEXFN", "MOEXOG", "RGBI")
+ORTHO_TICKERS = ("IMOEX", "RTSI", "MOEXFN", "MOEXOG", "RGBI", "BR_CONT", "NG_CONT")
 SECTOR_FOR = {"SBER": "MOEXFN", "GAZP": "MOEXOG", "LKOH": "MOEXOG"}
+# Genuinely-orthogonal commodity drivers (continuous front-month FORTS futures).
+COMMODITY = ("BR_CONT", "NG_CONT")  # Brent oil, natural gas
 _DAY_BARS = 8  # ~ index main-session length, for a "day" return
 
 
 def load_ortho_series(data_dir: str, tickers=ORTHO_TICKERS) -> dict[str, pd.DataFrame]:
-    """Load each orthogonal instrument as a sorted [begin, close] frame (MSK tz-aware)."""
+    """Load each available orthogonal instrument as a sorted [begin, close] frame (MSK tz-aware).
+
+    Tolerant: instruments without a parquet (e.g. futures not yet built) are skipped.
+    """
     out: dict[str, pd.DataFrame] = {}
     for tk in tickers:
-        df = load_candles(str(data_dir), ticker=tk, timeframe="1H", tz_aware=True)
+        try:
+            df = load_candles(str(data_dir), ticker=tk, timeframe="1H", tz_aware=True)
+        except Exception:
+            continue
         df = df[["begin", "close"]].sort_values("begin").reset_index(drop=True)
         out[tk] = df.rename(columns={"close": tk})
     return out
@@ -104,6 +112,12 @@ def build_orthogonal_features(
 
     if "rates" in groups:
         add_instrument("RGBI")
+
+    if "commodity" in groups:
+        # Genuinely-orthogonal oil/gas drivers (not the collinear sector index)
+        for name in COMMODITY:
+            if name in ortho:
+                add_instrument(name)
 
     names = list(cols.keys())
     mat = np.column_stack([cols[k] for k in names]) if names else np.empty((n, 0))
