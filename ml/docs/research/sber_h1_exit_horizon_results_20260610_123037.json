@@ -1,0 +1,210 @@
+{
+  "experiment": "sber_h1_exit_horizon_backtest",
+  "timestamp": "20260610_123037",
+  "git_branch": "ml-expirement",
+  "config": {
+    "holds": [
+      1,
+      2,
+      3
+    ],
+    "thresholds": [
+      0.45,
+      0.5,
+      0.55,
+      0.6
+    ],
+    "fee_one_way": 0.0005,
+    "hours_per_year": 1750,
+    "sharpe_annualisation": "sqrt(HOURS_PER_YEAR / hold_h)",
+    "cooldown": "no overlapping positions"
+  },
+  "anchor": {
+    "hold_h": 1,
+    "threshold": 0.5,
+    "documented_sharpe": 6.38,
+    "reproduced": {
+      "sharpe": 6.38088360573966,
+      "total_return": 0.050729324862724745,
+      "max_drawdown": -0.020642421673988998,
+      "win_rate": 0.3974358974358974,
+      "n_trades": 78,
+      "n_buy": 78,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0006435151587316618
+    },
+    "ok": true
+  },
+  "grid": {
+    "h1_t0.45": {
+      "hold_h": 1,
+      "threshold": 0.45,
+      "sharpe": -7.691167976361013,
+      "total_return": -0.33211279092878665,
+      "max_drawdown": -0.33211279092878665,
+      "win_rate": 0.34918032786885245,
+      "n_trades": 610,
+      "n_buy": 258,
+      "n_sell": 352,
+      "avg_trade_ret": -0.0006551273860377003
+    },
+    "h1_t0.50": {
+      "hold_h": 1,
+      "threshold": 0.5,
+      "sharpe": 6.38088360573966,
+      "total_return": 0.050729324862724745,
+      "max_drawdown": -0.020642421673988998,
+      "win_rate": 0.3974358974358974,
+      "n_trades": 78,
+      "n_buy": 78,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0006435151587316618
+    },
+    "h1_t0.55": {
+      "hold_h": 1,
+      "threshold": 0.55,
+      "sharpe": 14.332693001502237,
+      "total_return": 0.04314082318752854,
+      "max_drawdown": -0.007074930926663003,
+      "win_rate": 0.45161290322580644,
+      "n_trades": 31,
+      "n_buy": 31,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0013713589403105888
+    },
+    "h1_t0.60": {
+      "hold_h": 1,
+      "threshold": 0.6,
+      "sharpe": 22.29486785316736,
+      "total_return": 0.03541108380079461,
+      "max_drawdown": -0.0028517782061120434,
+      "win_rate": 0.4666666666666667,
+      "n_trades": 15,
+      "n_buy": 15,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0023321075625347136
+    },
+    "h2_t0.45": {
+      "hold_h": 2,
+      "threshold": 0.45,
+      "sharpe": -1.6251083384006695,
+      "total_return": -0.10909564211415679,
+      "max_drawdown": -0.1221962509158323,
+      "win_rate": 0.44329896907216493,
+      "n_trades": 388,
+      "n_buy": 175,
+      "n_sell": 213,
+      "avg_trade_ret": -0.000284301123388451
+    },
+    "h2_t0.50": {
+      "hold_h": 2,
+      "threshold": 0.5,
+      "sharpe": 9.225547561231423,
+      "total_return": 0.12035905874539532,
+      "max_drawdown": -0.01739344262295084,
+      "win_rate": 0.6296296296296297,
+      "n_trades": 54,
+      "n_buy": 54,
+      "n_sell": 0,
+      "avg_trade_ret": 0.002130006873637743
+    },
+    "h2_t0.55": {
+      "hold_h": 2,
+      "threshold": 0.55,
+      "sharpe": 8.894438405988444,
+      "total_return": 0.04429711574516282,
+      "max_drawdown": -0.01739344262295084,
+      "win_rate": 0.7,
+      "n_trades": 20,
+      "n_buy": 20,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0021961324807868495
+    },
+    "h2_t0.60": {
+      "hold_h": 2,
+      "threshold": 0.6,
+      "sharpe": 25.482050588767066,
+      "total_return": 0.06305138394376497,
+      "max_drawdown": -0.001221067757267713,
+      "win_rate": 0.8888888888888888,
+      "n_trades": 9,
+      "n_buy": 9,
+      "n_sell": 0,
+      "avg_trade_ret": 0.006848041305617892
+    },
+    "h3_t0.45": {
+      "hold_h": 3,
+      "threshold": 0.45,
+      "sharpe": -0.17002465875319914,
+      "total_return": -0.02254873306809757,
+      "max_drawdown": -0.14294039111413814,
+      "win_rate": 0.49842271293375395,
+      "n_trades": 317,
+      "n_buy": 154,
+      "n_sell": 163,
+      "avg_trade_ret": -4.838215803851803e-05
+    },
+    "h3_t0.50": {
+      "hold_h": 3,
+      "threshold": 0.5,
+      "sharpe": 9.559098952495086,
+      "total_return": 0.16075380948696583,
+      "max_drawdown": -0.021555877637304155,
+      "win_rate": 0.7142857142857143,
+      "n_trades": 49,
+      "n_buy": 49,
+      "n_sell": 0,
+      "avg_trade_ret": 0.0030769228283829956
+    },
+    "h3_t0.55": {
+      "hold_h": 3,
+      "threshold": 0.55,
+      "sharpe": 11.250454906743226,
+      "total_return": 0.08574787268924022,
+      "max_drawdown": -0.013956745012838279,
+      "win_rate": 0.7058823529411765,
+      "n_trades": 17,
+      "n_buy": 17,
+      "n_sell": 0,
+      "avg_trade_ret": 0.004905867772927701
+    },
+    "h3_t0.60": {
+      "hold_h": 3,
+      "threshold": 0.6,
+      "sharpe": 26.164507400585105,
+      "total_return": 0.09910582127779177,
+      "max_drawdown": 0.0,
+      "win_rate": 1.0,
+      "n_trades": 9,
+      "n_buy": 9,
+      "n_sell": 0,
+      "avg_trade_ret": 0.010601842900544261
+    }
+  },
+  "best_by_return": {
+    "hold_h": 3,
+    "threshold": 0.5,
+    "sharpe": 9.559098952495086,
+    "total_return": 0.16075380948696583,
+    "max_drawdown": -0.021555877637304155,
+    "win_rate": 0.7142857142857143,
+    "n_trades": 49,
+    "n_buy": 49,
+    "n_sell": 0,
+    "avg_trade_ret": 0.0030769228283829956
+  },
+  "best_by_sharpe": {
+    "hold_h": 3,
+    "threshold": 0.6,
+    "sharpe": 26.164507400585105,
+    "total_return": 0.09910582127779177,
+    "max_drawdown": 0.0,
+    "win_rate": 1.0,
+    "n_trades": 9,
+    "n_buy": 9,
+    "n_sell": 0,
+    "avg_trade_ret": 0.010601842900544261
+  },
+  "n_val_predictions": 7872,
+  "total_seconds": 1155.6
+}

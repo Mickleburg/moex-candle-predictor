@@ -1,0 +1,30 @@
+{
+  "experiment": "orthogonal_lstm",
+  "ticker": "LKOH",
+  "groups": [
+    "commodity"
+  ],
+  "timestamp": "20260615_014959",
+  "git_branch": "ml-expirement",
+  "input_dim": 22,
+  "orthogonal_feature_names": [
+    "BR_CONT_ret_1h",
+    "BR_CONT_ret_3h",
+    "BR_CONT_ret_d",
+    "BR_CONT_vol",
+    "NG_CONT_ret_1h",
+    "NG_CONT_ret_3h",
+    "NG_CONT_ret_d",
+    "NG_CONT_vol"
+  ],
+  "wf_macro_f1": 0.4620236952777908,
+  "backtest": {
+    "n": 129,
+    "total_return": 0.0856885183303342,
+    "win_rate": 0.4728682170542636,
+    "sharpe": 2.73144394837389,
+    "mean_ret": 0.0006557827587205822
+  },
+  "ohlcv_baseline": null,
+  "total_seconds": 1330.6
+}

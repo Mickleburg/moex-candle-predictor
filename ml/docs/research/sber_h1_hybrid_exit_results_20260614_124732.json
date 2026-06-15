@@ -1,0 +1,51 @@
+{
+  "experiment": "sber_h1_hybrid_exit",
+  "timestamp": "20260614_124732",
+  "git_branch": "ml-expirement",
+  "config": {
+    "fee_one_way": 0.0005,
+    "prod_threshold": 0.5,
+    "horizon": 3,
+    "target": "triple_barrier:h3:w12:up1.25:down1.25"
+  },
+  "results": {
+    "fixed_3h": {
+      "n_trades": 49,
+      "total_return": 0.1607538094869685,
+      "sharpe": 9.559100182081213,
+      "win_rate": 0.7142857142857143,
+      "avg_trade_ret": 0.0030769228283829835,
+      "max_drawdown": -0.021555877637304266,
+      "mean_hold_h": 3.0
+    },
+    "stop_only": {
+      "n_trades": 50,
+      "total_return": 0.17543939141137588,
+      "sharpe": 11.84753551027156,
+      "win_rate": 0.66,
+      "avg_trade_ret": 0.003262064961884026,
+      "max_drawdown": -0.01024451917868019,
+      "mean_hold_h": 2.74
+    },
+    "tp_only": {
+      "n_trades": 51,
+      "total_return": 0.08142841381792842,
+      "sharpe": 7.757371659226457,
+      "win_rate": 0.7843137254901961,
+      "avg_trade_ret": 0.0015502356764336494,
+      "max_drawdown": -0.013956745012838168,
+      "mean_hold_h": 2.4705882352941178
+    },
+    "full_tb": {
+      "n_trades": 52,
+      "total_return": 0.070985645427456,
+      "sharpe": 7.67533092051134,
+      "win_rate": 0.6923076923076923,
+      "avg_trade_ret": 0.001331332494728373,
+      "max_drawdown": -0.011527802159978728,
+      "mean_hold_h": 2.25
+    }
+  },
+  "n_val_predictions": 7872,
+  "total_seconds": 2.8
+}

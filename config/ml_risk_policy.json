@@ -1,0 +1,43 @@
+{
+  "spec_version": "2026-06-14",
+  "source_block": "ml",
+  "consumer_block": "risk_manager",
+  "status": "research_recommendation",
+  "note": "Static policy RECOMMENDATION published by the ML block. The per-request ml_prediction contract carries the FORECAST and the inputs needed to act (confidence, expected_return, signal_context, as_of). This file is the static POLICY on how to act on those forecasts. risk_manager owns the final decision and may override. This is NOT returned inside ml_prediction — it is delivered as a versioned spec.",
+  "contract_inputs_used": {
+    "confidence": "entry threshold check (min_confidence)",
+    "signal_context.lower_barrier": "absolute stop-loss price level",
+    "signal_context.horizon_bars": "hold horizon (bars)",
+    "expected_return": "risk-adjusted edge / position-sizing input",
+    "as_of": "session / weekend filter (Europe/Moscow)"
+  },
+  "global": {
+    "timezone": "Europe/Moscow",
+    "side": "long_only_phase_1",
+    "skip_weekend_sessions": true,
+    "skip_weekend_sessions_reason": "MOEX weekend sessions (introduced 2025) are thin; the model has no edge there (validation: Sunday cluster negative)."
+  },
+  "per_ticker": {
+    "SBER": {
+      "tradeable": true,
+      "entry": { "signal": "buy", "min_confidence": 0.50 },
+      "hold": { "bars": 3, "timeframe": "1H" },
+      "stop_loss": { "type": "lower_volatility_barrier", "level_from": "signal_context.lower_barrier" },
+      "take_profit": null,
+      "validated_backtest_weekday_only": {
+        "return": 0.1896, "sharpe": 14.95, "win_rate": 0.732,
+        "max_drawdown": -0.0102, "trades": 41,
+        "basis": "walk-forward validation (2023-07..2025); out-of-sample test gate PENDING",
+        "caveats": ["edge decays 2023->2025", "small sample (41 trades)", "concentrated in Friday + evening + high-vol"]
+      }
+    },
+    "GAZP": {
+      "tradeable": false,
+      "reason": "No tradeable edge from OHLCV (conf>0.50 BUY win 41% < 50%). Commodity/news-driven, exogenous. Serve predictions but do not act until orthogonal data (gas/Brent/USDRUB) is added."
+    },
+    "LKOH": {
+      "tradeable": false,
+      "reason": "No tradeable edge from OHLCV (conf>0.50 BUY win 45% < 50%). Oil/FX-driven, exogenous. Serve predictions but do not act until orthogonal data (Brent/USDRUB) is added."
+    }
+  }
+}

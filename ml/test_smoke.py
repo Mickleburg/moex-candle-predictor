@@ -984,6 +984,288 @@ def test_predictor_input_validation():
         return False
 
 
+def test_ml_prediction_contract_invariants():
+    """Test candle_batch -> ml_prediction contract helpers."""
+
+    print("\nTesting ML prediction JSON contract invariants...")
+
+    try:
+        import json
+        import math
+        import pickle
+        import tempfile
+        from datetime import datetime, timedelta
+
+        import numpy as np
+        from sklearn.dummy import DummyClassifier
+
+        from src.nlp import make_continuous_past_features
+        from src.service.contracts import (
+            build_artifact_missing_response,
+            build_ml_prediction_response,
+            candle_batch_to_dataframe,
+            load_candle_batch_json,
+        )
+        from src.service.research_artifact import build_artifact_prediction_response, load_research_artifact, predict_with_artifact
+
+        base = datetime(2026, 5, 15, 10)
+        payload = {
+            "ticker": "SBER",
+            "timeframe": "1H",
+            "candles": [
+                {"begin": (base + timedelta(hours=2)).isoformat(), "open": 300, "high": 302, "low": 299, "close": 301, "volume": 100},
+                {"begin": base.isoformat(), "open": 298, "high": 301, "low": 297, "close": 300, "volume": 120},
+                {"begin": (base + timedelta(hours=1)).isoformat(), "open": 300, "high": 303, "low": 299, "close": 302, "volume": 110},
+            ],
+        }
+        batch = load_candle_batch_json(payload)
+        df = candle_batch_to_dataframe(batch)
+        assert df["begin"].is_monotonic_increasing
+        assert df["ticker"].nunique() == 1
+        assert df["timeframe"].nunique() == 1
+
+        duplicate = dict(payload)
+        duplicate["candles"] = [payload["candles"][0], payload["candles"][0]]
+        try:
+            candle_batch_to_dataframe(load_candle_batch_json(duplicate))
+            raise AssertionError("duplicate begin was accepted")
+        except ValueError:
+            pass
+
+        response = build_ml_prediction_response(
+            ticker="SBER",
+            timeframe="1H",
+            as_of=df["begin"].iloc[-1].isoformat(),
+            probabilities={"buy": 0.2, "hold": 0.5, "sell": 0.3},
+            confidence=0.5,
+        )
+        assert set(response["probabilities"]) == {"buy", "hold", "sell"}
+        assert math.isclose(sum(response["probabilities"].values()), 1.0, abs_tol=1e-6)
+        assert response["diagnostics"]["feature_set"] == "continuous_regime"
+
+        missing = build_artifact_missing_response(batch=batch, df=df, artifact_dir="missing")
+        assert missing["diagnostics"]["artifact_missing"] is True
+        assert missing["probabilities"] == {"buy": 0.0, "hold": 1.0, "sell": 0.0}
+        assert missing["confidence"] == 0.0
+        json.dumps(missing)
+
+        feature_matrix, feature_names = make_continuous_past_features(df)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            model = DummyClassifier(strategy="prior")
+            model.fit(np.zeros((3, len(feature_names))), np.asarray([0, 1, 2], dtype=int))
+            with (tmp_path / "model.pkl").open("wb") as handle:
+                pickle.dump(model, handle)
+            (tmp_path / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "artifact_id": "smoke",
+                        "model_version": "smoke",
+                        "artifact_type": "research",
+                        "is_production": False,
+                        "model_family": "triple_barrier_extra_trees",
+                        "target": "triple_barrier:h3:w12:up1.25:down1.25",
+                        "feature_set": "continuous_regime",
+                        "class_weight": "none",
+                        "validation_macro_f1_mean": 0.1,
+                        "min_candles_for_prediction": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "feature_config.json").write_text(
+                json.dumps(
+                    {
+                        "feature_set": "continuous_regime",
+                        "feature_columns": feature_names,
+                        "standardization_mean": [0.0] * len(feature_names),
+                        "standardization_std": [1.0] * len(feature_names),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "target_config.json").write_text(
+                json.dumps({"target_mode": "triple_barrier", "label_order": ["SELL", "HOLD", "BUY"]}),
+                encoding="utf-8",
+            )
+            (tmp_path / "label_mapping.json").write_text(
+                json.dumps(
+                    {
+                        "internal_to_contract": {"SELL": "sell", "HOLD": "hold", "BUY": "buy"},
+                        "contract_to_internal": {"sell": "SELL", "hold": "HOLD", "buy": "BUY"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (tmp_path / "schema_version.json").write_text(json.dumps({"artifact_schema_version": 1}), encoding="utf-8")
+            (tmp_path / "feature_columns.json").write_text(json.dumps(feature_names), encoding="utf-8")
+
+            artifact = load_research_artifact(tmp_path)
+            artifact_response = build_artifact_prediction_response(batch=batch, df=df, artifact=artifact)
+            assert artifact_response["diagnostics"]["artifact_missing"] is False
+            assert artifact_response["diagnostics"]["is_production"] is False
+            assert math.isclose(sum(artifact_response["probabilities"].values()), 1.0, abs_tol=1e-6)
+
+            # New contract info: expected_return + signal_context (informational, not commands)
+            assert isinstance(artifact_response["expected_return"], float)
+            ctx = artifact_response["signal_context"]
+            assert ctx["horizon_bars"] == 3
+            assert ctx["horizon_timeframe"] == "1H"
+            assert ctx["upper_return"] >= 0.001 and ctx["lower_return"] >= 0.001
+            assert ctx["upper_barrier"] > ctx["reference_close"] > ctx["lower_barrier"]
+            assert ctx["calibrated"] is False
+            json.dumps(artifact_response)
+
+            insufficient = predict_with_artifact(artifact, df.head(1))
+            assert insufficient.diagnostics["error"] == "insufficient_history"
+            assert insufficient.probabilities == {"buy": 0.0, "hold": 1.0, "sell": 0.0}
+        print("  PASS ML prediction contract helpers")
+        return True
+    except Exception as exc:
+        print(f"  FAIL ML prediction contract test failed: {exc}")
+        return False
+
+
+def test_timezone_canonicalization():
+    """Test MSK timezone fix preserves wall-clock hour/dow while correcting the tz label."""
+
+    print("\nTesting timezone canonicalization...")
+
+    try:
+        import pandas as pd
+
+        from src.data.load import MOEX_TZ, to_moscow_time
+
+        # Legacy: MSK wall-clock mislabelled as UTC.
+        legacy = pd.Series(pd.to_datetime(
+            ["2020-01-03 09:00:00", "2025-03-14 22:00:00"], utc=True))
+        fixed = to_moscow_time(legacy)
+        assert str(fixed.dt.tz) == MOEX_TZ
+        # Wall-clock hour/dow unchanged -> models stay valid.
+        assert list(fixed.dt.hour) == list(legacy.dt.hour) == [9, 22]
+        assert list(fixed.dt.dayofweek) == list(legacy.dt.dayofweek)
+        # Correct label is +03:00.
+        assert fixed.iloc[0].utcoffset().total_seconds() == 3 * 3600
+
+        # Naive input is localised, not shifted.
+        naive = pd.Series(pd.to_datetime(["2025-03-14 22:00:00"]))
+        fixed_naive = to_moscow_time(naive)
+        assert list(fixed_naive.dt.hour) == [22]
+        assert str(fixed_naive.dt.tz) == MOEX_TZ
+        print("  PASS Timezone canonicalization (wall-clock preserved, label corrected to MSK)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Timezone canonicalization test failed: {exc}")
+        return False
+
+
+def test_orthogonal_tz_alignment():
+    """Orthogonal merge_asof must handle mismatched tz (contract +03:00 vs named MSK)."""
+
+    print("\nTesting orthogonal tz alignment...")
+
+    try:
+        import pandas as pd
+
+        from src.features.orthogonal import _align_backward
+
+        # Target candle begins as a fixed +03:00 offset (as parsed from a contract isoformat)
+        target = pd.to_datetime(["2025-03-14 22:00:00+03:00", "2025-03-14 23:00:00+03:00"])
+        # Orthogonal feature bars carry a NAMED Europe/Moscow tz (different tz object)
+        feats = pd.DataFrame({
+            "begin": pd.to_datetime(["2025-03-14 21:00:00", "2025-03-14 22:00:00"]).tz_localize("Europe/Moscow"),
+            "X_ret_1h": [0.01, 0.02],
+        })
+        merged = _align_backward(pd.Series(target), feats)  # must not raise on mismatched tz
+        # backward: 22:00 -> 22:00 bar (0.02); 23:00 -> last <=23:00 is 22:00 bar (0.02)
+        assert list(merged["X_ret_1h"]) == [0.02, 0.02], list(merged["X_ret_1h"])
+        print("  PASS Orthogonal tz alignment (mismatched tz merged, backward semantics)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Orthogonal tz alignment test failed: {exc}")
+        return False
+
+
+def test_ticker_model_router():
+    """Test per-ticker routing: known ticker -> model, unknown ticker -> artifact_missing."""
+
+    print("\nTesting per-ticker model router...")
+
+    try:
+        import json
+        import pickle
+        import tempfile
+        from datetime import datetime, timedelta
+
+        import numpy as np
+        from sklearn.dummy import DummyClassifier
+
+        from src.nlp import make_continuous_past_features
+        from src.service.contracts import candle_batch_to_dataframe, load_candle_batch_json
+        from src.service.model_registry import TickerModelRouter, resolve_artifact_dir
+
+        base = datetime(2026, 5, 15, 10)
+        candles = [
+            {"begin": (base + timedelta(hours=i)).isoformat(), "open": 300 + i, "high": 303 + i,
+             "low": 298 + i, "close": 301 + i, "volume": 100 + i}
+            for i in range(40)
+        ]
+
+        def make_batch(ticker):
+            return load_candle_batch_json({"ticker": ticker, "timeframe": "1H", "candles": candles})
+
+        df_for_names = candle_batch_to_dataframe(make_batch("SBER"))
+        _, feature_names = make_continuous_past_features(df_for_names)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Build a minimal ET artifact for SBER under the ET template name.
+            art = root / "research_triple_barrier_sber_h1"
+            art.mkdir(parents=True)
+            model = DummyClassifier(strategy="prior")
+            model.fit(np.zeros((3, len(feature_names))), np.asarray([0, 1, 2], dtype=int))
+            with (art / "model.pkl").open("wb") as handle:
+                pickle.dump(model, handle)
+            (art / "metadata.json").write_text(json.dumps({
+                "artifact_id": "smoke_sber", "model_version": "smoke_sber", "ticker": "SBER",
+                "timeframe": "1H", "model_family": "triple_barrier_extra_trees",
+                "target": "triple_barrier:h3:w12:up1.25:down1.25", "feature_set": "continuous_regime",
+                "class_weight": "none", "validation_macro_f1_mean": 0.1, "min_candles_for_prediction": 2,
+            }), encoding="utf-8")
+            (art / "feature_config.json").write_text(json.dumps({
+                "feature_set": "continuous_regime", "feature_columns": feature_names,
+                "standardization_mean": [0.0] * len(feature_names),
+                "standardization_std": [1.0] * len(feature_names),
+            }), encoding="utf-8")
+            (art / "target_config.json").write_text(json.dumps(
+                {"target_mode": "triple_barrier", "label_order": ["SELL", "HOLD", "BUY"]}), encoding="utf-8")
+            (art / "label_mapping.json").write_text(json.dumps({
+                "internal_to_contract": {"SELL": "sell", "HOLD": "hold", "BUY": "buy"},
+                "contract_to_internal": {"sell": "SELL", "hold": "HOLD", "buy": "BUY"},
+            }), encoding="utf-8")
+            (art / "schema_version.json").write_text(json.dumps({"artifact_schema_version": 1}), encoding="utf-8")
+            (art / "feature_columns.json").write_text(json.dumps(feature_names), encoding="utf-8")
+
+            router = TickerModelRouter(artifact_root=root)
+            assert router.available_tickers() == ["SBER"], router.available_tickers()
+            assert resolve_artifact_dir("SBER", root) == art
+            assert resolve_artifact_dir("GAZP", root) is None
+
+            sber_resp = router.predict(make_batch("SBER"))
+            assert sber_resp["diagnostics"]["artifact_missing"] is False
+            assert sber_resp["ticker"] == "SBER"
+
+            gazp_resp = router.predict(make_batch("GAZP"))
+            assert gazp_resp["diagnostics"]["artifact_missing"] is True
+            assert gazp_resp["ticker"] == "GAZP"
+            json.dumps(gazp_resp)
+        print("  PASS Per-ticker routing (SBER->model, GAZP->artifact_missing)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Ticker model router test failed: {exc}")
+        return False
+
+
 def main():
     """Run all smoke tests."""
 
@@ -1007,6 +1289,10 @@ def main():
         ("Nested Thresholds", test_nested_threshold_invariants()),
         ("Vocabulary Constraints", test_vocabulary_selection_constraints()),
         ("Predictor Validation", test_predictor_input_validation()),
+        ("ML Prediction Contract", test_ml_prediction_contract_invariants()),
+        ("Timezone Canonicalization", test_timezone_canonicalization()),
+        ("Orthogonal TZ Alignment", test_orthogonal_tz_alignment()),
+        ("Ticker Model Router", test_ticker_model_router()),
     ]
 
     print("\n" + "=" * 50)

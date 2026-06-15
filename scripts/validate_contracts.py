@@ -196,6 +196,21 @@ def validate_supported_tickers() -> None:
             raise AssertionError(f"{ticker} missing 1H timeframe")
 
 
+def validate_optional_generated_ml_prediction(schema: dict[str, Any]) -> None:
+    path = REPO_ROOT / "data" / "reports" / "ml_prediction_example.json"
+    if not path.exists():
+        return
+    payload = load_json(path)
+    for field in schema["required"]:
+        if field not in payload:
+            raise AssertionError(f"generated ml_prediction missing {field}")
+    assert_probability_vector(payload, "probabilities")
+    diagnostics = payload.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        raise AssertionError("generated ml_prediction diagnostics must be an object")
+    print("generated ml_prediction example: probability vector OK")
+
+
 def main() -> int:
     schemas: dict[str, dict[str, Any]] = {}
     examples: dict[str, dict[str, Any]] = {}
@@ -212,6 +227,7 @@ def main() -> int:
     validate_jsonschema_if_available(schemas, examples)
     validate_cross_contracts(examples)
     validate_supported_tickers()
+    validate_optional_generated_ml_prediction(schemas["ml_prediction"])
     print("All contract checks passed.")
     return 0
 
