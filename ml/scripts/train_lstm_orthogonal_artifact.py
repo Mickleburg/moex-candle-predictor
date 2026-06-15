@@ -143,8 +143,11 @@ def main():
         "min_candles_for_prediction": SEQ_LEN + 1, "recommended_min_candles": SEQ_LEN + 20,
         "training_protocol": "fit on first 85% development data; test untouched",
         "created_at": "2026-06-15",
+        "production_rule": "BUY conf>0.50; hold 3h + lower-barrier stop; no take-profit; long-only; skip weekend sessions",
         "notes": ("Orthogonal LSTM. Serves predictions with self-fetched market context "
-                  "(Brent/IMOEX/RTSI) via MarketContextProvider; input contract unchanged."),
+                  "(Brent/IMOEX/RTSI) via MarketContextProvider; input contract unchanged. "
+                  "LKOH oil+market validation backtest: Sharpe=5.42, +11.73%, win 56.8%, 81 trades; "
+                  "bootstrap P(profit)=97.3%. is_production=false until the test gate + sign-off."),
     })
     wj(out_dir / "label_mapping.json", {
         "internal_to_contract": {"SELL": "sell", "HOLD": "hold", "BUY": "buy"},

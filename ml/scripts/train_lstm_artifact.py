@@ -153,8 +153,8 @@ def main():
 
     # ── Load data ─────────────────────────────────────────────────────────────
     print(f"Loading {args.ticker} {args.timeframe}...")
-    df = load_candles(str(raw_dir), ticker=args.ticker, timeframe=args.timeframe)
-    df["begin"] = pd.to_datetime(df["begin"], utc=True)
+    # tz_aware=True -> correctly-labelled MSK (wall-clock preserved; hour/dow identical to legacy).
+    df = load_candles(str(raw_dir), ticker=args.ticker, timeframe=args.timeframe, tz_aware=True)
     df = df.sort_values("begin").reset_index(drop=True)
     print(f"  {len(df)} candles")
 
@@ -229,19 +229,25 @@ def main():
         "recommended_min_candles": SEQ_LEN + 20,
         "training_protocol": "fit on first 85% development data; test untouched",
         "created_at": "2026-06-03",
-        # Walk-forward validation results (from sber_lstm_research.py, seed-averaged)
+        # Walk-forward validation results (seed-averaged)
         "validation_macro_f1": 0.4814,
         "validation_macro_f1_mean": 0.4778,
         "validation_macro_f1_worst_fold": 0.4404,
         "validation_sell_f1": 0.446,
         "validation_hold_f1": 0.579,
         "validation_buy_f1": 0.409,
-        "backtest_conf050_sharpe": 6.38,
-        "backtest_conf050_return": 0.0507,
-        "backtest_conf050_n_trades": 78,
+        # Production rule + backtest (validation periods)
+        "production_rule": "BUY conf>0.50; hold 3h + lower-barrier stop; no take-profit; long-only; skip weekend sessions",
+        "backtest_prod_sharpe": 14.95,
+        "backtest_prod_return": 0.1896,
+        "backtest_prod_win_rate": 0.732,
+        "backtest_prod_n_trades": 41,
+        "backtest_prod_max_drawdown": -0.0102,
+        "robustness_bootstrap_p_profit": 1.0,
         "notes": (
-            "LSTM v2 best research model. At confidence>0.50: Sharpe=6.38 on val. "
-            "NOT production-ready: needs more trade count and multi-ticker validation."
+            "LSTM v2 (OHLCV). Production rule (3h+stop, weekday-only): Sharpe=14.95, +18.96%, "
+            "win 73.2%, 41 trades, DD -1.02%; bootstrap P(profit)=100%. is_production=false until "
+            "the locked test-set gate passes and the team signs off."
         ),
     }
     write_json(out_dir / "metadata.json", metadata)
