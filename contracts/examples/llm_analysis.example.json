@@ -1,19 +1,20 @@
 {
+  "as_of": "2026-05-15T15:00:00+03:00",
   "ticker": "SBER",
   "timeframe": "1H",
-  "as_of": "2026-05-15T15:00:00+03:00",
-  "technical_view": "moderately_bullish",
-  "probabilities": {
-    "buy": 0.42,
-    "hold": 0.38,
-    "sell": 0.20
+  "features": {
+    "sentiment": 0.34,
+    "impact_score": 0.62,
+    "novelty": 0.71,
+    "event_type": "guidance",
+    "news_count": 3,
+    "recency_minutes": 47,
+    "embedding": [0.011, -0.244, 0.187, 0.052]
   },
-  "confidence": 0.55,
-  "key_reasons": [
-    "price above EMA20",
-    "volume above average"
+  "affected_tickers": ["SBER"],
+  "sources": [
+    { "source": "interfax", "url": "https://example.invalid/sber-guidance", "published_at": "2026-05-15T14:13:00+03:00" }
   ],
-  "risk_notes": [
-    "near resistance"
-  ]
+  "model_version": "llm_news_features_v0_mock",
+  "is_production": false
 }

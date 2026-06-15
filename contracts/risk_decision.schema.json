@@ -7,6 +7,7 @@
     "ticker": { "type": "string" },
     "requested_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
     "approved_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
+    "position_side": { "type": "string", "enum": ["LONG", "SHORT", "FLAT"], "description": "V2 market-neutral: which leg this ticker is on (top-k long / bottom-k short). Optional for back-compat with long-only flows." },
     "approved": { "type": "boolean" },
     "position_context": { "type": "object", "additionalProperties": true },
     "risk_checks": { "type": "object", "additionalProperties": { "type": "boolean" } },

@@ -2,6 +2,7 @@
   "ticker": "SBER",
   "requested_action": "BUY",
   "approved_action": "BUY",
+  "position_side": "LONG",
   "approved": true,
   "position_context": {
     "current_lots": 0,

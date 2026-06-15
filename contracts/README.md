@@ -2,10 +2,22 @@
 
 `contracts/` содержит JSON Schema для блоков торгового агента.
 
-> **V2 (2026-06-15):** текущие схемы ещё описывают СТАРУЮ late-fusion-постановку. На этапе
-> заморозки контрактов V2 переопределяем: `llm_analysis` → новостные ПРИЗНАКИ (не buy/hold/sell);
-> `aggregated_signal` → кросс-секционный ранг/скор по тикерам; новый `feature_bundle`
-> (`[quant ⊕ news]`). Блок `aggregator` удалён (ранняя фьюжн). См. `docs/ARCHITECTURE_V2.md`.
+> **V2 контракты ЗАФИКСИРОВАНЫ (2026-06-15).** Переопределены под кросс-секцию + раннюю фьюжн.
+> Проверка: `python scripts/validate_contracts.py` (с `jsonschema` — валидация примеров против схем).
+> Блок `aggregator` удалён (ранняя фьюжн). См. `docs/ARCHITECTURE_V2.md`.
+
+## Статус контрактов (V2)
+
+| Контракт | Статус | Роль |
+|----------|--------|------|
+| `candle_batch` | без изменений | вход ML/бэкенда: OHLCV по тикеру |
+| `market_snapshot` | без изменений | market context (индексы/индикаторы) |
+| `llm_analysis` | **переопределён** | НОВОСТНЫЕ ПРИЗНАКИ по тикеру (sentiment/event/impact/novelty/embedding), НЕ buy/hold/sell |
+| `feature_bundle` | **новый** | `[quant ⊕ news]` матрица по вселенной — вход решающей модели (ранняя фьюжн) |
+| `aggregated_signal` | **переопределён** | кросс-секционный РАНГ вселенной (long top-k / short bottom-k), выход решающей модели |
+| `risk_decision` | +`position_side` (LONG/SHORT/FLAT) | портфельное решение по тикеру (маркет-нейтрал) |
+| `ml_prediction` | без изменений | пер-тикерный buy/hold/sell прогноз (V1, всё ещё обслуживается ML-сервисом; для диагностики/одиночных бумаг) |
+| `order_request`, `execution_report`, `portfolio_snapshot`, `agent_cycle_result` | без изменений | исполнение/учёт |
 
 Интерфейсы между блоками (V2 — целевые):
 
