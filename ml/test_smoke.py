@@ -1159,6 +1159,33 @@ def test_timezone_canonicalization():
         return False
 
 
+def test_orthogonal_tz_alignment():
+    """Orthogonal merge_asof must handle mismatched tz (contract +03:00 vs named MSK)."""
+
+    print("\nTesting orthogonal tz alignment...")
+
+    try:
+        import pandas as pd
+
+        from src.features.orthogonal import _align_backward
+
+        # Target candle begins as a fixed +03:00 offset (as parsed from a contract isoformat)
+        target = pd.to_datetime(["2025-03-14 22:00:00+03:00", "2025-03-14 23:00:00+03:00"])
+        # Orthogonal feature bars carry a NAMED Europe/Moscow tz (different tz object)
+        feats = pd.DataFrame({
+            "begin": pd.to_datetime(["2025-03-14 21:00:00", "2025-03-14 22:00:00"]).tz_localize("Europe/Moscow"),
+            "X_ret_1h": [0.01, 0.02],
+        })
+        merged = _align_backward(pd.Series(target), feats)  # must not raise on mismatched tz
+        # backward: 22:00 -> 22:00 bar (0.02); 23:00 -> last <=23:00 is 22:00 bar (0.02)
+        assert list(merged["X_ret_1h"]) == [0.02, 0.02], list(merged["X_ret_1h"])
+        print("  PASS Orthogonal tz alignment (mismatched tz merged, backward semantics)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Orthogonal tz alignment test failed: {exc}")
+        return False
+
+
 def test_ticker_model_router():
     """Test per-ticker routing: known ticker -> model, unknown ticker -> artifact_missing."""
 
@@ -1264,6 +1291,7 @@ def main():
         ("Predictor Validation", test_predictor_input_validation()),
         ("ML Prediction Contract", test_ml_prediction_contract_invariants()),
         ("Timezone Canonicalization", test_timezone_canonicalization()),
+        ("Orthogonal TZ Alignment", test_orthogonal_tz_alignment()),
         ("Ticker Model Router", test_ticker_model_router()),
     ]
 

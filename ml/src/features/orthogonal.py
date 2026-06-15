@@ -68,10 +68,24 @@ def _per_bar_features(series: pd.DataFrame, name: str) -> pd.DataFrame:
     return feats
 
 
+def _to_utc(s: pd.Series) -> pd.Series:
+    """Normalize a datetime series to UTC tz for type-safe merging (same instants).
+
+    Inputs may carry different tz objects (named Europe/Moscow vs fixed +03:00 from a
+    contract isoformat); merge_asof rejects mismatched tz types, so we convert both to UTC.
+    """
+    s = pd.to_datetime(s)
+    if getattr(s.dt, "tz", None) is None:
+        return s.dt.tz_localize("UTC")
+    return s.dt.tz_convert("UTC")
+
+
 def _align_backward(target_begin: pd.Series, feats: pd.DataFrame) -> pd.DataFrame:
     """merge_asof backward: each target candle gets the last orthogonal bar <= its begin."""
-    left = pd.DataFrame({"begin": pd.to_datetime(target_begin)}).sort_values("begin")
-    right = feats.sort_values("begin")
+    left = pd.DataFrame({"begin": _to_utc(pd.Series(target_begin))}).sort_values("begin")
+    right = feats.copy()
+    right["begin"] = _to_utc(right["begin"])
+    right = right.sort_values("begin")
     merged = pd.merge_asof(left, right, on="begin", direction="backward")
     return merged.set_index(left.index).sort_index()
 
