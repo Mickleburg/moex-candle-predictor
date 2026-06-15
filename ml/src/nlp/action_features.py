@@ -205,6 +205,102 @@ def make_continuous_past_features(df: pd.DataFrame) -> tuple[np.ndarray, list[st
     return X, names
 
 
+def make_lag_sequence_features(df: pd.DataFrame, n_lags: int = 10) -> tuple[np.ndarray, list[str]]:
+    """Past-only lag features that capture price trajectory shape, not just snapshot.
+
+    The current continuous_regime feature set has cumulative returns (ret_3, ret_6...)
+    but loses trajectory shape: a 3h cumulative return of +0.5% could be three equal
+    small ups or one big move followed by reversals. These lags expose the path.
+
+    Features added (all past-only, no lookahead at row i):
+      - lag_ret_{k}:     individual 1h return k steps back, for k=2..n_lags
+                         (k=1 already covered by ret_1)
+      - lag_body_{k}:    signed candle body k steps back: (close-open)/open, k=1..5
+      - lag_vol_ratio_{k}: volume k steps back relative to 20-bar mean, k=1..5
+      - ret_day_{d}:     ~d-day return using session length (7h/day), d=1..3
+      - day_range:       (max_high - min_low) of last 7 candles / close
+      - close_in_day_range: close position within last 7 candles' range [0, 1]
+      - up_streak:       consecutive positive 1h returns ending now (0..5)
+      - down_streak:     consecutive negative 1h returns ending now (0..5)
+    """
+    required = ["open", "high", "low", "close", "volume"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    close = df["close"].astype(float)
+    open_ = df["open"].astype(float)
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    volume = df["volume"].astype(float)
+    safe_open = open_.where(open_.abs() > 1e-12, np.nan)
+
+    features: dict[str, pd.Series] = {}
+
+    # Individual 1h lag returns: what did price do k hours ago?
+    for k in range(2, n_lags + 1):
+        features[f"lag_ret_{k}"] = close.shift(k - 1).pct_change()
+
+    # Lag candle bodies (direction + magnitude k steps ago)
+    for k in range(1, 6):
+        body = (close.shift(k) - open_.shift(k)) / safe_open.shift(k)
+        features[f"lag_body_{k}"] = body
+
+    # Lag volume ratios
+    vol_mean = volume.rolling(window=20, min_periods=4).mean()
+    for k in range(1, 6):
+        features[f"lag_vol_ratio_{k}"] = volume.shift(k) / vol_mean.shift(k).where(
+            vol_mean.shift(k).abs() > 1e-12, np.nan
+        )
+
+    # Multi-day returns (MOEX session ~7h, so 7 candles ≈ 1 trading day)
+    SESSION = 7
+    for d in range(1, 4):
+        features[f"ret_day_{d}"] = close.pct_change(d * SESSION)
+
+    # Close position within last-session range
+    last_high = high.rolling(window=SESSION, min_periods=2).max()
+    last_low = low.rolling(window=SESSION, min_periods=2).min()
+    day_range = (last_high - last_low) / close.where(close.abs() > 1e-12, np.nan)
+    features["day_range"] = day_range
+    rng = (last_high - last_low).where((last_high - last_low).abs() > 1e-12, np.nan)
+    features["close_in_day_range"] = (close - last_low) / rng
+
+    # Streak features (how many consecutive up/down hours ending now)
+    ret1 = close.pct_change()
+    ret1_arr = ret1.to_numpy()
+    up = np.zeros(len(df), dtype=float)
+    dn = np.zeros(len(df), dtype=float)
+    for i in range(1, len(df)):
+        max_streak = 5
+        u, d_ = 0, 0
+        for lag in range(1, max_streak + 1):
+            if i - lag < 0:
+                break
+            if ret1_arr[i - lag + 1] > 0:
+                u += 1
+            else:
+                break
+        for lag in range(1, max_streak + 1):
+            if i - lag < 0:
+                break
+            if ret1_arr[i - lag + 1] < 0:
+                d_ += 1
+            else:
+                break
+        up[i] = float(u)
+        dn[i] = float(d_)
+    features["up_streak"] = pd.Series(up, index=df.index)
+    features["down_streak"] = pd.Series(dn, index=df.index)
+
+    names = list(features)
+    matrix = pd.DataFrame(features, index=df.index)[names].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    X = matrix.to_numpy(dtype=float)
+    if not np.all(np.isfinite(X)):
+        raise ValueError("Lag sequence features contain non-finite values")
+    return X, names
+
+
 def standardize_by_train(
     feature_matrix: np.ndarray,
     train_indices: Sequence[int],

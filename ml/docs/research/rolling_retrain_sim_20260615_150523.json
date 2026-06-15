@@ -1,0 +1,94 @@
+{
+  "experiment": "rolling_retrain_sim",
+  "timestamp": "20260615_150523",
+  "git_branch": "ml-expirement",
+  "config": {
+    "train_size": 12000,
+    "step": 2000,
+    "seed": 42,
+    "adaptive_normalization": true,
+    "rule": "BUY conf>0.50, 3h+stop, skip weekends"
+  },
+  "chunks": [
+    {
+      "period": "2023-07-07..2024-01-15",
+      "val_start": 12000,
+      "f1": 0.4614842831918475,
+      "n_signals": 197,
+      "action_rate": 0.10010162601626016,
+      "n_trades": 118,
+      "win_rate": 0.3898305084745763,
+      "return": -0.021228862070807653,
+      "sharpe": -0.8522826129644979
+    },
+    {
+      "period": "2024-01-15..2024-07-24",
+      "val_start": 14000,
+      "f1": 0.44655704230819393,
+      "n_signals": 148,
+      "action_rate": 0.07520325203252033,
+      "n_trades": 86,
+      "win_rate": 0.3953488372093023,
+      "return": -0.017682924214166174,
+      "sharpe": -1.3212928204686576
+    },
+    {
+      "period": "2024-07-24..2025-01-30",
+      "val_start": 16000,
+      "f1": 0.45451383699784237,
+      "n_signals": 228,
+      "action_rate": 0.11585365853658537,
+      "n_trades": 134,
+      "win_rate": 0.41044776119402987,
+      "return": 0.08513267832680005,
+      "sharpe": 1.8714804432343675
+    },
+    {
+      "period": "2025-01-30..2025-06-20",
+      "val_start": 18000,
+      "f1": 0.39087711916477086,
+      "n_signals": 119,
+      "action_rate": 0.06046747967479675,
+      "n_trades": 44,
+      "win_rate": 0.4318181818181818,
+      "return": -0.013226267672526326,
+      "sharpe": -1.703419613485964
+    },
+    {
+      "period": "2025-06-20..2025-11-01",
+      "val_start": 20000,
+      "f1": 0.4496553080529631,
+      "n_signals": 155,
+      "action_rate": 0.07876016260162602,
+      "n_trades": 66,
+      "win_rate": 0.4090909090909091,
+      "return": -0.03199920654709143,
+      "sharpe": -3.057879359984816
+    },
+    {
+      "period": "2025-11-01..2026-03-24",
+      "val_start": 22000,
+      "f1": 0.4595111449570191,
+      "n_signals": 503,
+      "action_rate": 0.25558943089430897,
+      "n_trades": 229,
+      "win_rate": 0.34497816593886466,
+      "return": -0.14338598159910743,
+      "sharpe": -6.7120017984835085
+    }
+  ],
+  "total": {
+    "n": 677,
+    "total_return": -0.14632185946837573,
+    "win_rate": 0.38404726735598227,
+    "mean_ret": -0.0002189599912856997,
+    "sharpe": -1.0737306075806243,
+    "compounded_return": -0.14632185946837573
+  },
+  "frozen_gate_reference": {
+    "sber_test_return": -0.0796,
+    "sber_test_trades": 213,
+    "note": "frozen model on 2025-09..2026-06 lost -7.96% with 213 trades"
+  },
+  "total_seconds": 1265.6
+}

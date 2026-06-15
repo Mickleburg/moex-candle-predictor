@@ -2,8 +2,14 @@ __pycache__/
 .venv/
 ml/.venv/
 artifacts/
+ml/artifacts/research_triple_barrier_sber_h1/
 data/raw/*.parquet
 data/predictions/*.parquet
 data/reports/*.csv
 data/reports/*.json
 data/reports/*.jsonl
+
+CLAUDE.md
+ml/SKILL.md
+
+data/backend.exe

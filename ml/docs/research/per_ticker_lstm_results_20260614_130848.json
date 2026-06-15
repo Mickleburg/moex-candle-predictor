@@ -1,0 +1,101 @@
+{
+  "experiment": "per_ticker_lstm",
+  "timestamp": "20260614_130848",
+  "git_branch": "ml-expirement",
+  "config": {
+    "tickers": [
+      "SBER",
+      "GAZP",
+      "LKOH"
+    ],
+    "target": "triple_barrier:h3:w12:up1.25:down1.25",
+    "production_rule": "BUY conf>0.50, hold 3h + lower-barrier stop, no take-profit",
+    "sber_baseline_f1": 0.4778
+  },
+  "results": [
+    {
+      "ticker": "SBER",
+      "n_val_predictions": 7872,
+      "wf_macro_f1": 0.4813704496153149,
+      "wf_sell_f1": 0.4647244647244647,
+      "wf_hold_f1": 0.5843558282208589,
+      "wf_buy_f1": 0.3950310559006211,
+      "backtest_stop_loss": {
+        "n_trades": 50,
+        "total_return": 0.17543939141137588,
+        "sharpe": 11.84753551027156,
+        "win_rate": 0.66,
+        "avg_trade_ret": 0.003262064961884026,
+        "max_drawdown": -0.01024451917868019,
+        "mean_hold_h": 2.74
+      },
+      "backtest_fixed_3h": {
+        "n_trades": 49,
+        "total_return": 0.1607538094869685,
+        "sharpe": 9.559100182081213,
+        "win_rate": 0.7142857142857143,
+        "avg_trade_ret": 0.0030769228283829835,
+        "max_drawdown": -0.021555877637304266,
+        "mean_hold_h": 3.0
+      }
+    },
+    {
+      "ticker": "GAZP",
+      "n_val_predictions": 7872,
+      "wf_macro_f1": 0.45213854676227605,
+      "wf_sell_f1": 0.4921838724655626,
+      "wf_hold_f1": 0.5454194047158871,
+      "wf_buy_f1": 0.3188123631053784,
+      "backtest_stop_loss": {
+        "n_trades": 131,
+        "total_return": 0.007512241829719102,
+        "sharpe": 0.28706909675058695,
+        "win_rate": 0.4122137404580153,
+        "avg_trade_ret": 8.459911085927271e-05,
+        "max_drawdown": -0.06551339470760309,
+        "mean_hold_h": 2.732824427480916
+      },
+      "backtest_fixed_3h": {
+        "n_trades": 124,
+        "total_return": -0.014939006896932172,
+        "sharpe": -0.219440075166752,
+        "win_rate": 0.4596774193548387,
+        "avg_trade_ret": -8.139735490287196e-05,
+        "max_drawdown": -0.08611961732961826,
+        "mean_hold_h": 3.0
+      }
+    },
+    {
+      "ticker": "LKOH",
+      "n_val_predictions": 7872,
+      "wf_macro_f1": 0.45668124472484334,
+      "wf_sell_f1": 0.4732850160121355,
+      "wf_hold_f1": 0.5432977461447213,
+      "wf_buy_f1": 0.35346097201767307,
+      "backtest_stop_loss": {
+        "n_trades": 56,
+        "total_return": 0.005021509847656702,
+        "sharpe": 0.5966227698153033,
+        "win_rate": 0.44642857142857145,
+        "avg_trade_ret": 9.776434705543456e-05,
+        "max_drawdown": -0.0214398417194529,
+        "mean_hold_h": 2.8214285714285716
+      },
+      "backtest_fixed_3h": {
+        "n_trades": 55,
+        "total_return": -0.053240340082230775,
+        "sharpe": -3.2957985683139372,
+        "win_rate": 0.4909090909090909,
+        "avg_trade_ret": -0.0009687163325187108,
+        "max_drawdown": -0.07252460983277453,
+        "mean_hold_h": 3.0
+      }
+    }
+  ],
+  "tradeable_tickers": [
+    "SBER",
+    "GAZP",
+    "LKOH"
+  ],
+  "total_seconds": 8644.3
+}

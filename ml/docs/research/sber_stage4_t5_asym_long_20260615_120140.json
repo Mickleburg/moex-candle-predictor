@@ -1,0 +1,27 @@
+{
+  "experiment": "sber_stage4",
+  "tag": "t5_asym_long",
+  "timestamp": "20260615_120140",
+  "config": {
+    "up_k": 1.5,
+    "down_k": 1.0,
+    "vol_window": 12,
+    "seq_len": 32,
+    "horizon": 3
+  },
+  "wf_macro_f1": 0.4392381784737191,
+  "backtest": {
+    "n": 88,
+    "total_return": 0.18518870205890625,
+    "win_rate": 0.5795454545454546,
+    "mean_ret": 0.0019521706816099762,
+    "sharpe": 7.841015782060758
+  },
+  "baseline": {
+    "return": 0.1896,
+    "sharpe": 14.95,
+    "win_rate": 0.732,
+    "trades": 41
+  },
+  "total_seconds": 3543.8
+}

@@ -1,0 +1,30 @@
+{
+  "experiment": "orthogonal_lstm",
+  "ticker": "GAZP",
+  "groups": [
+    "commodity"
+  ],
+  "timestamp": "20260615_021221",
+  "git_branch": "ml-expirement",
+  "input_dim": 22,
+  "orthogonal_feature_names": [
+    "BR_CONT_ret_1h",
+    "BR_CONT_ret_3h",
+    "BR_CONT_ret_d",
+    "BR_CONT_vol",
+    "NG_CONT_ret_1h",
+    "NG_CONT_ret_3h",
+    "NG_CONT_ret_d",
+    "NG_CONT_vol"
+  ],
+  "wf_macro_f1": 0.4552846829636605,
+  "backtest": {
+    "n": 161,
+    "total_return": -0.023669494352482445,
+    "win_rate": 0.422360248447205,
+    "sharpe": -0.4923990086425364,
+    "mean_ret": -0.00012719753473615424
+  },
+  "ohlcv_baseline": null,
+  "total_seconds": 1424.7
+}
