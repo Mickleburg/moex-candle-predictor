@@ -7,7 +7,8 @@
 - `ml/` - активный Python research-блок для свечей MOEX, candle-language экспериментов и action classification.
 - `backend/` - существующий Go backend для загрузки/хранения свечей и HTTP-интеграции с ML service.
 - `contracts/` - JSON Schema контрактов между будущими блоками агента.
-- `llm/`, `aggregator/`, `risk_manager/`, `execution/`, `agent/` - scaffold будущей агентной архитектуры.
+- `llm/` - независимый LLM technical-analysis block с mock mode, strict JSON validation и safe fallback.
+- `aggregator/`, `risk_manager/`, `execution/`, `agent/` - scaffold будущей агентной архитектуры.
 
 Лучший validation-only research candidate на момент создания ветки:
 
@@ -34,7 +35,7 @@ execution -> agent logs
 
 - `backend/` - исторические и будущие свежие свечи, raw storage, batch validation.
 - `ml/` - ML forecast block: текущий рабочий research/inference слой.
-- `llm/` - будущий LLM technical-analysis block; не имеет права торговать.
+- `llm/` - LLM technical-analysis block: принимает technical snapshot и возвращает JSON-сигнал; не имеет права торговать.
 - `aggregator/` - будущий late-fusion слой для ML и LLM сигналов.
 - `risk_manager/` - будущий слой ограничений, лимитов и запрета рискованных действий.
 - `execution/` - будущий dry-run/paper/live adapter к broker/MOEX API.
@@ -85,6 +86,7 @@ Set-Location ..
 
 - ML research reports: `ml/docs/research/`
 - ML block overview: `ml/README.md`
+- LLM block overview: `llm/README.md`
 - Architecture contracts: `contracts/README.md`
 - Existing backend: `backend/README.md`
 

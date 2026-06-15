@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moex-candle-predictor.local/llm/schemas/llm_analysis.schema.json",
+  "title": "LLMTechnicalAnalysis",
+  "description": "Structured technical-analysis output produced by the LLM block. This is not a trading decision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ticker",
+    "timeframe",
+    "as_of",
+    "technical_view",
+    "probabilities",
+    "confidence",
+    "key_reasons",
+    "risk_notes"
+  ],
+  "properties": {
+    "ticker": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeframe": {
+      "type": "string",
+      "minLength": 1
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 1
+    },
+    "technical_view": {
+      "type": "string",
+      "enum": [
+        "strongly_bullish",
+        "moderately_bullish",
+        "neutral",
+        "moderately_bearish",
+        "strongly_bearish"
+      ]
+    },
+    "probabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "buy",
+        "hold",
+        "sell"
+      ],
+      "properties": {
+        "buy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "sell": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "$comment": "The runtime validator additionally checks that buy + hold + sell is approximately 1.0."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "key_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
