@@ -1,93 +1,68 @@
 # MOEX Candle Predictor
 
-`moex-candle-predictor` оформлен как модульная research-платформа для будущего торгового агента на MOEX. Сейчас рабочим и проверенным блоком остается ML research; остальные блоки являются архитектурным scaffold без live trading и без production-интеграций.
+Модульная research-платформа для торгового агента на MOEX. Блоки общаются через JSON-контракты
+(`contracts/`). Весь стек — **Python**.
 
-## Текущий статус
+> **Направление V2 (2026-06-15).** Направленное предсказание 1H одной бумаги (buy/hold/sell)
+> провалено и закрыто. Новая цель — **кросс-секция / маркет-нейтрал + ранняя ML/LLM фьюжн
+> (LLM = новостные фичи) + новости**. Источник правды: [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md),
+> [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md), [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md).
+> Рабочая ветка: `demo`.
 
-- `ml/` - активный Python research-блок для свечей MOEX, candle-language экспериментов и action classification.
-- `backend/` - существующий Go backend для загрузки/хранения свечей и HTTP-интеграции с ML service.
-- `contracts/` - JSON Schema контрактов между будущими блоками агента.
-- `llm/` - независимый LLM technical-analysis block с mock mode, strict JSON validation и safe fallback.
-- `aggregator/`, `risk_manager/`, `execution/`, `agent/` - scaffold будущей агентной архитектуры.
-
-Лучший validation-only research candidate на момент создания ветки:
+## Архитектура V2
 
 ```text
-target:       triple_barrier:h3:w12:up1.25:down1.25
-features:     continuous_regime
-model:        extra_trees:depth=none:leaf=20:maxfeat=sqrt
-class_weight: none
-mean macro-F1: 0.4695
+ДАННЫЕ      backend (свечи) + market context (индексы/фьючи/FX) + news ingestion
+                          │
+ПРИЗНАКИ    quant features (цена/технички, кросс-секц.) ⊕ LLM news features   ← ранняя фьюжн
+                          │
+РЕШЕНИЕ     ml: кросс-секционная модель → ранг по относительной силе
+                          │
+ПОРТФЕЛЬ    risk_manager: long top-k / short bottom-k, маркет-нейтрал, лимиты
+                          │
+ИСПОЛНЕНИЕ   execution
 ```
-
-Это не production artifact. Test не используется для подбора новых candidates. Перед production-независимыми выводами нужны seed robustness, frozen evaluation protocol, backtest и paper trading.
 
 ## Блоки
 
-```text
-backend/data -> ml prediction
-backend/data -> llm technical analysis
-ml + llm -> aggregator
-aggregator + portfolio -> risk manager
-risk manager -> execution
-execution -> agent logs
-```
+- `ml/` — активный Python research-блок. Сейчас разворачивается в **кросс-секционную** модель.
+- `llm/` — извлекатель **новостных признаков** (NLP), не buy/hold/sell. Текущий код — мок под
+  старую late-fusion-схему, ждёт переопределения контракта.
+- `backend/` — данные (свечи + market context). **Переписывается на Python** (Go-версия удалена).
+- `risk_manager/` — станет **портфельным** слоем (long/short, маркет-нейтрал, лимиты, сайзинг).
+- `execution/` — dry-run/paper/live adapter к брокеру/MOEX (пока только paper).
+- `agent/` — orchestrator полного цикла.
+- `contracts/` — общие JSON-схемы. `config/` — общая конфигурация.
+- `aggregator/` — **удалён**: late fusion заменён ранней фьюжн внутри решающей модели.
 
-- `backend/` - исторические и будущие свежие свечи, raw storage, batch validation.
-- `ml/` - ML forecast block: текущий рабочий research/inference слой.
-- `llm/` - LLM technical-analysis block: принимает technical snapshot и возвращает JSON-сигнал; не имеет права торговать.
-- `aggregator/` - будущий late-fusion слой для ML и LLM сигналов.
-- `risk_manager/` - будущий слой ограничений, лимитов и запрета рискованных действий.
-- `execution/` - будущий dry-run/paper/live adapter к broker/MOEX API.
-- `agent/` - будущий orchestrator полного цикла.
-- `contracts/` - shared JSON contracts.
-- `config/` - shared конфигурация, включая demo-supported тикеры.
+## Метод валидации
+
+Только **deployment-симуляция** (скользящий ретрейн сквозь свежий forward-период, с комиссией).
+Обычный walk-forward обманул нас в V1. Тест-сплит 2025-2026 сожжён — для честного гейта нужен
+свежий forward. Подробности — в `docs/RESEARCH_HYPOTHESES.md`.
 
 ## Safety
 
-- Реальная торговля по умолчанию запрещена.
-- Первый режим исполнения - dry-run/paper.
-- Risk manager сильнее ML, LLM и aggregator: он может заблокировать любой сигнал.
-- LLM не отправляет orders и не принимает финальное торговое решение.
-- Test split нельзя использовать для research tuning.
+- Реальная торговля по умолчанию запрещена; первый режим — dry-run/paper.
+- Risk manager сильнее всех: может заблокировать любой сигнал.
+- LLM не торгует и не принимает финальное решение (в V2 он вообще выдаёт только фичи).
+- Тест-сплит нельзя использовать для тюнинга.
+- `is_production=false` до честного forward-гейта + sign-off.
 
-## Текущие ML проверки
-
-```powershell
-python -m compileall -q ml\src ml\scripts ml\test_smoke.py
-python ml\test_smoke.py
-```
-
-ML-блок также имеет contract-compatible CLI:
+## Проверки
 
 ```powershell
-python ml\scripts\predict_from_json.py `
-  --input-json contracts\examples\candle_batch.example.json `
-  --output-json data\reports\ml_prediction_example.json
-```
-
-Без artifact CLI возвращает `diagnostics.artifact_missing=true` и не имитирует реальный прогноз. На ветке `ml-expirement` добавлен research-only artifact path: локально можно обучить frozen triple-barrier artifact и передать его через `--artifact-dir`, чтобы получить реальные `predict_proba` probabilities по `ml_prediction` contract. Это все еще не production/live trading artifact.
-
-## Проверка contracts и backend
-
-```powershell
-python scripts\validate_contracts.py
-```
-
-Если менялся Go backend:
-
-```powershell
-Set-Location backend
-go test ./...
-Set-Location ..
+$PYTHON = "ml\.venv-win\Scripts\python.exe"
+& $PYTHON -m pytest ml/test_smoke.py          # смоук-тесты ML
+& $PYTHON scripts/validate_contracts.py        # валидация контрактов
 ```
 
 ## Документация
 
-- ML research reports: `ml/docs/research/`
-- ML block overview: `ml/README.md`
-- LLM block overview: `llm/README.md`
-- Architecture contracts: `contracts/README.md`
-- Existing backend: `backend/README.md`
-
-Корневой `docs/` оставлен для общей технической документации проекта, которая не является SBER H1 research report.
+- Архитектура V2: `docs/ARCHITECTURE_V2.md`
+- Гипотезы исследования: `docs/RESEARCH_HYPOTHESES.md`
+- Источники данных (ISS/новости): `docs/DATA_SOURCES.md`
+- ML-блок: `ml/README.md`, `ml/CLAUDE.md`
+- LLM-блок: `llm/README.md`, `llm/CLAUDE.md`
+- Контракты: `contracts/README.md`
+- История ML-research: `ml/docs/research/`
