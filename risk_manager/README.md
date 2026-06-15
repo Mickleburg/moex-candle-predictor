@@ -1,25 +1,28 @@
 # Risk Manager Block
 
-`risk_manager/` - scaffold будущего блока ограничений и safety checks.
+`risk_manager/` — scaffold портфельного слоя и safety checks (Python).
 
-Risk manager учитывает:
+## Роль в V2 (ИЗМЕНИЛАСЬ)
 
-- cash;
-- текущие позиции;
-- max position per ticker;
-- max total exposure;
-- max daily loss;
-- cooldown;
-- min expected edge;
-- no short на первом этапе.
+В V2 risk_manager — **портфельный конструктор**, а не пер-тикерный допуск. На вход — кросс-секционный
+ранг/скор по тикерам от решающей модели; на выход — **маркет-нейтральный портфель**:
 
-Если позиции нет, допустимы только `BUY` или `HOLD`.
+- long top-k сильнейших / short bottom-k слабейших;
+- балансировка long/short ноги (нейтральность по бете/деньгам);
+- сайзинг позиций (в т.ч. по волатильности);
+- лимиты: max position per ticker, max gross/net exposure, max daily loss, cooldown, min edge.
 
-Если позиция есть, допустимы:
+Risk manager имеет право **заблокировать любой сигнал** независимо от ML и LLM.
 
-- `BUY_MORE`;
-- `HOLD`;
-- `SELL_PARTIAL`;
-- `SELL_ALL`.
+> Шорты в V2 — часть дизайна (маркет-нейтрал), а не «фаза 2». Старое «no short на первом этапе»
+> относилось к проваленной направленной постановке и больше не действует.
 
-Risk manager имеет право заблокировать любой сигнал независимо от ML, LLM и aggregator.
+## Учитывает
+
+cash; текущие позиции; max position per ticker; max gross/net exposure; max daily loss; cooldown;
+min expected edge; баланс long/short.
+
+## Статус
+
+Скаффолд, не реализован. Точный контракт входа (`aggregated_signal` → кросс-секционный ранг)
+определяется на этапе заморозки контрактов V2.

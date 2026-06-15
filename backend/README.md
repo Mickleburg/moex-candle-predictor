@@ -1,56 +1,30 @@
-# Backend / Data Block
+# Backend Block (Python — to build)
 
-`backend/` - существующий Go backend проекта. В demo-архитектуре он отвечает за data layer:
+`backend/` — блок данных торгового агента. **Go-реализация удалена (2026-06-15); блок переписывается
+на Python** (весь стек проекта — Python).
 
-- загрузку исторических свечей MOEX;
-- хранение raw candles;
-- batch validation;
-- поддержку нескольких тикеров;
-- подготовку данных для ML research;
-- будущий API layer для свежих market data.
+## Назначение
 
-Go-код уже находится внутри `backend/`, поэтому агрессивный move не выполнялся.
+- загрузка свечей MOEX (ISS) и хранение (raw parquet / БД);
+- источник **market context** для V2: индексы (IMOEX/RTSI/MOEXFN/MOEXOG/RGBI), непрерывные фьючерсы
+  (Brent/NG), FX-прокси — то, что ML-блок сейчас self-fetch'ит при инференсе;
+- (позже) приём ленты новостей для LLM-блока (см. `docs/DATA_SOURCES.md`);
+- HTTP-сервис, отдающий данные по JSON-контрактам (`contracts/`).
 
-## Input
+## Статус
 
-```json
-{
-  "ticker": "SBER",
-  "timeframe": "1H",
-  "from": "2020-01-01T00:00:00+03:00",
-  "to": "2026-05-03T23:00:00+03:00",
-  "source": "moex"
-}
-```
+Скаффолд. Пока research качает данные напрямую, минуя бэкенд:
+`scripts/download_candles.py`, `scripts/download_futures_continuous.py` (оба идут в MOEX ISS).
+Переиспользуемая логика для Python-бэкенда уже есть в `ml/src/service/market_context.py`
+(`MarketContextProvider`) и загрузчиках в `scripts/`.
 
-## Output
+## Эндпоинты MOEX ISS и инструменты
 
-```json
-{
-  "ticker": "SBER",
-  "timeframe": "1H",
-  "candles_count": 24613,
-  "raw_path": "ml/data/raw/SBER_1H_20200103T0900_20260503T1800.parquet",
-  "quality": {
-    "duplicates": 0,
-    "invalid_ohlc": 0,
-    "missing_ohlcv": 0
-  }
-}
-```
+См. `docs/DATA_SOURCES.md` — все паттерны URL, коды инструментов, нюансы tz/FX, пагинация.
 
-## Current status
+## Что нужно сделать (Python-реимплементация)
 
-- Реализован Go HTTP backend.
-- Есть MOEX клиент и storage layer.
-- Backend может быть источником данных для ML research.
-- Live trading/execution не относится к backend-блоку.
-
-## Проверка
-
-Если меняется Go-код:
-
-```powershell
-Set-Location backend
-go test ./...
-```
+1. Сервис загрузки/кэширования свечей и market context (обернуть существующие загрузчики).
+2. HTTP-слой под контракты `candle_batch` / market context.
+3. Гигиена tz (МСК) — как в `ml/src/data/load.py` (`to_moscow_time`, `tz_aware`).
+4. Источник новостей (Layer 3A) — позже, под LLM-блок.
