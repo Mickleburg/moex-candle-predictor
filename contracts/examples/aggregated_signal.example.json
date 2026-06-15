@@ -1,17 +1,14 @@
 {
-  "ticker": "SBER",
-  "timeframe": "1H",
   "as_of": "2026-05-15T15:00:00+03:00",
-  "combined_probabilities": {
-    "buy": 0.375,
-    "hold": 0.35,
-    "sell": 0.275
-  },
-  "raw_decision": "BUY",
-  "expected_edge": 0.0015,
-  "confidence": 0.58,
-  "components": {
-    "ml_weight": 0.75,
-    "llm_weight": 0.25
-  }
+  "timeframe": "1H",
+  "universe": ["SBER", "LKOH", "GAZP"],
+  "horizon": { "bars": 3, "timeframe": "1H" },
+  "rankings": [
+    { "ticker": "SBER", "score": 1.42, "rank": 1, "percentile": 0.95, "expected_relative_return": 0.011, "leg": "long" },
+    { "ticker": "LKOH", "score": 0.05, "rank": 2, "percentile": 0.50, "expected_relative_return": 0.000, "leg": "flat" },
+    { "ticker": "GAZP", "score": -1.18, "rank": 3, "percentile": 0.05, "expected_relative_return": -0.009, "leg": "short" }
+  ],
+  "market_neutral": true,
+  "model_version": "research_xsec_v0",
+  "is_production": false
 }

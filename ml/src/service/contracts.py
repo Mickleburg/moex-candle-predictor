@@ -156,7 +156,7 @@ def build_ml_prediction_response(
 
     ``signal_context`` is optional prediction-intrinsic forecast context (horizon,
     volatility-scaled barrier levels, calibration flag). It is INFORMATION for the
-    downstream aggregator/risk_manager — never a trading command. Omitted from the
+    downstream risk_manager — never a trading command. Omitted from the
     response when not provided.
     """
 
