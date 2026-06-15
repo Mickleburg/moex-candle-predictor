@@ -39,10 +39,19 @@ INTERVAL_MAP = {
 # Instrument registry: ticker -> (engine, market, board or None).
 # board=None omits the /boards/<board> path segment (indices, currency, futures).
 INSTRUMENT_REGISTRY: dict[str, tuple[str, str, str | None]] = {
-    # Shares (TQBR board)
-    "SBER": ("stock", "shares", "TQBR"),
-    "GAZP": ("stock", "shares", "TQBR"),
-    "LKOH": ("stock", "shares", "TQBR"),
+    # Shares (TQBR board) — cross-sectional universe (liquid blue chips, sector-diverse)
+    "SBER": ("stock", "shares", "TQBR"),   # banks
+    "GAZP": ("stock", "shares", "TQBR"),   # oil & gas
+    "LKOH": ("stock", "shares", "TQBR"),   # oil & gas
+    "GMKN": ("stock", "shares", "TQBR"),   # metals (Nornickel)
+    "ROSN": ("stock", "shares", "TQBR"),   # oil (Rosneft)
+    "NVTK": ("stock", "shares", "TQBR"),   # gas (Novatek)
+    "TATN": ("stock", "shares", "TQBR"),   # oil (Tatneft)
+    "MGNT": ("stock", "shares", "TQBR"),   # retail (Magnit)
+    "MTSS": ("stock", "shares", "TQBR"),   # telecom (MTS)
+    "SNGS": ("stock", "shares", "TQBR"),   # oil (Surgutneftegas)
+    "CHMF": ("stock", "shares", "TQBR"),   # steel (Severstal)
+    "ALRS": ("stock", "shares", "TQBR"),   # diamonds (Alrosa)
     # Broad-market + sector indices (no board)
     "IMOEX": ("stock", "index", None),   # MOEX Russia Index (RUB)
     "RTSI": ("stock", "index", None),    # RTS Index (USD) -> RTSI-IMOEX ~= USD/RUB driver
