@@ -1,40 +1,61 @@
-# ML Research Reports
+# Research-отчёты ML-блока — индекс
 
-Здесь лежат research-отчеты, перенесенные из корневого `docs/`.
+> Авторитетный отчёт о состоянии блока: [`../ML_BLOCK_STATE_2026-06-15.md`](../ML_BLOCK_STATE_2026-06-15.md).
+> Здесь — индекс экспериментов с честным статусом каждого. Отчёты ниже — исторический лог;
+> при расхождении с состоянием блока приоритет у `ML_BLOCK_STATE`.
 
-Правила чтения результатов:
+## Финальный итог (актуально на 2026-06-15)
 
-- для выбора модели использовать только aggregate metrics по folds;
-- fold-level rows использовать только для диагностики;
-- test split не использовать для подбора;
-- validation-only результаты не считать production-ready;
-- trading claims не делать без отдельного backtest/paper trading.
+Два торгуемых тикера, оба обслуживаются роутером; вся research-часть закрыта.
 
-Текущий лучший validation-only candidate:
+| Тикер | Модель | Бэктест (валидация, 3ч+стоп, будни) | Робастность | Торгуемый |
+|-------|--------|--------------------------------------|-------------|-----------|
+| **SBER** | OHLCV LSTM v2 | +18.96%, Sharpe 14.95, win 73.2%, 41 сделка | P(прибыль)=100% | **да** |
+| **LKOH** | нефть+рынок LSTM (self-fetch) | +11.73%, Sharpe 5.42, win 56.8%, 81 сделка | P(прибыль)=97.3% | **да (слабее)** |
+| GAZP | — | эджа нет (win<50%) | — | нет |
 
-```text
-triple_barrier:h3:w12:up1.25:down1.25
-continuous_regime
-extra_trees:depth=none:leaf=20:maxfeat=sqrt
-class_weight=none
-mean macro-F1=0.4695
-```
+**Продакшн-правило (оба тикера):** BUY при confidence > 0.50; держать 3 часа со стоп-лоссом на нижнем
+барьере волатильности; без тейк-профита; long-only; не торговать выходные сессии. `is_production=false`
+до прохождения финального тест-гейта и sign-off команды.
 
-## Новый отчет
+**Таргет:** triple_barrier h=3, vol_window=12, up_k=down_k=1.25. **Модель:** CandleLSTM(hidden=128,
+2 слоя, dropout=0.3), окно 32 свечи.
 
-- `sber_h1_triple_barrier_seed_robustness_2026-05-15.md` - проверка устойчивости текущего triple-barrier candidate по seeds `7,13,21,42,100`.
-- `sber_h1_research_artifact_2026-05-15.md` - protocol локального research artifact bundle и JSON inference path для frozen candidate.
+## Сквозной вывод (7 отрицательных результатов)
 
-Seed robustness подтвердил, что `random_state=42` не был случайным выбросом:
+Эдж SBER — редкий чистый высокоуверенный сигнал. **Любое расширение его разбавляет:** multi-ticker
+joint, трансформер, мульти-горизонт, мета-лейблинг, ортогональные фичи на SBER, вариации таргета/окна.
+Простой confidence — почти оптимальный селектор. LKOH разблокирован только по-настоящему ортогональным
+драйвером (нефть Brent); GAZP непрогнозируем на 1H (NG = американский газ ≠ Газпром).
 
-```text
-triple_barrier:h3:w12:up1.25:down1.25
-continuous_regime
-extra_trees:depth=none:leaf=20:maxfeat=sqrt
-class_weight=none
-mean macro-F1 over seeds=0.4685
-worst seed macro-F1=0.4676
-worst fold macro-F1=0.4522
-```
+## Ключевые отчёты текущего цикла (июнь 2026)
 
-Этот результат по-прежнему validation-only и не является production artifact.
+| Отчёт | Тема | Итог |
+|-------|------|------|
+| `sber_h1_lstm_v2_2026-06-03.md` | LSTM v2 | лучшая модель SBER (WF F1 0.4778) |
+| `sber_h1_exit_horizon_2026-06-10.md` | горизонт выхода | выход 3ч утроил доходность (+5%→+16%) |
+| `sber_h1_hybrid_exit_2026-06-14.md` | матрица выходов 2×2 | стоп помогает, тейк-профит вредит → +17.54% |
+| `sber_h1_sell_diag_tb_exit_2026-06-14.md` | диагностика SELL | шортов нет по объективной причине |
+| `sber_edge_analysis_2026-06-14.md` | где живёт эдж + робастность | эдж реален (P=100%), пятница+вечер+high-vol |
+| `per_ticker_lstm_2026-06-14.md` | перенос на GAZP/LKOH | F1 переносится, эдж — нет |
+| `sber_h1_multiticker_backtest_2026-06-09.md` | multi-ticker | ❌ разбавляет (Sharpe −0.39) |
+| `sber_multihorizon_2026-06-14.md` | мульти-горизонт | ❌ разбавляет |
+| `sber_meta_labeling_2026-06-15.md` | мета-лейблинг | ❌ confidence уже оптимален |
+| `sber_orthogonal_2026-06-15.md` | ортогональные на SBER | ❌ не нужны SBER |
+| `gazp_lkoh_orthogonal_2026-06-15.md` | индексы для GAZP/LKOH | ❌ коллинеарны |
+| `gazp_lkoh_commodity_2026-06-15.md` | нефть/газ для GAZP/LKOH | LKOH ✅, GAZP ❌ |
+| `lkoh_orthogonal_refine_2026-06-15.md` | абляция LKOH | нефть+рынок → Sharpe 5.42 |
+| `sber_stage4_2026-06-15.md` | таргет/seq-len | ❌ базовый держится |
+| `sber_h1_transformer_2026-06-07.md` | трансформер | ❌ переуверен |
+
+## Исторические отчёты (май 2026) — НЕ актуальны для продакшена
+
+Файлы `sber_h1_*_2026-05-*` и `sber_h1_nlp/word2vec/word_lm/next_word*` — ранняя разведка
+(candle-language/NLP, ExtraTrees frozen candidate F1≈0.47). Подход последовательностей (LSTM) их
+превзошёл; оставлены как исторический лог. Их числа НЕ описывают текущую продакшн-модель.
+
+## Правила чтения результатов
+
+- Для выбора конфигурации — только aggregate metrics по фолдам; fold-level — для диагностики.
+- Test split не использовать для подбора (validation-only результаты — не production-ready).
+- Trading-выводы — только после backtest; финальный тест-гейт ещё не запускался.
