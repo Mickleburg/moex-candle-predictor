@@ -327,6 +327,14 @@ def _predict_with_lstm(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame
             n_candles=len(candle_batch_df),
         )
 
+    # Guard: built feature dim must match the artifact's normalisation/input dim.
+    if feat_mat.shape[1] != len(norm_mean):
+        raise ValueError(
+            f"Feature dimension mismatch: builder produced {feat_mat.shape[1]} features but the "
+            f"artifact expects {len(norm_mean)} (feature_set='{artifact.feature_config.get('feature_set', '')}', "
+            f"orthogonal_groups={artifact.feature_config.get('orthogonal_groups')})."
+        )
+
     # Normalise and take the last seq_len steps
     feat_norm = np.nan_to_num((feat_mat - norm_mean) / norm_std, nan=0.0, posinf=0.0, neginf=0.0)
     window = feat_norm[-seq_len:].astype(np.float32)       # (seq_len, input_dim)
