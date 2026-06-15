@@ -121,7 +121,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ticker", default="SBER")
     ap.add_argument("--groups", default="market,sector,rates",
-                    help="comma list of: market,sector,rates (empty = OHLCV baseline)")
+                    help="comma list of: market,sector,rates,commodity (empty = OHLCV baseline)")
+    ap.add_argument("--cache", action="store_true",
+                    help="save walk-forward proba/idx to ml/artifacts for robustness analysis")
     args = ap.parse_args()
     ticker = args.ticker.upper()
     groups = tuple(g.strip() for g in args.groups.split(",") if g.strip())
@@ -143,6 +145,12 @@ def main():
 
     proba, idx = collect(combined, td.labels, td.n_trainval, input_dim)
     macro_f1 = float(f1_score(td.labels[idx], proba.argmax(1), average="macro", zero_division=0))
+
+    if args.cache:
+        cache_path = ML_DIR / "artifacts" / f"orth_wf_preds_{ticker.lower()}_{tag}.npz"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(cache_path, proba=proba, idx=idx)
+        print(f"  cached WF preds -> {cache_path.name}")
 
     close = td.df["close"].astype(float).to_numpy()
     high = td.df["high"].astype(float).to_numpy()

@@ -289,16 +289,36 @@ def _predict_with_et(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame) 
     )
 
 
+def _lstm_feature_matrix(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame) -> np.ndarray:
+    """Build the LSTM per-step feature matrix, with orthogonal features if the artifact uses them.
+
+    Orthogonal artifacts declare `feature_config.orthogonal_groups`; the orthogonal series are
+    self-fetched by the ML block via the market-context provider (NOT supplied through the
+    contract). Plain artifacts use the 14-dim OHLCV/time features.
+    """
+    from src.models.lstm_model import build_per_step_features
+
+    groups = artifact.feature_config.get("orthogonal_groups")
+    if groups:
+        from src.features.orthogonal import build_combined_features
+        from .market_context import get_market_context
+
+        ticker = str(artifact.metadata.get("ticker", "")).upper()
+        ortho = get_market_context().get_ortho_series()
+        mat, _ = build_combined_features(candle_batch_df, ortho, ticker, groups=tuple(groups))
+        return mat
+    return build_per_step_features(candle_batch_df)
+
+
 def _predict_with_lstm(artifact: ResearchArtifact, candle_batch_df: pd.DataFrame) -> ArtifactPrediction:
     """LSTM inference: SEQ_LEN-step sequence window."""
     import torch
-    from src.models.lstm_model import build_per_step_features
 
     seq_len = int(artifact.feature_config.get("seq_len", 32))
     norm_mean = artifact.feature_mean   # shape (input_dim,)
     norm_std  = artifact.feature_std    # shape (input_dim,)
 
-    feat_mat = build_per_step_features(candle_batch_df)   # (N, input_dim)
+    feat_mat = _lstm_feature_matrix(artifact, candle_batch_df)   # (N, input_dim)
     if len(feat_mat) < seq_len:
         return _safe_hold_prediction(
             artifact,
