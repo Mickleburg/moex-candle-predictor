@@ -78,6 +78,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--news", type=str, default="", help="path to news table (csv/parquet)")
     ap.add_argument("--horizon", type=int, default=10)
+    ap.add_argument("--window", type=int, default=NEWS_WINDOW_DAYS,
+                    help="news staleness window in days (use ~10 for a WEEKLY news table)")
     args = ap.parse_args()
 
     panel, sector_panel, market = load_panels(timeframe="1D")
@@ -92,8 +94,8 @@ def main() -> int:
     if args.news:
         news = (pd.read_parquet(args.news) if args.news.endswith(".parquet")
                 else pd.read_csv(args.news, parse_dates=["as_of"]))
-        news["as_of"] = pd.to_datetime(news["as_of"], utc=False)
-        np_panels = news_to_panels(news, panel.index, cols, panel.columns)
+        news["as_of"] = pd.to_datetime(news["as_of"], utc=True).dt.tz_convert("Europe/Moscow")
+        np_panels = news_to_panels(news, panel.index, cols, panel.columns, window_days=args.window)
         print("\nQUANT + REAL NEWS:")
         run(panel, target, {**quant, **np_panels}, args.horizon, label="quant+news")
         return 0
