@@ -1,0 +1,62 @@
+H6 macro/cross-asset cross-sectional signal
+  panel: 12 tickers x 1693 days, 2020-01-03..2026-06-01; forward from 2025-01-01
+  macro[oil]: coverage 99.94%, daily std 0.0244
+  macro[fx]: coverage 99.94%, daily std 0.0119
+  macro[rates]: coverage 99.94%, daily std 0.0057
+
+Read: a variant is a DYNAMIC signal only if FWD IC > 0, IR > 0, AND edge over its
+time-shuffled control (edge>0.01). 'shuf' is the static-bias null; 'edge' is real timing.
+
+--- price-momentum benchmark (from harness, the number to beat) ---
+mom_L20                H= 5 k=3 | IC all=+0.0420  IS=+0.0453(IR+0.14)  FWD=+0.0328(IR+0.10) | bt IS=-0.374 FWD=-0.134 win=0.48 (n_ic=1668, n_fwd=89)
+mom_L20                H=10 k=3 | IC all=+0.0431  IS=+0.0390(IR+0.12)  FWD=+0.0546(IR+0.17) | bt IS=-0.331 FWD=-0.098 win=0.50 (n_ic=1663, n_fwd=44)
+mom_L20                H=20 k=3 | IC all=+0.0399  IS=+0.0318(IR+0.10)  FWD=+0.0630(IR+0.20) | bt IS=+0.001 FWD=+0.134 win=0.52 (n_ic=1653, n_fwd=21)
+mom_L60                H= 5 k=3 | IC all=+0.0160  IS=+0.0061(IR+0.02)  FWD=+0.0425(IR+0.12) | bt IS=-0.739 FWD=-0.125 win=0.46 (n_ic=1628, n_fwd=89)
+mom_L60                H=10 k=3 | IC all=+0.0104  IS=-0.0033(IR-0.01)  FWD=+0.0474(IR+0.13) | bt IS=-0.555 FWD=-0.019 win=0.50 (n_ic=1623, n_fwd=44)
+mom_L60                H=20 k=3 | IC all=+0.0063  IS=+0.0032(IR+0.01)  FWD=+0.0148(IR+0.04) | bt IS=-0.410 FWD=-0.131 win=0.57 (n_ic=1613, n_fwd=21)
+
+--- STATIC beta tilt (expected to be a static bias: small edge vs shuffle) ---
+beta_oil                   H= 5 | IS=-0.0058  FWD=-0.0119(IR-0.04)  shuf=-0.0142  edge=+0.0023 | btFWD=-0.258 win=0.38
+beta_oil                   H=10 | IS=-0.0162  FWD=-0.0151(IR-0.05)  shuf=-0.0103  edge=-0.0048 | btFWD=-0.028 win=0.50
+beta_oil                   H=20 | IS=-0.0027  FWD=+0.0235(IR+0.08)  shuf=-0.0145  edge=+0.0380 | btFWD=+0.118 win=0.67  <-- dynamic
+beta_fx                    H= 5 | IS=-0.0023  FWD=-0.0412(IR-0.13)  shuf=-0.0270  edge=-0.0142 | btFWD=-0.350 win=0.43
+beta_fx                    H=10 | IS=-0.0009  FWD=-0.0631(IR-0.20)  shuf=-0.0293  edge=-0.0338 | btFWD=-0.211 win=0.43
+beta_fx                    H=20 | IS=-0.0030  FWD=-0.0551(IR-0.17)  shuf=-0.0281  edge=-0.0270 | btFWD=-0.224 win=0.38
+
+--- DYNAMIC tilt beta*driver_momentum (the H6 signal) ---
+tilt_oil_m10               H= 5 | IS=+0.0011  FWD=-0.0532(IR-0.17)  shuf=+0.0102  edge=-0.0634 | btFWD=-0.510 win=0.32
+tilt_oil_m10               H=10 | IS=-0.0016  FWD=-0.0130(IR-0.04)  shuf=+0.0106  edge=-0.0236 | btFWD=+0.017 win=0.50
+tilt_oil_m10               H=20 | IS=-0.0072  FWD=+0.0218(IR+0.08)  shuf=+0.0062  edge=+0.0156 | btFWD=+0.216 win=0.71  <-- dynamic
+tilt_oil_m20               H= 5 | IS=-0.0059  FWD=+0.0057(IR+0.02)  shuf=+0.0087  edge=-0.0030 | btFWD=-0.046 win=0.49
+tilt_oil_m20               H=10 | IS=-0.0100  FWD=+0.0371(IR+0.12)  shuf=+0.0066  edge=+0.0305 | btFWD=+0.236 win=0.55  <-- dynamic
+tilt_oil_m20               H=20 | IS=-0.0196  FWD=+0.0256(IR+0.09)  shuf=+0.0062  edge=+0.0194 | btFWD=+0.323 win=0.76  <-- dynamic
+
+tilt_fx_m10                H= 5 | IS=-0.0020  FWD=-0.0049(IR-0.01)  shuf=-0.0008  edge=-0.0041 | btFWD=-0.201 win=0.47
+tilt_fx_m10                H=10 | IS=-0.0279  FWD=+0.0207(IR+0.06)  shuf=+0.0030  edge=+0.0177 | btFWD=+0.115 win=0.52  <-- dynamic
+tilt_fx_m10                H=20 | IS=-0.0267  FWD=+0.0016(IR+0.01)  shuf=+0.0055  edge=-0.0039 | btFWD=+0.041 win=0.43
+tilt_fx_m20                H= 5 | IS=-0.0035  FWD=-0.0116(IR-0.04)  shuf=-0.0067  edge=-0.0049 | btFWD=-0.359 win=0.44
+tilt_fx_m20                H=10 | IS=-0.0085  FWD=+0.0021(IR+0.01)  shuf=-0.0029  edge=+0.0050 | btFWD=-0.075 win=0.48
+tilt_fx_m20                H=20 | IS=-0.0220  FWD=-0.0186(IR-0.06)  shuf=+0.0011  edge=-0.0197 | btFWD=-0.080 win=0.43
+
+tilt_rates_m10             H= 5 | IS=+0.0062  FWD=-0.0237(IR-0.07)  shuf=+0.0006  edge=-0.0243 | btFWD=-0.153 win=0.40
+tilt_rates_m10             H=10 | IS=+0.0228  FWD=-0.0174(IR-0.05)  shuf=+0.0012  edge=-0.0186 | btFWD=-0.280 win=0.36
+tilt_rates_m10             H=20 | IS=+0.0340  FWD=+0.0076(IR+0.02)  shuf=-0.0009  edge=+0.0085 | btFWD=-0.114 win=0.52
+tilt_rates_m20             H= 5 | IS=+0.0088  FWD=-0.0093(IR-0.03)  shuf=+0.0020  edge=-0.0113 | btFWD=-0.241 win=0.44
+tilt_rates_m20             H=10 | IS=+0.0249  FWD=+0.0203(IR+0.06)  shuf=-0.0004  edge=+0.0207 | btFWD=-0.208 win=0.41  <-- dynamic
+tilt_rates_m20             H=20 | IS=+0.0342  FWD=+0.0325(IR+0.09)  shuf=-0.0087  edge=+0.0412 | btFWD=-0.211 win=0.48  <-- dynamic
+
+--- COMBINED oil+fx tilt (z-scored sum) ---
+tilt_oilfx_m10             H= 5 | IS=+0.0003  FWD=-0.0613(IR-0.20)  shuf=+0.0086  edge=-0.0699 | btFWD=-0.517 win=0.37
+tilt_oilfx_m10             H=10 | IS=-0.0111  FWD=-0.0220(IR-0.07)  shuf=+0.0086  edge=-0.0306 | btFWD=-0.114 win=0.46
+tilt_oilfx_m10             H=20 | IS=-0.0176  FWD=-0.0030(IR-0.01)  shuf=+0.0055  edge=-0.0085 | btFWD=-0.121 win=0.43
+tilt_oilfx_m20             H= 5 | IS=-0.0008  FWD=-0.0145(IR-0.04)  shuf=-0.0020  edge=-0.0125 | btFWD=-0.327 win=0.44
+tilt_oilfx_m20             H=10 | IS=-0.0107  FWD=+0.0069(IR+0.02)  shuf=+0.0024  edge=+0.0045 | btFWD=-0.120 win=0.50
+tilt_oilfx_m20             H=20 | IS=-0.0203  FWD=-0.0090(IR-0.03)  shuf=+0.0092  edge=-0.0182 | btFWD=-0.084 win=0.48
+
+--- COMBINED oil+fx+rates tilt ---
+tilt_all_m10               H= 5 | IS=+0.0026  FWD=-0.0516(IR-0.16)  shuf=+0.0035  edge=-0.0551 | btFWD=-0.394 win=0.40
+tilt_all_m10               H=10 | IS=-0.0057  FWD=-0.0119(IR-0.04)  shuf=+0.0031  edge=-0.0150 | btFWD=-0.013 win=0.43
+tilt_all_m10               H=20 | IS=-0.0005  FWD=+0.0037(IR+0.01)  shuf=-0.0004  edge=+0.0041 | btFWD=+0.033 win=0.57
+tilt_all_m20               H= 5 | IS=+0.0116  FWD=-0.0174(IR-0.05)  shuf=-0.0086  edge=-0.0088 | btFWD=-0.305 win=0.42
+tilt_all_m20               H=10 | IS=+0.0216  FWD=+0.0113(IR+0.04)  shuf=-0.0029  edge=+0.0142 | btFWD=-0.110 win=0.52  <-- dynamic
+tilt_all_m20               H=20 | IS=+0.0141  FWD=-0.0083(IR-0.03)  shuf=+0.0037  edge=-0.0120 | btFWD=-0.150 win=0.38
