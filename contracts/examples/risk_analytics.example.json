@@ -1,0 +1,104 @@
+{
+  "as_of": "2026-06-16T00:00:00+03:00",
+  "timeframe": "1D",
+  "horizon": {
+    "bars": 10,
+    "timeframe": "1D"
+  },
+  "universe": [
+    "SBER",
+    "GAZP",
+    "LKOH",
+    "GMKN",
+    "ROSN",
+    "NVTK",
+    "TATN",
+    "MGNT",
+    "MTSS",
+    "SNGS",
+    "CHMF",
+    "ALRS"
+  ],
+  "per_ticker": [
+    {
+      "ticker": "SBER",
+      "vol_forecast": 0.004484,
+      "inv_vol_weight": 0.181867,
+      "valid": true
+    },
+    {
+      "ticker": "GAZP",
+      "vol_forecast": 0.009286,
+      "inv_vol_weight": 0.087814,
+      "valid": true
+    },
+    {
+      "ticker": "LKOH",
+      "vol_forecast": 0.011207,
+      "inv_vol_weight": 0.072764,
+      "valid": true
+    },
+    {
+      "ticker": "GMKN",
+      "vol_forecast": 0.019925,
+      "inv_vol_weight": 0.040928,
+      "valid": true
+    },
+    {
+      "ticker": "ROSN",
+      "vol_forecast": 0.010556,
+      "inv_vol_weight": 0.077251,
+      "valid": true
+    },
+    {
+      "ticker": "NVTK",
+      "vol_forecast": 0.014559,
+      "inv_vol_weight": 0.056013,
+      "valid": true
+    },
+    {
+      "ticker": "TATN",
+      "vol_forecast": 0.012121,
+      "inv_vol_weight": 0.067279,
+      "valid": true
+    },
+    {
+      "ticker": "MGNT",
+      "vol_forecast": 0.013051,
+      "inv_vol_weight": 0.062485,
+      "valid": true
+    },
+    {
+      "ticker": "MTSS",
+      "vol_forecast": 0.005429,
+      "inv_vol_weight": 0.150219,
+      "valid": true
+    },
+    {
+      "ticker": "SNGS",
+      "vol_forecast": 0.009349,
+      "inv_vol_weight": 0.087231,
+      "valid": true
+    },
+    {
+      "ticker": "CHMF",
+      "vol_forecast": 0.010726,
+      "inv_vol_weight": 0.076032,
+      "valid": true
+    },
+    {
+      "ticker": "ALRS",
+      "vol_forecast": 0.020328,
+      "inv_vol_weight": 0.040116,
+      "valid": true
+    }
+  ],
+  "regime": {
+    "distance": 1.2075,
+    "percentile": 0.3401,
+    "novel": false,
+    "exposure_scalar": 1.0
+  },
+  "model_version": "risk_analytics_v0",
+  "is_production": false
+}

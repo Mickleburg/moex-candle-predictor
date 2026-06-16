@@ -31,6 +31,7 @@ CONTRACTS = [
     "order_request",
     "execution_report",
     "agent_cycle_result",
+    "risk_analytics",
 ]
 
 PROBABILITY_KEYS = {"buy", "hold", "sell"}

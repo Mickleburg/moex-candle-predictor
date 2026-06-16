@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskAnalytics",
+  "description": "V2 Layer-4: the ML block's RISK-ANALYTICS output — forward volatility forecast + market-regime state + suggested sizing per ticker. This is INFORMATION for risk_manager (vol-targeting + regime gating), NOT a directional or trade decision. Produced after the cross-sectional directional alpha was found not to generalize (price and news both closed); the ML block's honest, deployable role is risk analytics.",
+  "type": "object",
+  "required": ["as_of", "timeframe", "horizon", "universe", "per_ticker", "regime", "model_version", "is_production"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "timeframe": { "type": "string" },
+    "horizon": {
+      "type": "object",
+      "required": ["bars", "timeframe"],
+      "properties": {
+        "bars": { "type": "integer", "minimum": 1 },
+        "timeframe": { "type": "string" }
+      }
+    },
+    "universe": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "per_ticker": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["ticker", "vol_forecast", "inv_vol_weight", "valid"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "vol_forecast": { "type": "number", "minimum": 0, "description": "Predicted forward realized volatility (per-bar, EWMA) over the horizon." },
+          "inv_vol_weight": { "type": "number", "minimum": 0, "description": "Suggested vol-targeting weight (1/vol, normalized to sum 1 over valid tickers)." },
+          "valid": { "type": "boolean" }
+        }
+      }
+    },
+    "regime": {
+      "type": "object",
+      "required": ["distance", "percentile", "novel", "exposure_scalar"],
+      "properties": {
+        "distance": { "type": "number", "minimum": 0, "description": "Mahalanobis novelty distance of the current regime vs the past distribution." },
+        "percentile": { "type": "number", "minimum": 0, "maximum": 1 },
+        "novel": { "type": "boolean", "description": "True if the current regime is in the high-novelty tail (model least reliable)." },
+        "exposure_scalar": { "type": "number", "minimum": 0, "maximum": 1, "description": "Suggested gross-exposure multiplier (1 = normal, 0 = abstain in a novel regime)." }
+      }
+    },
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
+  }
+}
