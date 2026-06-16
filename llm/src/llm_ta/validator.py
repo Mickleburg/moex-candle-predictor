@@ -1,22 +1,20 @@
+"""Validate llm_analysis payloads against the frozen V2 contract.
+
+V2 = NEWS FEATURES (no buy/hold/sell). Beyond JSON-schema validation we enforce the
+no-lookahead invariant: every sources[].published_at must be <= as_of.
+"""
 from __future__ import annotations
 
+import datetime as dt
 import json
-import math
 from pathlib import Path
 from typing import Any
 
-
 LLM_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = LLM_ROOT / "schemas" / "llm_analysis.schema.json"
-PROBABILITY_KEYS = ("buy", "hold", "sell")
-PROBABILITY_SUM_TOLERANCE = 0.02
-TECHNICAL_VIEW_VALUES = {
-    "strongly_bullish",
-    "moderately_bullish",
-    "neutral",
-    "moderately_bearish",
-    "strongly_bearish",
-}
+
+REQUIRED_TOP = ("as_of", "ticker", "timeframe", "features", "model_version", "is_production")
+REQUIRED_FEATURES = ("sentiment", "impact_score", "novelty", "event_type", "news_count")
 
 
 class LLMAnalysisValidationError(ValueError):
@@ -50,64 +48,66 @@ def validate_analysis(payload: dict[str, Any], schema_path: Path = DEFAULT_SCHEM
         _validate_without_jsonschema(payload)
     else:
         Draft202012Validator.check_schema(schema)
-        validator = jsonschema.Draft202012Validator(schema, format_checker=FormatChecker())
+        validator = Draft202012Validator(schema, format_checker=FormatChecker())
         errors = sorted(validator.iter_errors(payload), key=lambda error: list(error.path))
         if errors:
-            message = "; ".join(error.message for error in errors)
-            raise LLMAnalysisValidationError(message)
-    _validate_probability_sum(payload)
+            raise LLMAnalysisValidationError("; ".join(error.message for error in errors))
+    _validate_no_lookahead(payload)
 
 
 def _validate_without_jsonschema(payload: dict[str, Any]) -> None:
-    required = {
-        "ticker",
-        "timeframe",
-        "as_of",
-        "technical_view",
-        "probabilities",
-        "confidence",
-        "key_reasons",
-        "risk_notes",
-    }
-    unknown = set(payload) - required
-    if unknown:
-        raise LLMAnalysisValidationError(f"unknown fields: {sorted(unknown)}")
-    missing = required - set(payload)
+    missing = set(REQUIRED_TOP) - set(payload)
     if missing:
         raise LLMAnalysisValidationError(f"missing fields: {sorted(missing)}")
-
-    for field in ("ticker", "timeframe", "as_of"):
+    for field in ("as_of", "ticker", "timeframe", "model_version"):
         if not isinstance(payload[field], str) or not payload[field]:
             raise LLMAnalysisValidationError(f"{field} must be a non-empty string")
-
-    if payload["technical_view"] not in TECHNICAL_VIEW_VALUES:
-        raise LLMAnalysisValidationError("technical_view has an unsupported value")
-
-    probabilities = payload["probabilities"]
-    if not isinstance(probabilities, dict):
-        raise LLMAnalysisValidationError("probabilities must be an object")
-    if set(probabilities) != set(PROBABILITY_KEYS):
-        raise LLMAnalysisValidationError("probabilities must contain buy, hold, sell only")
-    for key in PROBABILITY_KEYS:
-        if not _is_number_between_zero_and_one(probabilities[key]):
-            raise LLMAnalysisValidationError(f"probabilities.{key} must be a number between 0 and 1")
-
-    if not _is_number_between_zero_and_one(payload["confidence"]):
-        raise LLMAnalysisValidationError("confidence must be a number between 0 and 1")
-
-    for field in ("key_reasons", "risk_notes"):
-        if not isinstance(payload[field], list) or not all(isinstance(item, str) for item in payload[field]):
-            raise LLMAnalysisValidationError(f"{field} must be an array of strings")
-
-
-def _is_number_between_zero_and_one(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
+    if not isinstance(payload["is_production"], bool):
+        raise LLMAnalysisValidationError("is_production must be a boolean")
+    features = payload["features"]
+    if not isinstance(features, dict):
+        raise LLMAnalysisValidationError("features must be an object")
+    missing_f = set(REQUIRED_FEATURES) - set(features)
+    if missing_f:
+        raise LLMAnalysisValidationError(f"features missing: {sorted(missing_f)}")
+    if "probabilities" in payload or "probabilities" in features:
+        raise LLMAnalysisValidationError("V2: llm_analysis must not carry buy/hold/sell probabilities")
+    if not _in_range(features["sentiment"], -1, 1):
+        raise LLMAnalysisValidationError("features.sentiment must be in [-1, 1]")
+    for f in ("impact_score", "novelty"):
+        if not _in_range(features[f], 0, 1):
+            raise LLMAnalysisValidationError(f"features.{f} must be in [0, 1]")
+    if not isinstance(features["event_type"], str) or not features["event_type"]:
+        raise LLMAnalysisValidationError("features.event_type must be a non-empty string")
+    if not isinstance(features["news_count"], int) or features["news_count"] < 0:
+        raise LLMAnalysisValidationError("features.news_count must be a non-negative integer")
 
 
-def _validate_probability_sum(payload: dict[str, Any]) -> None:
-    probabilities = payload.get("probabilities")
-    if not isinstance(probabilities, dict):
-        raise LLMAnalysisValidationError("probabilities must be an object")
-    total = sum(float(probabilities[key]) for key in PROBABILITY_KEYS)
-    if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=PROBABILITY_SUM_TOLERANCE):
-        raise LLMAnalysisValidationError(f"probabilities sum to {total}, expected approximately 1.0")
+def _in_range(value: Any, lo: float, hi: float) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and lo <= value <= hi
+
+
+def _parse_dt(value: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(value)
+
+
+def _validate_no_lookahead(payload: dict[str, Any]) -> None:
+    """Every contributing source must be published at or before as_of."""
+    as_of_raw = payload.get("as_of")
+    if not isinstance(as_of_raw, str):
+        raise LLMAnalysisValidationError("as_of must be a string")
+    try:
+        as_of = _parse_dt(as_of_raw)
+    except ValueError as exc:
+        raise LLMAnalysisValidationError(f"as_of is not ISO-8601: {exc}") from exc
+    for src in payload.get("sources", []) or []:
+        pub = src.get("published_at")
+        if pub is None:
+            raise LLMAnalysisValidationError("source missing published_at")
+        try:
+            pub_dt = _parse_dt(pub)
+        except ValueError as exc:
+            raise LLMAnalysisValidationError(f"source published_at is not ISO-8601: {exc}") from exc
+        if pub_dt > as_of:
+            raise LLMAnalysisValidationError(
+                f"lookahead: source published_at {pub} is after as_of {as_of_raw}")
