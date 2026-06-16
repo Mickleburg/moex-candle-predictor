@@ -1,138 +1,72 @@
-# LLM Technical Analysis Block
+# LLM News-Feature Block (V2)
 
-`llm/` - независимый блок технического анализа через mock или локальную/open-source LLM.
+`llm/` — извлекатель **структурированных новостных признаков** для кросс-секционной решающей
+модели (ранняя фьюжн). Блок **НЕ** предсказывает buy/hold/sell и не принимает торговых решений —
+он отдаёт по тикеру/моменту JSON по контракту `contracts/llm_analysis.schema.json`.
 
-Блок принимает technical snapshot по тикеру и возвращает строго структурированный JSON по `schemas/llm_analysis.schema.json`.
+> Предыстория: позднее слияние независимых buy/hold/sell провалено (см. пивот в `docs/ARCHITECTURE_V2.md`).
+> Роль блока сменилась на NLP-фичи. Источник новостей и механизм выгрузки — `llm/docs/NEWS_SOURCE_EDISCLOSURE.md`.
 
 ## Что делает блок
 
-- Интерпретирует технический snapshot: цена, EMA, RSI, ATR, объем, support/resistance, trend/volatility regime.
-- Возвращает `technical_view`, вероятности `buy/hold/sell`, `confidence`, `key_reasons` и `risk_notes`.
-- Валидирует любой ответ провайдера как строгий JSON и затем по JSON Schema.
-- При ошибке провайдера или невалидном JSON возвращает безопасный neutral fallback.
+- По `ticker` + `as_of` собирает корпоративные раскрытия (e-disclosure, выгружены в
+  `data/news/edisclosure/{TICKER}.parquet`) в окне `window_hours` назад.
+- Считает признаки: `sentiment`, `impact_score`, `novelty`, `event_type`, `news_count`,
+  `recency_minutes` (+ опц. `embedding`), плюс `sources[]` с `published_at` и `affected_tickers`.
+- **No-lookahead по времени ПУБЛИКАЦИИ**: учитываются только раскрытия с `pub_date <= as_of`
+  (никогда `event_date`). Валидатор отвергает любой источник с `published_at > as_of`.
+- Детерминированный baseline работает **без LLM и без сети** (бесплатно, воспроизводимо).
+  Опциональный LLM-слой уточняет `sentiment/novelty/impact/event_type` через тот же контракт.
 
 ## Что блок НЕ делает
 
-- Не торгует.
-- Не отправляет orders.
-- Не принимает финальное решение BUY/SELL/HOLD.
-- Не меняет portfolio state.
-- Не вызывает `aggregator`, `risk_manager` или `execution`.
+Не торгует, не шлёт orders, не возвращает buy/hold/sell, не меняет portfolio, не вызывает
+risk_manager/execution. Решение принимает кросс-секционная модель ниже по конвейеру.
 
-Финальное действие принимает только дальнейшая цепочка: `aggregator -> risk_manager -> execution`.
+## Вход / Выход
 
-## Вход
-
-Минимальный формат:
-
+Вход — `examples/sber_request.example.json`:
 ```json
-{
-  "ticker": "SBER",
-  "timeframe": "1H",
-  "as_of": "2026-05-15T15:00:00+03:00",
-  "technical_snapshot": {
-    "last_close": 301.5,
-    "ema_20": 300.8,
-    "trend_regime": "up"
-  }
-}
+{ "ticker": "SBER", "as_of": "2024-06-03T18:00:00+03:00", "timeframe": "1H", "window_hours": 72 }
+```
+Выход — `examples/sber_llm_analysis.example.json` (валиден по `schemas/llm_analysis.schema.json`,
+копия замороженного `contracts/llm_analysis.schema.json`). `is_production=false` до честного
+forward-гейта.
+
+## Запуск
+
+```powershell
+# детерминированный baseline (без LLM, бесплатно)
+$env:PYTHONPATH="src"; python -m llm_ta.cli --ticker SBER --as-of 2024-06-03T18:00:00+03:00
+
+# уточнение внутренней моделью Positive LLM (Gemma) — нужен ключ в env
+$env:POSITIVE_LLM_API_KEY="<ключ>"
+$env:PYTHONPATH="src"; python -m llm_ta.cli --ticker SBER --as-of 2024-06-03T18:00:00+03:00 --provider positive
 ```
 
-Полный пример лежит в `examples/sber_1h_input.json`.
+## LLM-провайдер (опционально; не Claude — по требованию стоимости)
 
-## Выход
+Слой OpenAI-совместимый: провайдер — это конфиг (`--provider` + env), не код. Учтены нюансы vLLM:
+structured output через `json_schema`, **никогда `temperature=0`** для Qwen/Gemma (зацикливание),
+`extra_body→top-level` (напр. `chat_template_kwargs.enable_thinking`), retry с backoff+джиттером
+на 429/5xx, обход корпоративного прокси для внутреннего шлюза. При ошибке/невалидном ответе блок
+откатывается к детерминированному baseline (всегда валиден).
 
-```json
-{
-  "ticker": "SBER",
-  "timeframe": "1H",
-  "as_of": "2026-05-15T15:00:00+03:00",
-  "technical_view": "moderately_bullish",
-  "probabilities": {
-    "buy": 0.42,
-    "hold": 0.38,
-    "sell": 0.2
-  },
-  "confidence": 0.55,
-  "key_reasons": [
-    "trend regime is up",
-    "price above EMA20",
-    "volume above average"
-  ],
-  "risk_notes": [
-    "near resistance"
-  ]
-}
-```
+| `--provider` | Модель | Стоимость | Прим. |
+|--------------|--------|-----------|-------|
+| `positive` (дефолт для LLM) | `positive-llm-chat` (Gemma-4-31B) | внутренняя, бесплатно | лучший русский, быстрый, reasoning off |
+| `positive-qwen36` | `positive-llm-qwen36` (Qwen3.6-35B) | внутренняя | thinking off для классификации |
+| `positive-strong` | `positive-llm-experimental` (Qwen3.5-397B) | внутренняя | reasoning-only, для сложного анализа |
+| `deepseek` | `deepseek-v4-flash` | ~$0.14/$0.28 за 1M (вся вселенная <~$2) | план на перспективу; `DEEPSEEK_API_KEY` |
+| `ollama` / `openai-compatible` | по `LLM_MODEL` | локально/прочее | `LLM_OPENAI_BASE_URL`, `LLM_MODEL` |
+| `baseline` (дефолт) | — | бесплатно | детерминированный, без сети |
 
-Схема требует `probabilities.buy`, `probabilities.hold`, `probabilities.sell` в диапазоне от `0` до `1`. Runtime-валидатор дополнительно проверяет, что сумма примерно равна `1.0` с tolerance `0.02`.
-
-## Fallback
-
-Если LLM вернула текст вместо JSON, битый JSON, неверную схему или не ответила, наружу отдается безопасный fallback:
-
-```json
-{
-  "technical_view": "neutral",
-  "probabilities": {
-    "buy": 0.0,
-    "hold": 1.0,
-    "sell": 0.0
-  },
-  "confidence": 0.0,
-  "key_reasons": ["LLM output was invalid"],
-  "risk_notes": ["fallback response used"]
-}
-```
-
-`ticker`, `timeframe` и `as_of` сохраняются из входа.
-
-## Mock mode
-
-Mock mode работает без реальной LLM:
-
-- `trend_regime == "up"` и `last_close > ema_20` -> `moderately_bullish`;
-- `trend_regime == "down"` и `last_close < ema_20` -> `moderately_bearish`;
-- иначе -> `neutral`.
-
-Запуск CLI из папки `llm/`:
-
-```bash
-PYTHONPATH=src python -m llm_ta.cli --provider mock --input examples/sber_1h_input.json
-```
+ENV для Positive LLM: `POSITIVE_LLM_API_KEY` (или `API_KEY`); базовый URL по умолчанию
+`https://api-llm.ml.ptsecurity.ru/v1` (переопределяется `LLM_OPENAI_BASE_URL`).
 
 ## Smoke test
 
 ```bash
-cd llm
-python smoke_test.py
+cd llm && python smoke_test.py     # baseline на реальных SBER-раскрытиях: схема + no-lookahead
 ```
-
-Smoke test читает `examples/sber_1h_input.json`, запускает mock provider, валидирует результат и сравнивает его с `examples/sber_1h_expected_output.json`.
-
-`jsonschema` не обязателен для smoke test: если пакет не установлен, используется встроенная минимальная проверка контракта. Для полноценной JSON Schema validation:
-
-```bash
-cd llm
-python -m pip install -r requirements.txt
-python smoke_test.py
-```
-
-## Локальный LLM provider
-
-Реальный вызов модели отделен от бизнес-логики через provider interface.
-
-Поддержан OpenAI-compatible local endpoint, например vLLM, LM Studio или Ollama `/v1`:
-
-```bash
-export LLM_OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-export LLM_OPENAI_API_KEY=ollama
-export LLM_MODEL=llama3.1
-export LLM_TIMEOUT_SECONDS=30
-
-PYTHONPATH=src python -m llm_ta.cli \
-  --provider openai-compatible \
-  --input examples/sber_1h_input.json
-```
-
-Если local provider вернет нестрогий JSON, CLI напечатает neutral fallback.
+Требуется `data/news/edisclosure/SBER.parquet`. `jsonschema` желателен (есть встроенный fallback).

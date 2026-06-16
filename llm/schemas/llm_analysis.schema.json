@@ -1,87 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moex-candle-predictor.local/llm/schemas/llm_analysis.schema.json",
-  "title": "LLMTechnicalAnalysis",
-  "description": "Structured technical-analysis output produced by the LLM block. This is not a trading decision.",
+  "title": "LlmAnalysis",
+  "description": "V2: structured NEWS FEATURES extracted by the LLM block for one ticker at one decision time. This is FEATURE INFORMATION for early fusion, NOT a buy/hold/sell decision. No-lookahead: every contributing source.published_at MUST be <= as_of.",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "ticker",
-    "timeframe",
-    "as_of",
-    "technical_view",
-    "probabilities",
-    "confidence",
-    "key_reasons",
-    "risk_notes"
-  ],
+  "required": ["as_of", "ticker", "timeframe", "features", "model_version", "is_production"],
   "properties": {
-    "ticker": {
-      "type": "string",
-      "minLength": 1
-    },
-    "timeframe": {
-      "type": "string",
-      "minLength": 1
-    },
-    "as_of": {
-      "type": "string",
-      "format": "date-time",
-      "minLength": 1
-    },
-    "technical_view": {
-      "type": "string",
-      "enum": [
-        "strongly_bullish",
-        "moderately_bullish",
-        "neutral",
-        "moderately_bearish",
-        "strongly_bearish"
-      ]
-    },
-    "probabilities": {
+    "as_of": { "type": "string", "format": "date-time", "description": "Decision timestamp; features use only news with published_at <= as_of." },
+    "ticker": { "type": "string", "description": "Ticker these news features describe." },
+    "timeframe": { "type": "string", "description": "Decision timeframe, e.g. 1H." },
+    "features": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "buy",
-        "hold",
-        "sell"
-      ],
+      "required": ["sentiment", "impact_score", "novelty", "event_type", "news_count"],
       "properties": {
-        "buy": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "hold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "sell": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        }
+        "sentiment": { "type": "number", "minimum": -1, "maximum": 1, "description": "Aggregate news sentiment for the ticker in the window." },
+        "impact_score": { "type": "number", "minimum": 0, "maximum": 1, "description": "Estimated market-impact magnitude." },
+        "novelty": { "type": "number", "minimum": 0, "maximum": 1, "description": "How new/surprising vs prior coverage." },
+        "event_type": { "type": "string", "description": "Dominant event class, e.g. earnings|sanctions|dividend|rate|m&a|guidance|none." },
+        "news_count": { "type": "integer", "minimum": 0, "description": "Number of relevant news items in the window." },
+        "recency_minutes": { "type": "number", "minimum": 0, "description": "Minutes from the most recent relevant news to as_of." },
+        "embedding": { "type": "array", "items": { "type": "number" }, "description": "Optional dense news embedding for the decision model." }
       },
-      "$comment": "The runtime validator additionally checks that buy + hold + sell is approximately 1.0."
+      "additionalProperties": true
     },
-    "confidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
-    },
-    "key_reasons": {
+    "affected_tickers": { "type": "array", "items": { "type": "string" }, "description": "Other tickers this news cluster touches." },
+    "sources": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "object",
+        "required": ["published_at"],
+        "properties": {
+          "source": { "type": "string" },
+          "url": { "type": "string" },
+          "published_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": true
       }
     },
-    "risk_notes": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    }
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
   }
 }

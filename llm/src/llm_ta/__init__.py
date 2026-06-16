@@ -1,21 +1,21 @@
-"""LLM technical-analysis block.
+"""LLM news-feature block (V2).
 
-This package returns structured technical analysis only. It never executes
-orders and never makes the final trading decision.
+Extracts structured NEWS FEATURES (sentiment, impact, novelty, event_type, ...) for a
+ticker at a decision time, for early fusion into the cross-sectional decision model.
+It never returns buy/hold/sell and never makes the trading decision.
 """
 
-from .analyzer import TechnicalAnalysisService, build_prompt, fallback_analysis
-from .providers import BaseLLMProvider, MockProvider, OpenAICompatibleProvider, provider_from_name
+from . import features
+from .analyzer import NewsFeatureService
+from .providers import BaseLLMProvider, OpenAICompatibleProvider, provider_from_name
 from .validator import LLMAnalysisValidationError, parse_strict_json, validate_analysis
 
 __all__ = [
     "BaseLLMProvider",
     "LLMAnalysisValidationError",
-    "MockProvider",
+    "NewsFeatureService",
     "OpenAICompatibleProvider",
-    "TechnicalAnalysisService",
-    "build_prompt",
-    "fallback_analysis",
+    "features",
     "parse_strict_json",
     "provider_from_name",
     "validate_analysis",
