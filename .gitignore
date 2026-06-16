@@ -13,3 +13,7 @@ CLAUDE.md
 ml/SKILL.md
 
 data/backend.exe
+# V2 news layer — regenerable data artifacts (code/generators are tracked)
+data/news/edisclosure/*.parquet
+data/news/*.csv
+data/news/.llm_weekly_cache.json
