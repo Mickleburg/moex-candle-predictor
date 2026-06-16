@@ -34,6 +34,7 @@ INTERVAL_MAP = {
     "10M": 10,
     "1H": 60,
     "1D": 24,
+    "1W": 7,
 }
 
 # Instrument registry: ticker -> (engine, market, board or None).
@@ -57,7 +58,9 @@ INSTRUMENT_REGISTRY: dict[str, tuple[str, str, str | None]] = {
     "RTSI": ("stock", "index", None),    # RTS Index (USD) -> RTSI-IMOEX ~= USD/RUB driver
     "MOEXFN": ("stock", "index", None),  # Financials sector (SBER)
     "MOEXOG": ("stock", "index", None),  # Oil & Gas sector (LKOH/GAZP)
-    "MOEXMM": ("stock", "index", None),  # Metals & Mining sector
+    "MOEXMM": ("stock", "index", None),  # Metals & Mining sector (GMKN/CHMF/ALRS)
+    "MOEXCN": ("stock", "index", None),  # Consumer sector (MGNT)
+    "MOEXTL": ("stock", "index", None),  # Telecom sector (MTSS)
     "RGBI": ("stock", "index", None),    # Russian Govt Bond Index (rates -> banks)
     # Currency
     "CNYRUB_TOM": ("currency", "selt", None),
