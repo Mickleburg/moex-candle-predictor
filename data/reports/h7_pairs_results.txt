@@ -1,0 +1,28 @@
+H7 pairs stat-arb screen - 12 names, 2020-01-03..2026-06-01, forward from 2025-01-01
+  hedge ratio + selection on POST-SHOCK in-sample 2023-01-01..2025-01-01; forward = untouched test
+
+pair             beta half-life |  IS cum  IS Sh | FWD cum FWD Sh  sel
+LKOH/ROSN        1.15      35.4 |  +0.149   0.44 |  +0.280   1.17  YES
+LKOH/TATN        0.82      22.1 |  +0.078   0.28 |  +0.113   0.58     
+LKOH/NVTK        0.16     146.8 |  -0.267  -0.83 |  +0.075   0.27     
+LKOH/SNGS        1.08     129.0 |  +0.144   0.38 |  +0.083   0.26     
+ROSN/TATN        0.65      26.1 |  +0.276   1.07 |  -0.053  -0.22  YES
+ROSN/NVTK        0.34     212.4 |  -0.050  -0.17 |  +0.025   0.10     
+ROSN/SNGS        1.03     121.5 |  +0.069   0.21 |  +0.168   0.68     
+TATN/NVTK        0.26     192.0 |  -0.332  -1.01 |  +0.176   0.56     
+TATN/SNGS        1.33     141.8 |  +0.151   0.33 |  +0.443   1.26     
+NVTK/SNGS        1.10      92.3 |  +0.173   0.44 |  +0.270   0.83     
+NVTK/GAZP        1.20      55.6 |  -0.094  -0.24 |  +0.054   0.17     
+SNGS/GAZP        0.30      53.5 |  -0.046  -0.12 |  -0.007  -0.03     
+GMKN/CHMF        0.16     200.4 |  -0.036  -0.10 |  -0.168  -0.42     
+GMKN/ALRS        0.85      38.6 |  +0.108   0.28 |  -0.306  -0.99     
+CHMF/ALRS        0.69      96.9 |  +0.186   0.50 |  +0.251   1.04     
+
+Selected in-sample (half-life 2..60d, IS Sharpe>0.3): 2 pairs: ['LKOH/ROSN', 'ROSN/TATN']
+
+EQUAL-WEIGHT BOOK of selected pairs:
+  IN-SAMPLE  cum +0.213  Sharpe +0.87
+  FORWARD    cum +0.114  Sharpe +0.57   <-- the honest gate
+
+Read: forward Sharpe>0 on pairs SELECTED in-sample = the spread keeps reverting
+out-of-sample = a real market-neutral edge. Forward<=0 = in-sample selection is overfit.
