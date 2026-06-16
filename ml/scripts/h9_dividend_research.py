@@ -97,8 +97,50 @@ def stage2(closes, imoex, div) -> None:
     for x in (-3, -2, -1, 0):
         rr = runup_capture(closes, imoex, div, -10, x)
         print(f"    exit {x:>3}: net {rr.runup.mean()-FEE_RT:+.4f} %pos {(rr.runup>0).mean():.2f}")
+    print("  PLACEBO control (is it dividend-specific or just momentum?):")
+    placebo_test(closes, imoex, div)
     print("  Read: positive & stable across entry windows (-15..-8) AND IS years AND scaling with")
-    print("  yield = a robust calendar edge. Caveat: 2025 forward is thin (few events) - accrue more.")
+    print("  yield AND distinct from a random-date placebo = a robust, dividend-specific calendar edge.")
+    print("  Caveat: 2025 forward is thin (few events) - accrue more; verify no-lookahead vs announce dates.")
+
+
+def placebo_test(closes, imoex, div, entry: int = -10, exit_off: int = -2, n_trials: int = 200) -> None:
+    """Control: run the SAME capture on RANDOM non-dividend dates (>20d from any event). If the
+    run-up appears there too, it's generic momentum, not a dividend effect. Real should sit far in
+    the right tail of the placebo distribution."""
+    def cap_at(s, pos):
+        idx = s.index[pos + entry: pos + exit_off + 1]
+        ar = (s.reindex(idx).pct_change() - imoex.reindex(idx).pct_change()).iloc[1:].sum()
+        return ar if np.isfinite(ar) else np.nan
+    real, expos = [], {}
+    for _, row in div.iterrows():
+        t = row["ticker"]
+        if t not in closes:
+            continue
+        s = closes[t]; pos = s.index.searchsorted(row["date"], side="right") - 1
+        if pos < abs(entry) + 2 or pos >= len(s) - 3:
+            continue
+        real.append(cap_at(s, pos)); expos.setdefault(t, set()).add(pos)
+    real = np.array([x for x in real if np.isfinite(x)])
+    rng = np.random.default_rng(0); pmeans = []
+    for _ in range(n_trials):
+        vals = []
+        for t, s in closes.items():
+            ev = expos.get(t, set())
+            if not ev:
+                continue
+            valid = [p for p in range(abs(entry) + 2, len(s) - 3) if all(abs(p - e) > 20 for e in ev)]
+            for p in rng.choice(valid, size=min(len(ev), len(valid)), replace=False):
+                v = cap_at(s, p)
+                if np.isfinite(v):
+                    vals.append(v)
+        pmeans.append(np.mean(vals))
+    pmeans = np.array(pmeans)
+    z = (real.mean() - pmeans.mean()) / pmeans.std()
+    print(f"  PLACEBO (random non-div dates, {n_trials} trials): mean {pmeans.mean():+.4f} "
+          f"[2.5-97.5%: {np.percentile(pmeans,2.5):+.4f}..{np.percentile(pmeans,97.5):+.4f}]")
+    print(f"  REAL {real.mean():+.4f} vs placebo: z={z:+.2f}, p(placebo>=real)={ (pmeans>=real.mean()).mean():.3f}"
+          f"  -> {'dividend-specific (not momentum)' if z>2 else 'NOT distinguishable from momentum'}")
 
 
 def main() -> int:

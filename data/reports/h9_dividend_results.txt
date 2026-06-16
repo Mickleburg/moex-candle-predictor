@@ -2,9 +2,9 @@ H9 dividend event study - 120 events used (IS 117, FWD 3); median yield 4.90%
 window = record date +/- 15 trading days (ex-day is ~ -1/-2 from record under T+1/T+2)
 
 offset |   CAAR_IS   AAR_IS |  CAAR_FWD
-C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:141: RuntimeWarning: Mean of empty slice
+C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:183: RuntimeWarning: Mean of empty slice
   a = np.nanmean(np.array(mat), axis=0)
-C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:150: RuntimeWarning: Mean of empty slice
+C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:192: RuntimeWarning: Mean of empty slice
   ai = np.nanmean(np.array(is_mat), axis=0)
    -15 | +0.0000 +nan | +0.0000
    -14 | -0.0021 -0.0021 | +0.0049
@@ -67,5 +67,9 @@ base (entry -10, exit -2), 129 events, round-trip fee 0.0010:
     exit  -2: net +0.0084 %pos 0.62
     exit  -1: net -0.0119 %pos 0.40
     exit   0: net -0.0288 %pos 0.26
+  PLACEBO control (is it dividend-specific or just momentum?):
+  PLACEBO (random non-div dates, 200 trials): mean +0.0012 [2.5-97.5%: -0.0056..+0.0077]
+  REAL +0.0094 vs placebo: z=+2.29, p(placebo>=real)=0.010  -> dividend-specific (not momentum)
   Read: positive & stable across entry windows (-15..-8) AND IS years AND scaling with
-  yield = a robust calendar edge. Caveat: 2025 forward is thin (few events) - accrue more.
+  yield AND distinct from a random-date placebo = a robust, dividend-specific calendar edge.
+  Caveat: 2025 forward is thin (few events) - accrue more; verify no-lookahead vs announce dates.
