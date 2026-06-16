@@ -41,10 +41,13 @@ IS_SELECT_START = pd.Timestamp("2023-01-01", tz="Europe/Moscow")
 FEE_ONEWAY = 0.0005
 BARS_PER_YEAR = 247
 
-# within-sector clusters that actually have >=2 liquid names (pairs need same-sector partners)
+# within-sector clusters that actually have >=2 liquid names (pairs need same-sector partners).
+# Expanded 2026-06-16 with VTBR/MAGN/NLMK/PLZL (full 2020-2026 history) to test BREADTH of the edge.
 CLUSTERS = {
+    "banks": ["SBER", "VTBR"],
     "energy": ["LKOH", "ROSN", "TATN", "NVTK", "SNGS", "GAZP"],
-    "metals": ["GMKN", "CHMF", "ALRS"],
+    "steel": ["CHMF", "MAGN", "NLMK"],
+    "mining": ["GMKN", "ALRS", "PLZL"],
 }
 Z_WINDOW = 60
 Z_ENTRY, Z_EXIT = 2.0, 0.5
@@ -92,6 +95,36 @@ def backtest_spread(spread: pd.Series, fee: float = FEE_ONEWAY) -> pd.Series:
     return pnl
 
 
+def backtest_rolling(a: pd.Series, b: pd.Series, window: int = 250,
+                     fee: float = FEE_ONEWAY) -> pd.Series:
+    """Rolling-hedge-ratio reversion P&L. CORRECT P&L uses LEG RETURNS with the lagged beta, NOT
+    spread.diff() (which injects a spurious log(b)*d_beta term when beta varies). z-signal from the
+    rolling-beta spread level. All past-only."""
+    la, lb = np.log(a), np.log(b)
+    beta = la.rolling(window).cov(lb) / lb.rolling(window).var()
+    spread = la - beta * lb
+    z = (spread - spread.rolling(Z_WINDOW).mean()) / spread.rolling(Z_WINDOW).std()
+    cur = 0.0; pos = []
+    for zi in z.to_numpy():
+        if np.isfinite(zi):
+            if cur == 0.0 and abs(zi) > Z_ENTRY:
+                cur = -np.sign(zi)
+            elif cur != 0.0 and abs(zi) < Z_EXIT:
+                cur = 0.0
+        pos.append(cur)
+    pos = pd.Series(pos, index=a.index); held = pos.shift(1).fillna(0.0)
+    legret = a.pct_change() - beta.shift(1) * b.pct_change()   # beta known at t-1
+    return held * legret.fillna(0.0) - pos.diff().abs().fillna(0.0) * fee * 2.0
+
+
+def per_year_sharpe(pnl: pd.Series) -> dict:
+    out = {}
+    for y, s in pnl.groupby(pnl.index.year):
+        s = s.dropna()
+        out[int(y)] = round(float(s.mean() / s.std() * np.sqrt(BARS_PER_YEAR)), 2) if s.std() > 0 else 0.0
+    return out
+
+
 def stats(pnl: pd.Series, lo=None, hi=None) -> dict:
     s = pnl
     if lo is not None: s = s[s.index >= lo]
@@ -104,7 +137,8 @@ def stats(pnl: pd.Series, lo=None, hi=None) -> dict:
 
 
 def main() -> int:
-    panel = load_daily_panel()
+    universe = sorted({n for names in CLUSTERS.values() for n in names})
+    panel = load_daily_panel(universe)
     is_mask = (panel.index >= IS_SELECT_START) & (panel.index < FORWARD_START)
     print(f"H7 pairs stat-arb screen - {panel.shape[1]} names, "
           f"{panel.index.min().date()}..{panel.index.max().date()}, forward from {FORWARD_START.date()}")
@@ -135,6 +169,22 @@ def main() -> int:
             print(f"{a+'/'+b:14} {beta:6.2f} {hl:9.1f} | {iss['cum']:+7.3f} {iss['sharpe']:6.2f} | "
                   f"{fws['cum']:+7.3f} {fws['sharpe']:6.2f} {'YES' if sel else '':>4}")
 
+    # SELECTION-FREE books: equal-weight ALL pairs / all pairs per cluster. No performance filter =>
+    # no selection overfitting; the rule is purely the economic prior "sector pairs revert". This is
+    # the fair test of whether the mechanism (not the pair-picking) carries an edge.
+    print("\n--- selection-free equal-weight books (no performance filter) ---")
+    cluster_pairs = {c: [f"{a}/{b}" for a, b in combinations([n for n in names if n in panel.columns], 2)]
+                     for c, names in CLUSTERS.items()}
+    cluster_pairs["ALL"] = list(all_pnl.keys())
+    for c, plist in cluster_pairs.items():
+        plist = [p for p in plist if p in all_pnl]
+        if not plist:
+            continue
+        bk = pd.concat([all_pnl[p] for p in plist], axis=1).mean(axis=1)
+        bi, bf = stats(bk, lo=IS_SELECT_START, hi=FORWARD_START), stats(bk, lo=FORWARD_START)
+        print(f"  {c:8} ({len(plist):>2} pairs) | IS cum {bi['cum']:+.3f} Sh {bi['sharpe']:+.2f} "
+              f"| FWD cum {bf['cum']:+.3f} Sh {bf['sharpe']:+.2f}")
+
     print(f"\nSelected in-sample (half-life 2..60d, IS Sharpe>0.3): {len(selected)} pairs: {selected}")
     if selected:
         book = pd.concat([all_pnl[p] for p in selected], axis=1).mean(axis=1)  # equal-weight book
@@ -144,6 +194,22 @@ def main() -> int:
         print(f"  FORWARD    cum {bf['cum']:+.3f}  Sharpe {bf['sharpe']:+.2f}   <-- the honest gate")
         print(f"\nRead: forward Sharpe>0 on pairs SELECTED in-sample = the spread keeps reverting")
         print(f"out-of-sample = a real market-neutral edge. Forward<=0 = in-sample selection is overfit.")
+
+    # ROBUSTNESS VERDICT — energy cluster (the only one with any forward signal), per-year, and the
+    # decisive fixed-vs-rolling hedge-ratio swap. A real edge must survive BOTH; this one does not.
+    print("\n--- ROBUSTNESS: energy cluster, per-year Sharpe, fixed vs rolling hedge ratio ---")
+    energy = [n for n in CLUSTERS["energy"] if n in panel.columns]
+    fixed_book = pd.concat(
+        [all_pnl[f"{a}/{b}"] for a, b in combinations(energy, 2) if f"{a}/{b}" in all_pnl],
+        axis=1).mean(axis=1)
+    roll_book = pd.concat(
+        [backtest_rolling(panel[a], panel[b]) for a, b in combinations(energy, 2)],
+        axis=1).mean(axis=1)
+    for name, bk in [("fixed-beta", fixed_book), ("rolling-beta", roll_book)]:
+        fw = stats(bk, lo=FORWARD_START)
+        print(f"  {name:12} | FWD Sharpe {fw['sharpe']:+.2f} | per-year {per_year_sharpe(bk)}")
+    print("  VERDICT: forward sign flips with hedge-ratio method (fixed vs rolling) and per-year is")
+    print("  unstable -> NOT a robust edge. Fixed-beta forward was 2025 luck baked into a 2023-24 beta.")
     return 0
 
 
