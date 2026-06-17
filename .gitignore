@@ -17,3 +17,6 @@ data/backend.exe
 data/news/edisclosure/*.parquet
 data/news/*.csv
 data/news/.llm_weekly_cache.json
+# but DO track the curated dividend-announcement certification table (small, not regenerable
+# without network; the ML block joins it for the H9 run-up no-lookahead test)
+!data/news/dividend_announcements.csv
