@@ -48,6 +48,11 @@ UNIVERSE: dict[str, tuple[int, str]] = {
     "SNGS": (312,  "Сургутнефтегаз"),
     "CHMF": (30,   "Северсталь"),
     "ALRS": (199,  "АЛРОСА"),
+    # extended dividend-certification universe (companyIDs discovered 2026-06-17)
+    "VTBR": (1210, "ВТБ"),                # Банк ВТБ (ПАО); query broad -> client-side id filter
+    "MAGN": (9,    "Магнитогорский металлургический"),   # ПАО "ММК"
+    "NLMK": (2509, "Новолипецкий металлургический"),     # ПАО "НЛМК"
+    "PLZL": (7832, "Полюс"),              # ПАО «Полюс»
 }
 
 START_DATE = dt.date(2020, 1, 1)          # candle history starts 2020-01-03
