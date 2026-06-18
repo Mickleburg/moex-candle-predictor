@@ -101,9 +101,13 @@ LLM = извлекатель СОБЫТИЙ из тел сообщений: `{ev
 > + **пер-событийные даты объявления (LLM-чат e-disclosure, `data/news/dividend_announcements.csv`):
 > ML независимо проверил → PASS 129/129, 0 нарушений, медиана зазора 37 ТД (min 18).** Сертифиц.
 > книга Sharpe +0.61 ≈ полная (эдж не зависит от 5 несертиф. событий). `h9_nolookahead_verify.py`.
-> **Единственная оговорка:** forward 2025 тонкий/минусовой (ограничение данных, НЕ lookahead) →
-> forward-shadow. Отчёты: `h9_dividend_2026-06-17.md`, `h9_nolookahead_2026-06-17.md`.
-> **Дальше:** forward-shadow по предстоящим ex-датам; интеграция слива в risk_manager.
+> **Единственная оговорка:** forward 2025 тонкий/минусовой (ограничение данных, НЕ lookahead).
+> **Путь доведён до деплоя:** forward-shadow монитор `dividend_sleeve_monitor.py` (живой ISS-календарь
+> → `data/reports/dividend_shadow_log.csv`), сигнал `build_sleeve_signal` (тег `s3_event`) для
+> risk_manager. Продукт-дока `ml/docs/H9_DIVIDEND_SLEEVE_2026-06-18.md`. Отчёты:
+> `h9_dividend_2026-06-17.md`, `h9_nolookahead_2026-06-17.md`. **Осталось (эксплуатация/др. блоки):**
+> копить shadow-трек в дивид. сезон; интеграция слива в risk_manager-комбинатор; питать предстоящие
+> ex-даты из e-disclosure (ISS лагает). `is_production=false` до forward-трека + sign-off.
 
 ---
 
