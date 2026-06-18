@@ -1,0 +1,37 @@
+H9 robustness — net of realistic costs (commission+tier slippage+hedge)
+
+HEDGE method comparison (entry -12, exit -2, vol 20, cap 0.34):
+  imoex1    | full cum +0.467 Sh +0.54 DD -0.173 | IS Sh +0.79
+  beta_adj  | full cum +0.657 Sh +0.70 DD -0.140 | IS Sh +0.94
+  sector    | full cum +0.957 Sh +0.92 DD -0.105 | IS Sh +1.24
+  none      | full cum +0.844 Sh +0.65 DD -0.276 | IS Sh +0.84
+
+PARAMETER sweep (IMOEX hedge), IS Sharpe / full Sharpe — looking for stability:
+  entry exit  vol  cap |  IS Sh full Sh full cum
+     10    2   20 0.34 |  +1.05   +0.78   +0.769
+     10    2   20  0.5 |  +1.05   +0.78   +0.757
+     10    2   40 0.34 |  +1.05   +0.78   +0.765
+     10    2   40  0.5 |  +1.05   +0.78   +0.754
+     10    3   20 0.34 |  +1.07   +0.83   +0.814
+     10    3   20  0.5 |  +1.09   +0.83   +0.817
+     10    3   40 0.34 |  +1.08   +0.84   +0.821
+     10    3   40  0.5 |  +1.09   +0.84   +0.817
+     12    2   20 0.34 |  +0.79   +0.54   +0.467
+     12    2   20  0.5 |  +0.80   +0.54   +0.464
+     12    2   40 0.34 |  +0.80   +0.54   +0.471
+     12    2   40  0.5 |  +0.81   +0.55   +0.475
+     12    3   20 0.34 |  +0.87   +0.63   +0.558
+     12    3   20  0.5 |  +0.88   +0.63   +0.566
+     12    3   40 0.34 |  +0.88   +0.63   +0.565
+     12    3   40  0.5 |  +0.90   +0.64   +0.577
+     15    2   20 0.34 |  +0.80   +0.66   +0.670
+     15    2   20  0.5 |  +0.80   +0.67   +0.670
+     15    2   40 0.34 |  +0.80   +0.67   +0.673
+     15    2   40  0.5 |  +0.80   +0.67   +0.668
+     15    3   20 0.34 |  +0.85   +0.73   +0.757
+     15    3   20  0.5 |  +0.85   +0.74   +0.759
+     15    3   40 0.34 |  +0.86   +0.74   +0.764
+     15    3   40  0.5 |  +0.86   +0.74   +0.762
+
+Read: edge should stay positive across hedge methods AND parameter choices (no single
+lucky setting). Forward stays thin regardless -> shadow. is_production=false.

@@ -1,0 +1,19 @@
+H9 cost model — net-of-cost re-validation (hedged dividend run-up book)
+
+Flat-slippage BREAKEVEN sweep (commission 5bps + slippage/side, hedge 3bps/side):
+  slippage  0bps/side (RT~16bps)     | full cum +0.636 Sh +0.68 DD -0.151 | IS Sh +0.94
+  slippage  3bps/side (RT~22bps)     | full cum +0.545 Sh +0.61 DD -0.160 | IS Sh +0.86
+  slippage  5bps/side (RT~26bps)     | full cum +0.487 Sh +0.56 DD -0.168 | IS Sh +0.81
+  slippage  8bps/side (RT~32bps)     | full cum +0.404 Sh +0.48 DD -0.180 | IS Sh +0.73
+  slippage 12bps/side (RT~40bps)     | full cum +0.301 Sh +0.39 DD -0.197 | IS Sh +0.63
+  slippage 16bps/side (RT~48bps)     | full cum +0.205 Sh +0.29 DD -0.213 | IS Sh +0.52
+  slippage 20bps/side (RT~56bps)     | full cum +0.116 Sh +0.20 DD -0.229 | IS Sh +0.42
+  slippage 25bps/side (RT~66bps)     | full cum +0.014 Sh +0.08 DD -0.249 | IS Sh +0.29
+
+Realistic per-name tier (SBER/GAZP/LKOH 3 .. MAGN 9 bps/side):
+  realistic, pre-tax                 | full cum +0.467 Sh +0.54 DD -0.173 | IS Sh +0.79
+  realistic, AFTER 13% tax           | full cum +0.366 Sh +0.49 DD -0.168 | IS Sh +0.75
+
+Breakeven flat slippage (IS cum -> 0): 34 bps/side
+Realistic slippage is ~3-9 bps/side -> compare to breakeven for the margin of safety.
+Read: edge is deployable only if realistic cost sits well below breakeven. is_production=false.
