@@ -106,3 +106,29 @@ def target_positions(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Time
     longs = inverse_vol_weights(panel, active, as_of_pos, vol_window, max_weight)
     return {"longs": longs, "market_hedge": -float(sum(longs.values())),
             "as_of": str(as_of), "is_production": False}
+
+
+def build_sleeve_signal(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Timestamp,
+                        model_version: str = "h9_dividend_runup_v1") -> dict:
+    """Sleeve output for the risk_manager combiner: target positions tagged with the sleeve id.
+
+    This is the S3-adjacent dividend run-up sleeve's contribution to the V3 multi-strategy book —
+    INFORMATION for risk_manager (which nets sleeves, applies vol-targeting + regime gate + limits),
+    not a trade command. Emitted as a self-describing dict (long weights + market hedge). The shared
+    `aggregated_signal` schema is cross-sectional-RANKING shaped and does not fit a calendar sleeve;
+    the V3 combiner handshake (extend aggregated_signal with a `sleeve`/target-position form) is a
+    risk_manager-side decision — documented, not forced here. is_production=false."""
+    tp = target_positions(panel, calendar, as_of)
+    return {
+        "sleeve": "s3_event",
+        "strategy": "dividend_runup",
+        "as_of": tp["as_of"],
+        "market_neutral": True,
+        "positions": [{"ticker": t, "weight": round(w, 4), "leg": "long"}
+                      for t, w in sorted(tp["longs"].items(), key=lambda kv: -kv[1])]
+                     + ([{"ticker": "IMOEX", "weight": round(tp["market_hedge"], 4), "leg": "hedge"}]
+                        if tp["longs"] else []),
+        "gross": round(sum(tp["longs"].values()) * 2.0, 4),
+        "model_version": model_version,
+        "is_production": False,
+    }
