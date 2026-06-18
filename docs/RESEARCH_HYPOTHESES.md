@@ -105,9 +105,12 @@ LLM = извлекатель СОБЫТИЙ из тел сообщений: `{ev
 > **Путь доведён до деплоя:** forward-shadow монитор `dividend_sleeve_monitor.py` (живой ISS-календарь
 > → `data/reports/dividend_shadow_log.csv`), сигнал `build_sleeve_signal` (тег `s3_event`) для
 > risk_manager. Продукт-дока `ml/docs/H9_DIVIDEND_SLEEVE_2026-06-18.md`. Отчёты:
-> `h9_dividend_2026-06-17.md`, `h9_nolookahead_2026-06-17.md`. **Осталось (эксплуатация/др. блоки):**
-> копить shadow-трек в дивид. сезон; интеграция слива в risk_manager-комбинатор; питать предстоящие
-> ex-даты из e-disclosure (ISS лагает). `is_production=false` до forward-трека + sign-off.
+> `h9_dividend_2026-06-17.md`, `h9_nolookahead_2026-06-17.md`.
+> **P0 ПРОЙДЕН (2026-06-18):** реалист. издержки — запас ~4-10× (breakeven 34 б.п./сторона vs 3-9),
+> после налога Sharpe +0.49; робастен 24/24 по параметрам; **сектор-хедж лучший (Sh +0.92, DD −0.105)**.
+> `h9_cost_model.py`, `h9_robustness.py`, `h9_production_P0_2026-06-18.md`.
+> **Осталось (эксплуатация/др. блоки):** forward-shadow в сезон; интеграция в risk_manager-комбинатор
+> (хедж по сектору); фид ex-дат из e-disclosure (ISS лагает). `is_production=false` до forward + sign-off.
 
 ---
 
