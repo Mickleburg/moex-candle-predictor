@@ -1,0 +1,23 @@
+H9 no-lookahead INDEPENDENT verification (entry = record - 12 TD)
+  total events in CSV: 134
+  matched (board_reco present): 129
+  PASS (board_reco <= entry): 129 / 129
+  VIOLATIONS: 0
+  median lead (reco -> record): 37 TD (min 18, max 80)
+
+  UNMATCHED (no board_reco — not certifiable from this data): 1
+ticker               record_date                                           notes
+  NLMK 2023-01-11 00:00:00+03:00 agm 2022-12-31; no board/AGM disclosure matched
+
+  tightest leads (smallest reco->record gap):
+ticker record_date board_reco_date entry_date  lead_td
+  VTBR  2021-06-22      2021-05-27 2021-06-04     18.0
+  TATN  2020-06-30      2020-05-25 2020-06-10     24.0
+  NLMK  2020-06-09      2020-04-30 2020-05-22     26.0
+  GMKN  2022-06-14      2022-04-29 2022-05-26     27.0
+  NVTK  2021-05-07      2021-03-29 2021-04-20     28.0
+  CHMF  2022-05-31      2022-04-15 2022-05-13     28.0
+  ROSN  2022-07-11      2022-05-30 2022-06-23     29.0
+  ROSN  2023-07-11      2023-05-30 2023-06-23     29.0
+
+  VERDICT: no-lookahead CERTIFIED for all matched events; 1 unmatched remain uncertified (exclude from the certified book).
