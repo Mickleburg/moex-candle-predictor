@@ -1,0 +1,8 @@
+ticker,record_date,ex_date,board_reco_date,agm_date,value,status,source_url,as_of,confidence,notes
+MTSS,2026-07-09,2026-07-08,2026-05-22,,35.00,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=VRLCdCNnvk6OBdkL1aM40Q-B-B,2026-06-19,medium,
+ROSN,2026-07-09,2026-07-08,2026-05-15,,2.27,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=Q5iAN0qL2kmUBRvx2UaX6g-B-B,2026-06-19,medium,
+PLZL,2026-07-13,2026-07-10,2026-05-27,,29.05,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=88twKVwF-A0Kke2Wns5wSAA-B-B,2026-06-19,medium,
+TATN,2026-07-15,2026-07-14,2026-04-28,,11.61,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=h5dsA5zR3UuJONteG2JKcQ-B-B,2026-06-19,medium,interim-netted: value = installment payable at THIS record (fiscal-year total is higher; earlier interims already paid)
+SNGS,2026-07-16,2026-07-15,2026-05-15,,0.85,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=-CocHPf-Aux0yc1NGsRgV-C4w-B-B,2026-06-19,medium,
+SBER,2026-07-20,2026-07-17,2026-04-21,,37.64,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=7tSumUE9bUa3nmDlDRhZaQ-B-B,2026-06-19,medium,
+VTBR,2026-07-20,2026-07-17,2026-05-26,,9.71,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=W2Y3pCaC-AkqeqZq6Vz6GOw-B-B,2026-06-19,medium,
