@@ -1,0 +1,31 @@
+# One-command bring-up from a clean clone:
+#   cp .env.example .env   # fill in secrets
+#   docker compose -f infra/docker-compose.yml up -d --build
+#
+# `restart: unless-stopped` is the process supervisor (auto-restart on crash/reboot).
+# The ./data bind-mount persists the SQLite state store, cycle results, logs and parquet
+# candles across container rebuilds — so restarts recover state.
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: moex-agent:latest
+    container_name: moex-agent
+    env_file:
+      - ../.env
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ../data:/app/data
+    restart: unless-stopped
+    # The scheduler daemon (EOD + pre-open + dead-man's-switch). Override `command:` with
+    # e.g. ["run-eod","--force"] for a one-shot manual cycle.
+    command: ["scheduler"]
+    healthcheck:
+      # liveness: the agent process answers `status` (state store reachable).
+      test: ["CMD", "python", "-m", "agent.src.cli", "status"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 30s
