@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AggregatedSignal",
+  "description": "V2: cross-sectional ranking of the universe by predicted RELATIVE strength (market-neutral). Output of the ML decision model (early fusion over feature_bundle); input to risk_manager. Replaces the old late-fusion buy/hold/sell aggregate. NOT a per-ticker trade command.",
+  "type": "object",
+  "required": ["as_of", "timeframe", "universe", "horizon", "rankings", "model_version", "is_production"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "timeframe": { "type": "string" },
+    "universe": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+    "horizon": {
+      "type": "object",
+      "required": ["bars", "timeframe"],
+      "properties": {
+        "bars": { "type": "integer", "minimum": 1 },
+        "timeframe": { "type": "string" }
+      }
+    },
+    "rankings": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["ticker", "score", "rank", "percentile", "leg"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "score": { "type": "number", "description": "Relative-strength score; higher = expected to outperform the universe." },
+          "rank": { "type": "integer", "minimum": 1, "description": "1 = strongest." },
+          "percentile": { "type": "number", "minimum": 0, "maximum": 1 },
+          "expected_relative_return": { "type": "number", "description": "Optional expected return vs universe/index over the horizon." },
+          "leg": { "type": "string", "enum": ["long", "short", "flat"], "description": "Intended portfolio leg (top-k long / bottom-k short / middle flat)." }
+        },
+        "additionalProperties": true
+      }
+    },
+    "market_neutral": { "type": "boolean", "description": "True if long and short legs are intended to be balanced (beta-neutral)." },
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
+  }
+}

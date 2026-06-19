@@ -1,0 +1,69 @@
+{
+  "experiment": "sber_multihorizon",
+  "timestamp": "20260614_224401",
+  "git_branch": "ml-expirement",
+  "config": {
+    "horizons": [
+      3,
+      6,
+      12
+    ],
+    "rule": "BUY conf>0.50, hold h + lower-barrier stop, skip weekends",
+    "seeds": [
+      7,
+      42,
+      100
+    ]
+  },
+  "per_horizon": {
+    "3": {
+      "wf_macro_f1": 0.4813704496153149,
+      "backtest": {
+        "n": 41,
+        "total_return": 0.18959531425784037,
+        "win_rate": 0.7317073170731707,
+        "sharpe": 14.950505042888077,
+        "mean_ret": 0.004268860315618772
+      }
+    },
+    "6": {
+      "wf_macro_f1": 0.40414847101771606,
+      "backtest": {
+        "n": 413,
+        "total_return": -0.0456703436242738,
+        "win_rate": 0.3728813559322034,
+        "sharpe": -0.3015246782492717,
+        "mean_ret": -9.436263480780127e-05
+      }
+    },
+    "12": {
+      "wf_macro_f1": 0.40396227993655404,
+      "backtest": {
+        "n": 536,
+        "total_return": -0.2158561980356064,
+        "win_rate": 0.2873134328358209,
+        "sharpe": -0.8681232127773848,
+        "mean_ret": -0.0004211869157991206
+      }
+    }
+  },
+  "combined": {
+    "n": 626,
+    "total_return": -0.30439025913198514,
+    "win_rate": 0.2955271565495208,
+    "sharpe": -1.306132346555175,
+    "mean_ret": -0.0005519189001051046,
+    "composition": {
+      "12": 411,
+      "6": 206,
+      "3": 9
+    }
+  },
+  "baseline_h3_weekday": {
+    "return": 0.1896,
+    "sharpe": 14.95,
+    "win_rate": 0.732,
+    "trades": 41
+  },
+  "total_seconds": 3931.5
+}

@@ -1,0 +1,138 @@
+{
+  "experiment": "sber_h1_multiticker_backtest",
+  "timestamp": "20260609_195749",
+  "git_branch": "ml-expirement",
+  "system": {
+    "python": "3.14.5 (tags/v3.14.5:5607950, May 10 2026, 10:43:50) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "cpu_count": 16
+  },
+  "config": {
+    "fee_one_way": 0.0005,
+    "thresholds": [
+      0.35,
+      0.4,
+      0.45,
+      0.5
+    ],
+    "hold_hours": 1,
+    "hours_per_year": 1750,
+    "seeds": [
+      7,
+      42,
+      100
+    ],
+    "wf_initial_train": 12000,
+    "wf_val_size": 2000,
+    "wf_n_splits": 4,
+    "tickers": [
+      "SBER",
+      "LKOH",
+      "GAZP"
+    ],
+    "training_loss": "CrossEntropyLoss (no class weights, matches 2026-06-03 harness)"
+  },
+  "buy_and_hold": {
+    "total_return": 0.24702093397746183,
+    "sharpe": 0.4067173630103938,
+    "max_drawdown": -0.3331110976422792
+  },
+  "lstm_v2": {
+    "by_threshold": {
+      "0.35": {
+        "total_return": -0.9918915730226551,
+        "sharpe": -9.855755325908554,
+        "max_drawdown": -0.9918915730226551,
+        "win_rate": 0.3466059916571862,
+        "n_trades": 5274,
+        "action_rate": 0.6699695121951219,
+        "n_buy": 2248,
+        "n_sell": 3026
+      },
+      "0.40": {
+        "total_return": -0.9725582334905157,
+        "sharpe": -11.395756416236352,
+        "max_drawdown": -0.972612330524369,
+        "win_rate": 0.3368055555555556,
+        "n_trades": 3744,
+        "action_rate": 0.47560975609756095,
+        "n_buy": 1504,
+        "n_sell": 2240
+      },
+      "0.45": {
+        "total_return": -0.33211279092878665,
+        "sharpe": -7.691167976361013,
+        "max_drawdown": -0.33211279092878665,
+        "win_rate": 0.34918032786885245,
+        "n_trades": 610,
+        "action_rate": 0.07748983739837398,
+        "n_buy": 258,
+        "n_sell": 352
+      },
+      "0.50": {
+        "total_return": 0.050729324862724745,
+        "sharpe": 6.38088360573966,
+        "max_drawdown": -0.020642421673988998,
+        "win_rate": 0.3974358974358974,
+        "n_trades": 78,
+        "action_rate": 0.009908536585365854,
+        "n_buy": 78,
+        "n_sell": 0
+      }
+    },
+    "best_threshold": "0.50",
+    "documented_anchor_sharpe": 6.38
+  },
+  "multiticker": {
+    "by_threshold": {
+      "0.35": {
+        "total_return": -0.989466949728451,
+        "sharpe": -9.338134326363416,
+        "max_drawdown": -0.989466949728451,
+        "win_rate": 0.3489907564610451,
+        "n_trades": 5301,
+        "action_rate": 0.6733993902439024,
+        "n_buy": 2214,
+        "n_sell": 3087
+      },
+      "0.40": {
+        "total_return": -0.9501714109822742,
+        "sharpe": -8.70449264736008,
+        "max_drawdown": -0.9501952676764468,
+        "win_rate": 0.3493975903614458,
+        "n_trades": 3735,
+        "action_rate": 0.47446646341463417,
+        "n_buy": 1601,
+        "n_sell": 2134
+      },
+      "0.45": {
+        "total_return": -0.4601645458288909,
+        "sharpe": -8.422033973807206,
+        "max_drawdown": -0.4626799847392121,
+        "win_rate": 0.3495575221238938,
+        "n_trades": 904,
+        "action_rate": 0.11483739837398374,
+        "n_buy": 510,
+        "n_sell": 394
+      },
+      "0.50": {
+        "total_return": -0.007865165888835235,
+        "sharpe": -0.3903468289475186,
+        "max_drawdown": -0.06413678564188163,
+        "win_rate": 0.35125448028673834,
+        "n_trades": 279,
+        "action_rate": 0.035442073170731704,
+        "n_buy": 279,
+        "n_sell": 0
+      }
+    },
+    "best_threshold": "0.50"
+  },
+  "verdict": {
+    "multiticker_wins": false,
+    "lstm_v2_best_sharpe": 6.38088360573966,
+    "multiticker_best_sharpe": -0.3903468289475186
+  },
+  "n_val_predictions": 7872,
+  "total_seconds": 17721.6
+}

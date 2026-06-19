@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskDecision",
+  "type": "object",
+  "required": ["ticker", "requested_action", "approved_action", "approved", "position_context", "risk_checks", "order_intent", "blocked_reason"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "requested_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
+    "approved_action": { "type": "string", "enum": ["BUY", "HOLD", "SELL", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"] },
+    "position_side": { "type": "string", "enum": ["LONG", "SHORT", "FLAT"], "description": "V2 market-neutral: which leg this ticker is on (top-k long / bottom-k short). Optional for back-compat with long-only flows." },
+    "approved": { "type": "boolean" },
+    "position_context": { "type": "object", "additionalProperties": true },
+    "risk_checks": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "order_intent": {
+      "type": ["object", "null"],
+      "required": ["side", "quantity_lots", "order_type", "limit_price"],
+      "properties": {
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity_lots": { "type": "integer", "minimum": 1 },
+        "order_type": { "type": "string", "enum": ["LIMIT"] },
+        "limit_price": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "blocked_reason": { "type": ["string", "null"] }
+  }
+}

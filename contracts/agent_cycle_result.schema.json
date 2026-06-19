@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentCycleResult",
+  "type": "object",
+  "required": ["as_of", "mode", "evaluated_tickers", "selected_orders", "rejected_candidates", "risk_summary"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "mode": { "type": "string", "enum": ["dry-run", "paper", "live"] },
+    "evaluated_tickers": { "type": "array", "items": { "type": "string" } },
+    "selected_orders": { "type": "array", "items": { "$ref": "order_request.schema.json" } },
+    "rejected_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "reason"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "risk_summary": { "type": "object", "additionalProperties": true }
+  }
+}

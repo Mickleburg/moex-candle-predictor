@@ -1,0 +1,42 @@
+{
+  "experiment": "orthogonal_lstm",
+  "ticker": "LKOH",
+  "groups": [
+    "market",
+    "sector",
+    "rates"
+  ],
+  "timestamp": "20260615_003657",
+  "git_branch": "ml-expirement",
+  "input_dim": 32,
+  "orthogonal_feature_names": [
+    "IMOEX_ret_1h",
+    "IMOEX_ret_3h",
+    "IMOEX_ret_d",
+    "IMOEX_vol",
+    "RTSI_ret_1h",
+    "RTSI_ret_3h",
+    "RTSI_ret_d",
+    "RTSI_vol",
+    "rtsi_imoex_spread_ret",
+    "MOEXOG_ret_1h",
+    "MOEXOG_ret_3h",
+    "MOEXOG_ret_d",
+    "MOEXOG_vol",
+    "rs_vs_MOEXOG",
+    "RGBI_ret_1h",
+    "RGBI_ret_3h",
+    "RGBI_ret_d",
+    "RGBI_vol"
+  ],
+  "wf_macro_f1": 0.4509096738323226,
+  "backtest": {
+    "n": 62,
+    "total_return": -0.016420188863552898,
+    "win_rate": 0.45161290322580644,
+    "sharpe": -1.1171645058941297,
+    "mean_ret": -0.00025040130896539686
+  },
+  "ohlcv_baseline": null,
+  "total_seconds": 1135.6
+}

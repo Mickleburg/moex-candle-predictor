@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LlmAnalysis",
+  "description": "V2: structured NEWS FEATURES extracted by the LLM block for one ticker at one decision time. This is FEATURE INFORMATION for early fusion, NOT a buy/hold/sell decision. No-lookahead: every contributing source.published_at MUST be <= as_of.",
+  "type": "object",
+  "required": ["as_of", "ticker", "timeframe", "features", "model_version", "is_production"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time", "description": "Decision timestamp; features use only news with published_at <= as_of." },
+    "ticker": { "type": "string", "description": "Ticker these news features describe." },
+    "timeframe": { "type": "string", "description": "Decision timeframe, e.g. 1H." },
+    "features": {
+      "type": "object",
+      "required": ["sentiment", "impact_score", "novelty", "event_type", "news_count"],
+      "properties": {
+        "sentiment": { "type": "number", "minimum": -1, "maximum": 1, "description": "Aggregate news sentiment for the ticker in the window." },
+        "impact_score": { "type": "number", "minimum": 0, "maximum": 1, "description": "Estimated market-impact magnitude." },
+        "novelty": { "type": "number", "minimum": 0, "maximum": 1, "description": "How new/surprising vs prior coverage." },
+        "event_type": { "type": "string", "description": "Dominant event class, e.g. earnings|sanctions|dividend|rate|m&a|guidance|none." },
+        "news_count": { "type": "integer", "minimum": 0, "description": "Number of relevant news items in the window." },
+        "recency_minutes": { "type": "number", "minimum": 0, "description": "Minutes from the most recent relevant news to as_of." },
+        "embedding": { "type": "array", "items": { "type": "number" }, "description": "Optional dense news embedding for the decision model." }
+      },
+      "additionalProperties": true
+    },
+    "affected_tickers": { "type": "array", "items": { "type": "string" }, "description": "Other tickers this news cluster touches." },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["published_at"],
+        "properties": {
+          "source": { "type": "string" },
+          "url": { "type": "string" },
+          "published_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
+  }
+}

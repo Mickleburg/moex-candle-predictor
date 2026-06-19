@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FeatureBundle",
+  "description": "V2: combined [quant + news] feature matrix for the cross-sectional decision model at one as_of. One entry per ticker in the universe. EARLY FUSION: quant and news features are concatenated here, before the decision model, so it can learn their interactions. All features are past-only (no lookahead).",
+  "type": "object",
+  "required": ["as_of", "timeframe", "universe", "feature_spec", "entries", "is_production"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "timeframe": { "type": "string" },
+    "universe": { "type": "array", "items": { "type": "string" }, "minItems": 2, "description": "Tickers ranked together (cross-section needs a universe, not one name)." },
+    "feature_spec": {
+      "type": "object",
+      "required": ["quant_features", "news_features", "cross_sectional_normalized"],
+      "properties": {
+        "quant_features": { "type": "array", "items": { "type": "string" }, "description": "Ordered quant feature names; align with entries[].quant." },
+        "news_features": { "type": "array", "items": { "type": "string" }, "description": "Ordered news feature names (from llm_analysis); align with entries[].news." },
+        "cross_sectional_normalized": { "type": "boolean", "description": "True if features are already cross-sectionally standardized across the universe at as_of." }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["ticker", "quant", "news", "valid"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "quant": { "type": "array", "items": { "type": "number" }, "description": "Aligns to feature_spec.quant_features." },
+          "news": { "type": "array", "items": { "type": "number" }, "description": "Aligns to feature_spec.news_features; zeros if no news." },
+          "valid": { "type": "boolean", "description": "False if required data was missing for this ticker (exclude from ranking)." }
+        },
+        "additionalProperties": true
+      }
+    },
+    "is_production": { "type": "boolean" }
+  }
+}

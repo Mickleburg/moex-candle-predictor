@@ -1,0 +1,14 @@
+{
+  "ticker": "SBER",
+  "timeframe": "1H",
+  "candles": [
+    {
+      "begin": "2026-05-15T15:00:00+03:00",
+      "open": 300.0,
+      "high": 302.0,
+      "low": 299.0,
+      "close": 301.5,
+      "volume": 123456
+    }
+  ]
+}

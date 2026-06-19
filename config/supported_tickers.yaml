@@ -1,0 +1,21 @@
+tickers:
+  - ticker: SBER
+    name: Sberbank
+    market: MOEX
+    board: TQBR
+    enabled: true
+    timeframes: ["1H"]
+
+  - ticker: GAZP
+    name: Gazprom
+    market: MOEX
+    board: TQBR
+    enabled: true
+    timeframes: ["1H"]
+
+  - ticker: LKOH
+    name: Lukoil
+    market: MOEX
+    board: TQBR
+    enabled: true
+    timeframes: ["1H"]

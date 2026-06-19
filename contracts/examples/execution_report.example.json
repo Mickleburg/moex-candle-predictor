@@ -1,0 +1,9 @@
+{
+  "client_order_id": "demo-20260515-SBER-001",
+  "ticker": "SBER",
+  "status": "DRY_RUN",
+  "exchange_order_id": null,
+  "filled_quantity_lots": 0,
+  "avg_fill_price": null,
+  "message": "dry-run only"
+}

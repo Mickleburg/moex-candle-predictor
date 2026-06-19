@@ -1,8 +1,143 @@
 """Time-based data splitting for time series."""
 
+from dataclasses import dataclass
 from typing import Generator, Tuple
 
 import pandas as pd
+
+
+@dataclass(frozen=True)
+class WalkForwardRange:
+    """Index ranges for one expanding-window validation fold."""
+
+    fold_id: int
+    train_start: int
+    train_end: int
+    val_start: int
+    val_end: int
+
+    @property
+    def train_len(self) -> int:
+        return self.train_end - self.train_start
+
+    @property
+    def val_len(self) -> int:
+        return self.val_end - self.val_start
+
+
+def walk_forward_ranges(
+    n_rows: int,
+    *,
+    n_splits: int = 4,
+    initial_train_size: int | None = None,
+    val_size: int | None = None,
+    gap: int = 0,
+    min_train_size: int = 1000,
+) -> list[WalkForwardRange]:
+    """Return expanding train/validation index ranges.
+
+    Fold ``i`` uses train ``[0:train_end)`` and validation
+    ``[train_end + gap:val_end)``. The function returns index ranges only,
+    so callers can build strict within-fold labels/windows without touching
+    future folds.
+    """
+
+    if n_rows <= 0:
+        raise ValueError("n_rows must be positive")
+    if n_splits < 1:
+        raise ValueError("n_splits must be >= 1")
+    if gap < 0:
+        raise ValueError("gap must be >= 0")
+
+    initial_train_size = int(initial_train_size if initial_train_size is not None else max(min_train_size, n_rows // 2))
+    if initial_train_size < min_train_size:
+        raise ValueError(f"initial_train_size must be >= min_train_size ({min_train_size})")
+    if initial_train_size + gap >= n_rows:
+        raise ValueError("initial_train_size + gap leaves no validation rows")
+
+    available = n_rows - initial_train_size - gap
+    val_size = int(val_size if val_size is not None else available // n_splits)
+    if val_size < 1:
+        raise ValueError("val_size must be >= 1")
+
+    folds: list[WalkForwardRange] = []
+    for fold_idx in range(n_splits):
+        train_end = initial_train_size + fold_idx * val_size
+        val_start = train_end + gap
+        val_end = val_start + val_size
+        if val_end > n_rows:
+            break
+        fold = WalkForwardRange(
+            fold_id=fold_idx + 1,
+            train_start=0,
+            train_end=train_end,
+            val_start=val_start,
+            val_end=val_end,
+        )
+        _validate_walk_forward_range(fold, n_rows)
+        folds.append(fold)
+
+    if not folds:
+        raise ValueError("No walk-forward folds could be generated")
+    return folds
+
+
+def rolling_walk_forward_ranges(
+    n_rows: int,
+    *,
+    train_size: int,
+    val_size: int,
+    step_size: int | None = None,
+    max_folds: int = 5,
+    gap: int = 0,
+) -> list[WalkForwardRange]:
+    """Return rolling train/validation index ranges.
+
+    Fold ``i`` uses train ``[i*step: i*step + train_size)`` and validation
+    immediately after the optional gap. This is useful when old history may be
+    less relevant than a fixed recent training window.
+    """
+
+    if n_rows <= 0:
+        raise ValueError("n_rows must be positive")
+    if train_size < 1:
+        raise ValueError("train_size must be >= 1")
+    if val_size < 1:
+        raise ValueError("val_size must be >= 1")
+    if gap < 0:
+        raise ValueError("gap must be >= 0")
+    if max_folds < 1:
+        raise ValueError("max_folds must be >= 1")
+    step_size = int(step_size if step_size is not None else val_size)
+    if step_size < 1:
+        raise ValueError("step_size must be >= 1")
+
+    folds: list[WalkForwardRange] = []
+    for fold_idx in range(max_folds):
+        train_start = fold_idx * step_size
+        train_end = train_start + train_size
+        val_start = train_end + gap
+        val_end = val_start + val_size
+        if val_end > n_rows:
+            break
+        fold = WalkForwardRange(
+            fold_id=fold_idx + 1,
+            train_start=train_start,
+            train_end=train_end,
+            val_start=val_start,
+            val_end=val_end,
+        )
+        _validate_walk_forward_range(fold, n_rows)
+        folds.append(fold)
+
+    if not folds:
+        raise ValueError("No rolling walk-forward folds could be generated")
+    return folds
+
+
+def _validate_walk_forward_range(fold: WalkForwardRange, n_rows: int) -> None:
+    if not (0 <= fold.train_start < fold.train_end <= fold.val_start < fold.val_end <= n_rows):
+        raise ValueError(f"Invalid walk-forward fold: {fold}")
 
 
 def time_split(

@@ -1,0 +1,98 @@
+{
+  "experiment": "sber_meta_labeling",
+  "timestamp": "20260615_015144",
+  "git_branch": "ml-expirement",
+  "n_candidates": 2290,
+  "base_win_rate": 0.3650655021834061,
+  "meta_test_auc": 0.5692127856034263,
+  "split_cut": 1145,
+  "heldout_baseline_conf050": {
+    "n": 55,
+    "total_return": 0.27135678819289977,
+    "win_rate": 0.6545454545454545,
+    "mean_ret": 0.004409322673706234,
+    "sharpe": 13.393764799110592
+  },
+  "meta_pwin_sweep": {
+    "0.50": {
+      "n": 208,
+      "total_return": 0.0794170221140098,
+      "win_rate": 0.46634615384615385,
+      "mean_ret": 0.00038838777272259085,
+      "sharpe": 1.5763666803448633
+    },
+    "0.55": {
+      "n": 142,
+      "total_return": 0.07604939655191889,
+      "win_rate": 0.4859154929577465,
+      "mean_ret": 0.0005363403918163362,
+      "sharpe": 2.2053811594831494
+    },
+    "0.60": {
+      "n": 99,
+      "total_return": 0.014847542852378881,
+      "win_rate": 0.48484848484848486,
+      "mean_ret": 0.0001633157031201963,
+      "sharpe": 0.7973641578641822
+    },
+    "0.65": {
+      "n": 62,
+      "total_return": -0.0018186076606121482,
+      "win_rate": 0.5,
+      "mean_ret": -1.7190049122107992e-05,
+      "sharpe": -0.0903832068336141
+    },
+    "0.70": {
+      "n": 35,
+      "total_return": 0.011570227827218948,
+      "win_rate": 0.5142857142857142,
+      "mean_ret": 0.00034268710458163913,
+      "sharpe": 1.6535994534955585
+    }
+  },
+  "meta_and_conf050": {
+    "0.50": {
+      "n": 44,
+      "total_return": 0.21988978299673767,
+      "win_rate": 0.6818181818181818,
+      "mean_ret": 0.00455985181503401,
+      "sharpe": 14.154909011353222
+    },
+    "0.55": {
+      "n": 35,
+      "total_return": 0.10672347037841501,
+      "win_rate": 0.6,
+      "mean_ret": 0.00293161601284225,
+      "sharpe": 9.51639396764662
+    },
+    "0.60": {
+      "n": 31,
+      "total_return": 0.05635977614871801,
+      "win_rate": 0.6129032258064516,
+      "mean_ret": 0.0017828763891920055,
+      "sharpe": 8.941826861829842
+    }
+  },
+  "meta_features": [
+    "conf",
+    "p_buy",
+    "p_hold",
+    "p_sell",
+    "vol",
+    "hour_sin",
+    "hour_cos",
+    "dow",
+    "is_friday",
+    "is_evening",
+    "ret_1h",
+    "ret_3h"
+  ],
+  "full_val_baseline": {
+    "return": 0.1896,
+    "sharpe": 14.95,
+    "win_rate": 0.732,
+    "trades": 41
+  },
+  "verdict": "meta does NOT beat baseline",
+  "total_seconds": 5.1
+}
