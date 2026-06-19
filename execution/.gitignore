@@ -1,0 +1,5 @@
+# Runtime state — never commit. Audit logs, dedupe ledger, kill flag, broker secrets.
+var/
+.env
+__pycache__/
+*.pyc
