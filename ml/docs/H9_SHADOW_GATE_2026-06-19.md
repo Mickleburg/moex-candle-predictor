@@ -46,9 +46,16 @@ dose-response. Возможная будущая РЕФИНация: кап до
 **Дисциплина:** это нельзя подгонять на тонком/сожжённом forward — только проверять на НОВЫХ
 накопленных событиях (июль-2026+). Записано как гипотеза, не как изменение правила.
 
+## Шаг 1 — holiday-aware счётчик ТД: ✅ ВЫПОЛНЕНО (backend отдал календарь)
+`np.busday_count` в `dividend_sleeve.py::target_positions` (ветка будущих ex-дат) и
+`dividend_sleeve_monitor.py::td_to` заменён на общий `backend.trading_calendar.trading_days_between`
+(RU-holiday-aware, оверлей реального IMOEX-панеля + поддерживаемый `RU_HOLIDAYS`; commit backend 6d0c338).
+Graceful fallback на np.busday_count с RuntimeWarning, если backend не на path (ML в изоляции). Регрессии
+нет: июль-2026 без праздников → live-сигналы идентичны (smoke 19/19; sim hedged +0.526/IS +0.84; handshake
+5 имён → сектор-хедж → 8 risk_decision; контракты валидны). Праздники теперь корректны (May20→Jun15: 18→17).
+
 ## Что осталось из ML-доводки
-- Шаг 1 (holiday-aware счётчик ТД) — ждёт общий `backend/trading_calendar.py` (backend-чат уже начал;
-  есть дубли в agent/execution — ML потребит backend-версию, не плодить свой). Сейчас слив/монитор
-  RU-holiday-наивны (`np.busday_count`) — корректностный долг.
-- Шаг 2 (свежий ценовой панель до сегодня) — ждёт автономный ingest backend-чата; панель сейчас по 2026-06-16.
-- Шаг 5 (опц. serving-CLI) — по запросу оркестратора.
+- Шаг 2 (свежий ценовой панель до сегодня) — ждёт первый EOD-ingest backend-чата; панель сейчас по
+  2026-06-16 (backend подтвердил рассинхрон store — закроется первым прогоном ingest).
+- Шаг 5 (опц. serving-CLI `predict_dividend_sleeve.py`) — по запросу оркестратора (agent-чат пока на
+  paper-mock для execution; ML-сигнал зовётся через public API).

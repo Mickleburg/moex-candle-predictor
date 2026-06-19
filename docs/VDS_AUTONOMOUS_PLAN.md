@@ -57,11 +57,12 @@ H9-валидация (эдж/no-lookahead/P0) · risk_manager-комбинат�
 
 ## H9 ML-доводка (этот чат — конкретные шаги)
 Малы и принадлежат ML; финишируемы здесь. Порядок = ценность. Детали 3+4 — `ml/docs/H9_SHADOW_GATE_2026-06-19.md`.
-1. ⏳ **MOEX holiday-aware счётчик торговых дней.** Заменить `np.busday_count` в
+1. ✅ **ВЫПОЛНЕНО. MOEX holiday-aware счётчик торговых дней.** `np.busday_count` в
    `dividend_sleeve.py::target_positions` (ветка будущих дат) и `dividend_sleeve_monitor.py::td_to`
-   на **общий `backend/trading_calendar.py`** (его строит backend-чат — НЕ плодить свой; есть дубли
-   в agent/execution). **Correctness:** record-даты кластеризуются май-июль (праздники 1/9 мая, 12 июня).
-   Ждёт стабилизации backend-календаря. Приёмка: вход/выход не дрейфует через праздник.
+   заменён на **общий `backend/trading_calendar.trading_days_between`** (backend отдал, commit 6d0c338;
+   graceful fallback на np.busday_count с warning, если backend не на path). Регрессии нет (июль-2026
+   без праздников → live-сигналы идентичны: smoke 19/19, sim hedged +0.526/IS +0.84, handshake 5 имён);
+   майско-июньские праздники теперь корректно пропускаются (May20→Jun15: 18→17, skip 12 июня).
 2. ⏳ **Свежий ценовой панель до сегодня + сверка live inverse-vol.** Ждёт автономный ingest backend-чата
    (панель сейчас по 2026-06-16). Сверка: `target_positions` на свежей панели воспроизводит размеры монитора.
 3. ✅ **ВЫПОЛНЕНО. Realized-P&L shadow-гейт** — `ml/scripts/h9_shadow_pnl.py`. Методология идентична
@@ -96,8 +97,9 @@ execution — параллельно (его узкое место — выбо�
 скелет цикла и VDS-bring-up можно делать параллельно на моках.
 
 ## Путь к `is_production=true` (acceptance-гейты)
-1. ML-доводка: ✅ realized-P&L гейт (3) + сверка якоря (4) построены; ⏳ holiday-календарь (1) и свежий
-   панель (2) ждут backend. **Гейт построен и сейчас NOT MET** (forward тонкий/минус) — это и есть критерий.
+1. ML-доводка: ✅ realized-P&L гейт (3) + сверка якоря (4) + holiday-календарь (1, потребляет
+   `backend/trading_calendar`); ⏳ свежий панель (2) ждёт первый EOD-ingest backend. **Гейт построен и
+   сейчас NOT MET** (forward тонкий/минус) — это и есть критерий снятия `is_production`.
 2. backend гонит докачку автономно ≥2 недели без дыр; integrity-гейт ловит фейлы.
 3. Оркестратор гоняет полный цикл на VDS в **paper** (execution paper-режим) сезон дивидендов.
 4. **Forward-shadow гейт:** realized run-up на свежих ex-датах (июль-2026+) net>0, согласуется с

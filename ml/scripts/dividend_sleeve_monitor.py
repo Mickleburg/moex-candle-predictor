@@ -7,8 +7,8 @@ addressing H9's only open caveat (the thin 2025 forward). No orders; the recomme
 
     python ml/scripts/dividend_sleeve_monitor.py
 
-Hold logic is in TRADING days to the record date (np.busday_count, weekend-aware): enter ~12 TD
-before, exit ~2 TD before (avoid the ex-gap). Past-only vols for sizing. is_production=false.
+Hold logic is in TRADING days to the record date (RU-holiday-aware shared backend calendar): enter
+~12 TD before, exit ~2 TD before (avoid the ex-gap). Past-only vols for sizing. is_production=false.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 ML_DIR = Path(__file__).resolve().parents[1]
@@ -26,7 +25,8 @@ sys.path.insert(0, str(ML_DIR))
 
 from scripts.xsec_eval_harness import load_daily_panel  # noqa: E402
 from src.service.dividend_sleeve import (  # noqa: E402
-    inverse_vol_weights, load_dividend_calendar, ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW, MAX_WEIGHT,
+    inverse_vol_weights, load_dividend_calendar, trading_days_between,
+    ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW, MAX_WEIGHT,
 )
 
 UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
@@ -35,8 +35,8 @@ LOG = REPO_ROOT / "data" / "reports" / "dividend_shadow_log.csv"
 
 
 def td_to(as_of: pd.Timestamp, when: pd.Timestamp) -> int:
-    """Signed trading-day count from as_of to `when` (weekend-aware; ignores RU holidays)."""
-    return int(np.busday_count(as_of.date(), when.date()))
+    """Signed trading-day count from as_of to `when`, RU-holiday-aware (shared backend calendar)."""
+    return trading_days_between(as_of.date(), when.date())
 
 
 def main() -> int:
