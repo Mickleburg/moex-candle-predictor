@@ -16,6 +16,8 @@ realistic assumption to be verified with announcement dates). Vols/weights use d
 
 from __future__ import annotations
 
+import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +25,20 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_RAW = REPO_ROOT / "data" / "raw"
+
+# Shared MOEX trading calendar (RU-holiday-aware) owned by the backend block. Future ex-date
+# countdowns must skip RU holidays (record dates cluster May-Jul around 1/9 May & 12 Jun) or the
+# entry/exit timing drifts. Fall back to weekend-only np.busday_count if backend isn't importable
+# (e.g. ML run in isolation) — LOUDLY, since that reintroduces the holiday drift.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+try:
+    from backend.trading_calendar import trading_days_between
+except Exception:  # pragma: no cover - isolation fallback
+    def trading_days_between(start, end) -> int:
+        warnings.warn("backend.trading_calendar unavailable; falling back to RU-holiday-NAIVE "
+                      "np.busday_count for trading-day counts", RuntimeWarning, stacklevel=2)
+        return int(np.busday_count(pd.Timestamp(start).date(), pd.Timestamp(end).date()))
 
 ENTRY_OFFSET = 12     # enter this many trading days before the ex-date anchor
 EXIT_OFFSET = 2       # exit this many trading days before the anchor (before the ex-gap at ~-1)
@@ -118,8 +134,9 @@ def target_positions(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Time
     if vol_pos < vol_window:
         return {"longs": {}, "market_hedge": 0.0, "as_of": str(as_of), "is_production": False}
     # active = names whose record date is `td` trading days ahead with exit_off < td <= entry.
-    # Hybrid: exact panel trading-day count for in-history dates; np.busday_count for FUTURE ex-dates
-    # (live, beyond the price panel) so the sleeve produces signals off the forward feed.
+    # Hybrid: exact panel trading-day count for in-history dates; the RU-holiday-aware trading
+    # calendar (backend) for FUTURE ex-dates (beyond the panel) so the sleeve produces signals off
+    # the forward feed without the holiday drift a weekday-only count would introduce.
     panel_end = idx[-1]
     cols = set(panel.columns)
     active: set[str] = set()
@@ -129,7 +146,7 @@ def target_positions(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Time
         if rec <= panel_end:
             td = (idx.searchsorted(rec, side="right") - 1) - as_of_pos
         else:
-            td = int(np.busday_count(pd.Timestamp(as_of).date(), pd.Timestamp(rec).date()))
+            td = trading_days_between(pd.Timestamp(as_of).date(), pd.Timestamp(rec).date())
         if exit_off < td <= entry:
             active.add(tkr)
     longs = inverse_vol_weights(panel, [t for t in panel.columns if t in active],
