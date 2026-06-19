@@ -3,6 +3,11 @@
 > Текущая единственная цель проекта: довести **H9 (дивидендный run-up слив)** до прод-готовности.
 > Гипотеза/механика/дока: `ml/docs/H9_DIVIDEND_SLEEVE_2026-06-18.md`. Остальные гипотезы отложены
 > (память `future_hypotheses`, в т.ч. H8). КАНОН по гипотезам — `docs/RESEARCH_HYPOTHESES.md`.
+>
+> **⬆ НАДСТРОЙКА (2026-06-19):** автономный деплой на VDS — `docs/VDS_AUTONOMOUS_PLAN.md`. Операционные
+> строки 5-8 ниже раскрыты там как суточный цикл + разбивка по чатам (backend/execution/agent+infra) +
+> контекст-доки `docs/CHAT_TASK_{backend_ingestion,execution,agent_orchestrator}.md`. ML-доводка H9
+> (holiday-календарь, realized-P&L shadow-гейт, сверка якоря) — там же в секции «H9 ML-доводка».
 
 ## Что H9 даёт и почему это слив
 Market-neutral пред-ex run-up: купить ~12 ТД до record date, выйти ~2 ТД до (перед ex-гэпом), хедж
