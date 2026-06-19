@@ -26,34 +26,12 @@ sys.path.insert(0, str(ML_DIR))
 
 from scripts.xsec_eval_harness import load_daily_panel  # noqa: E402
 from src.service.dividend_sleeve import (  # noqa: E402
-    inverse_vol_weights, ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW, MAX_WEIGHT,
+    inverse_vol_weights, load_dividend_calendar, ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW, MAX_WEIGHT,
 )
 
 UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
             "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"]
 LOG = REPO_ROOT / "data" / "reports" / "dividend_shadow_log.csv"
-ISS = "https://iss.moex.com/iss/securities/{}/dividends.json"
-
-
-def fetch_live_calendar(tickers: list[str]) -> pd.DataFrame:
-    """Live dividend calendar from MOEX ISS (catches newly-announced future ex-dates).
-    Falls back to the committed snapshot data/raw/dividends.csv if the network is unavailable."""
-    try:
-        import requests
-        rows = []
-        for t in tickers:
-            r = requests.get(ISS.format(t), timeout=20).json()["dividends"]
-            for d in r["data"]:
-                rec = dict(zip(r["columns"], d))
-                rows.append({"ticker": t, "date": rec.get("registryclosedate"), "value": rec.get("value")})
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize("Europe/Moscow")
-        return df.dropna(subset=["value", "date"])
-    except Exception as e:  # offline / ISS hiccup -> snapshot
-        print(f"  (ISS fetch failed: {e}; using committed snapshot)")
-        df = pd.read_csv(REPO_ROOT / "data" / "raw" / "dividends.csv")
-        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize("Europe/Moscow")
-        return df.dropna(subset=["value"])
 
 
 def td_to(as_of: pd.Timestamp, when: pd.Timestamp) -> int:
@@ -61,24 +39,19 @@ def td_to(as_of: pd.Timestamp, when: pd.Timestamp) -> int:
     return int(np.busday_count(as_of.date(), when.date()))
 
 
-def snapshot_calendar() -> pd.DataFrame:
-    df = pd.read_csv(REPO_ROOT / "data" / "raw" / "dividends.csv")
-    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize("Europe/Moscow")
-    return df.dropna(subset=["value"])
-
-
 def main() -> int:
-    # --as-of YYYY-MM-DD demonstrates/tests the monitor on a past date (uses the snapshot calendar);
-    # no arg = live mode (today, fetch ISS). NB: ISS dividends.json only lists CONFIRMED record dates
-    # and lags; for earlier forward signals feed upcoming ex-dates from e-disclosure (LLM chat, ~37 TD
-    # before record), not just ISS.
+    # --as-of YYYY-MM-DD demonstrates/tests the monitor on a past date; no arg = live (today). Calendar
+    # = historical snapshot + the LLM forward feed (data/news/dividend_calendar_upcoming.csv), so upcoming
+    # ex-dates appear ~37 TD before record (board recommendations), well before ISS publishes them.
     backtest_date = None
     if "--as-of" in sys.argv:
         backtest_date = pd.Timestamp(sys.argv[sys.argv.index("--as-of") + 1], tz="Europe/Moscow")
     as_of = backtest_date if backtest_date is not None else pd.Timestamp.now(tz="Europe/Moscow").normalize()
     panel = load_daily_panel(UNIVERSE)
     last_pos = panel.index.searchsorted(as_of, side="right") - 1 if backtest_date is not None else len(panel) - 1
-    cal = snapshot_calendar() if backtest_date is not None else fetch_live_calendar(UNIVERSE)
+    # merged calendar = ISS history + LLM forward feed (data/news/dividend_calendar_upcoming.csv) so
+    # upcoming ex-dates are visible before ISS publishes the record date.
+    cal = load_dividend_calendar()
 
     holding, upcoming = [], []
     for _, r in cal.iterrows():
@@ -93,7 +66,7 @@ def main() -> int:
 
     print(f"Dividend run-up sleeve — shadow monitor @ {as_of.date()}")
     print(f"  entry ~{ENTRY_OFFSET} TD before ex, exit ~{EXIT_OFFSET} TD before (avoid ex-gap); "
-          f"market-hedged vs IMOEX. is_production=false")
+          f"sector-hedged at book level by risk_manager. is_production=false")
     if holding:
         # dedupe by ticker for display (a name with two near ex-dates is ONE position); show nearest
         nearest: dict[str, tuple] = {}

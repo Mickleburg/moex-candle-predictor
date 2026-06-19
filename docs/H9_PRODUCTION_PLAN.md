@@ -19,8 +19,8 @@ short IMOEX, inverse-vol сайзинг. Доход — из агрегата п
 |---|--------|----------|-----------|-------------------|
 | 1 | ✅ **ВЫПОЛНЕНО.** Модель издержек + ре-валидация нетто | ML | P0 | **ПРОЙДЕНО:** реалист. 3-9 б.п./сторона vs breakeven 34 (запас ~4-10×); после налога Sharpe +0.49. `h9_cost_model.py` |
 | 2 | ✅ **ВЫПОЛНЕНО.** Робастность хеджа и параметров | ML | P0 | **ПРОЙДЕНО:** 24/24 комбинации параметров плюс; **сектор-хедж лучший (Sh +0.92, DD −0.105)**. `h9_robustness.py` |
-| 3 | **Фид предстоящих ex-дат из e-disclosure** (рекомендации СД ~37 ТД раньше; ISS лагает) | **ЧАТ LLM** (delegate) | P0 | поддерживаемый `data/news/dividend_calendar_upcoming.csv` с ex_date+board_reco_date |
-| 4 | **Интеграция слива в risk_manager** (комбинатор: нетит сливы, vol-targeting H4 + гейт H5 + лимиты; расширить контракт `aggregated_signal` под `sleeve`+target-positions) | **ЧАТ risk_manager** (delegate) | P1 | книга потребляет `build_sleeve_signal`, контракт валиден, лимиты применяются |
+| 3 | ✅ **ВЫПОЛНЕНО (LLM-чат + интеграция ML).** Фид предстоящих ex-дат из e-disclosure | LLM | P0 | `data/news/dividend_calendar_upcoming.csv` (7 июль-2026, 7/7 no-lookahead); смержен в `load_dividend_calendar`, слив даёт live-сигналы. `H9_INTEGRATION_2026-06-19.md` |
+| 4 | ✅ **ВЫПОЛНЕНО (risk_manager-чат + проверка ML).** Интеграция слива в комбинатор | risk_manager | P1 | контракты `sleeve_signal`+`risk_book`; end-to-end на 2026-07-06: 5 имён → сектор-хедж → лимиты → 8 `risk_decision`; handshake проверен |
 | 5 | **Forward-shadow трек** (копить `dividend_shadow_log.csv` в сезон) | ЭТОТ чат настроил; дальше эксплуатация | P1 | ≥1-2 сезона свежих ex-дат: run-up реализуется net>0 → снять `is_production=false` |
 | 6 | **Execution paper→live** (брокер/MOEX adapter, дисциплина входа/выхода, аудит) | ЧАТ execution (позже) | P2 | paper-прогон совпал с симуляцией |
 | 7 | **Автоматизация + алерты** (расписание монитора, уведомления) | эксплуатация | P2 | монитор по расписанию, алерты на входы/выходы |

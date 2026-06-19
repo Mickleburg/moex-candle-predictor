@@ -31,13 +31,28 @@ MAX_WEIGHT = 0.34     # per-name cap so a single active name can't dominate the 
 HEDGE_INDEX = "MARKET"  # market hedge handled by caller (beta=1 vs IMOEX in the sim)
 
 
-def load_dividend_calendar(path: Path | None = None) -> pd.DataFrame:
-    """Dividend events: ticker, record_date (tz Moscow), value. From MOEX ISS dump."""
+UPCOMING_FEED = REPO_ROOT / "data" / "news" / "dividend_calendar_upcoming.csv"
+
+
+def load_dividend_calendar(path: Path | None = None, with_upcoming: bool = True) -> pd.DataFrame:
+    """Dividend events: ticker, date (record date, tz Moscow), value. The historical snapshot
+    (data/raw/dividends.csv, from MOEX ISS) MERGED with the forward feed
+    (data/news/dividend_calendar_upcoming.csv, board recommendations from e-disclosure, maintained by
+    the LLM chat) so FUTURE ex-dates are visible before ISS publishes them. Refused dividends are
+    simply absent from the feed."""
     path = path or (DATA_RAW / "dividends.csv")
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"]).dt.tz_localize("Europe/Moscow")
     df = df.dropna(subset=["value"])
-    return df[df["value"] > 0].reset_index(drop=True)
+    df = df[df["value"] > 0][["ticker", "date", "value"]]
+    if with_upcoming and UPCOMING_FEED.exists():
+        up = pd.read_csv(UPCOMING_FEED)
+        up = up.dropna(subset=["record_date", "value"])
+        up = pd.DataFrame({"ticker": up["ticker"],
+                           "date": pd.to_datetime(up["record_date"]).dt.tz_localize("Europe/Moscow"),
+                           "value": up["value"].astype(float)})
+        df = pd.concat([df, up], ignore_index=True).drop_duplicates(subset=["ticker", "date"], keep="last")
+    return df.reset_index(drop=True)
 
 
 def _anchor_positions(price_index: pd.DatetimeIndex, calendar: pd.DataFrame,
@@ -99,11 +114,26 @@ def target_positions(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Time
     Returns {'longs': {ticker: weight}, 'market_hedge': float, 'as_of': ...}. is_production=false."""
     idx = panel.index
     as_of_pos = idx.searchsorted(as_of, side="right") - 1
-    if as_of_pos < vol_window:
+    vol_pos = min(as_of_pos, len(idx) - 1)            # clamp for vol sizing if as_of is live (>panel)
+    if vol_pos < vol_window:
         return {"longs": {}, "market_hedge": 0.0, "as_of": str(as_of), "is_production": False}
-    amap = active_window_map(idx, calendar, list(panel.columns), entry, exit_off)
-    active = [t for t in panel.columns if as_of_pos in amap.get(t, set())]
-    longs = inverse_vol_weights(panel, active, as_of_pos, vol_window, max_weight)
+    # active = names whose record date is `td` trading days ahead with exit_off < td <= entry.
+    # Hybrid: exact panel trading-day count for in-history dates; np.busday_count for FUTURE ex-dates
+    # (live, beyond the price panel) so the sleeve produces signals off the forward feed.
+    panel_end = idx[-1]
+    cols = set(panel.columns)
+    active: set[str] = set()
+    for tkr, rec in zip(calendar["ticker"], calendar["date"]):
+        if tkr not in cols:
+            continue
+        if rec <= panel_end:
+            td = (idx.searchsorted(rec, side="right") - 1) - as_of_pos
+        else:
+            td = int(np.busday_count(pd.Timestamp(as_of).date(), pd.Timestamp(rec).date()))
+        if exit_off < td <= entry:
+            active.add(tkr)
+    longs = inverse_vol_weights(panel, [t for t in panel.columns if t in active],
+                                vol_pos, vol_window, max_weight)
     return {"longs": longs, "market_hedge": -float(sum(longs.values())),
             "as_of": str(as_of), "is_production": False}
 
