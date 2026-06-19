@@ -1,0 +1,46 @@
+H9 realized-P&L SHADOW GATE — does the forward realize the in-sample run-up?
+  deployed rule: enter -12 TD / exit -2 TD vs RECORD date, market-adjusted (stock - IMOEX), net round-trip fee 0.0010
+  price panel through 2026-06-16; calendar = history + LLM forward feed
+================================================================================
+
+[methodology identity] vs research runup_capture: closed mean +0.01135 == ref +0.01135  -> OK
+
+BENCHMARK (in-sample <2025) — what the forward must match:
+  IN-SAMPLE         : n=117  net +0.0124  %pos 0.65  median +0.0143  | high-yield net +0.0158 vs low +0.0089
+
+SHADOW TRACK (forward >=2025) — realized so far:
+  FORWARD           : n= 12  net -0.0093  %pos 0.50  median -0.0071  | high-yield net -0.0187 vs low +0.0001
+  per-year (forward):
+    2025: n=12  net -0.0093  %pos 0.50
+  forward closed events (ticker / record / yield / net runup):
+    TATN  2025-01-08  yld 2.66%  net +0.0005
+    MGNT  2025-01-09  yld 11.58%  net -0.0388
+    ROSN  2025-01-10  yld 6.48%  net -0.0166
+    PLZL  2025-04-25  yld 3.93%  net -0.0364
+    NVTK  2025-04-28  yld 3.68%  net +0.0706
+    TATN  2025-06-02  yld 6.57%  net +0.0009
+    LKOH  2025-06-03  yld 8.36%  net +0.0219
+    MTSS  2025-07-07  yld 18.06%  net -0.0621
+    VTBR  2025-07-11  yld 35.14%  net -0.0514
+    SNGS  2025-07-17  yld 4.08%  net +0.0184
+    SBER  2025-07-18  yld 11.28%  net +0.0173
+    ROSN  2025-07-20  yld 3.51%  net -0.0357
+
+PLACEBO band (random non-dividend dates, in-sample) — forward should sit in its right tail:
+  placebo mean +0.0007 [2.5-97.5%: -0.0079..+0.0092]; forward gross -0.0083 at 2% of placebo  -> NOT yet separated (thin)
+
+PENDING pipeline (7 upcoming events, awaiting realization):
+    MTSS  record 2026-07-09  (~17 TD ahead)
+    ROSN  record 2026-07-09  (~17 TD ahead)
+    PLZL  record 2026-07-13  (~19 TD ahead)
+    TATN  record 2026-07-15  (~21 TD ahead)
+    SNGS  record 2026-07-16  (~22 TD ahead)
+    SBER  record 2026-07-20  (~24 TD ahead)
+    VTBR  record 2026-07-20  (~24 TD ahead)
+
+Live monitor shadow_log: 2 runs, 0 with holdings (accrues real-time as July-2026 events trade).
+
+================================================================================
+benchmark vs shadow: IS net +0.0124 (dose-resp OK, n=117) | FWD net -0.0093 (dose-resp INVERTED, n=12)
+VERDICT: NOT MET: 12 forward events, net -0.0093, %pos 0.50 — forward does NOT confirm the edge yet. is_production stays false; do not deploy live.
+  (is_production=false until this gate is MET on accrued forward events AND team sign-off.)
