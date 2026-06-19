@@ -32,11 +32,16 @@ CONTRACTS = [
     "execution_report",
     "agent_cycle_result",
     "risk_analytics",
+    # V3 sleeve combiner (risk_manager): position-form sleeve input + combined book output.
+    "sleeve_signal",
+    "risk_book",
 ]
 
 PROBABILITY_KEYS = {"buy", "hold", "sell"}
 SUPPORTED_ACTIONS = {"BUY", "SELL", "HOLD", "BUY_MORE", "SELL_PARTIAL", "SELL_ALL"}
 LEG_VALUES = {"long", "short", "flat"}
+SLEEVE_VALUES = {"s1_pairs", "s2_macro", "s3_event", "s4_core"}
+HEDGE_MODES = {"sector", "market", "none"}
 
 
 def parse_dt(value: str):
@@ -142,6 +147,21 @@ def validate_schema_shapes(schemas: dict[str, dict[str, Any]]) -> None:
     if set(schemas["order_request"]["properties"]["side"].get("enum", [])) != {"BUY", "SELL"}:
         raise AssertionError("order_request.side must enumerate BUY/SELL")
 
+    # V3: sleeve_signal is a POSITION-form sleeve input (target weights + sleeve tag), not a ranking.
+    ss_props = schemas["sleeve_signal"]["properties"]
+    if "positions" not in ss_props:
+        raise AssertionError("V3: sleeve_signal must define a 'positions' array")
+    if set(ss_props["sleeve"].get("enum", [])) != SLEEVE_VALUES:
+        raise AssertionError(f"sleeve_signal.sleeve must enumerate {sorted(SLEEVE_VALUES)}")
+
+    # V3: risk_book is the combiner output (netted book + risk scalars + limits + hedge).
+    rb_props = schemas["risk_book"]["properties"]
+    for required_field in ("net_positions", "hedge", "risk_scalars", "limits"):
+        if required_field not in rb_props:
+            raise AssertionError(f"risk_book must define '{required_field}'")
+    if set(rb_props["hedge"]["properties"]["mode"].get("enum", [])) != HEDGE_MODES:
+        raise AssertionError(f"risk_book.hedge.mode must enumerate {sorted(HEDGE_MODES)}")
+
 
 def assert_probability_vector(payload: dict[str, Any], field: str) -> None:
     proba = payload[field]
@@ -243,6 +263,49 @@ def validate_cross_contracts(examples: dict[str, dict[str, Any]]) -> None:
         raise AssertionError("portfolio_snapshot must include SBER position")
 
 
+def validate_v3_sleeve_contracts(examples: dict[str, dict[str, Any]]) -> None:
+    """V3 risk_manager combiner: sleeve_signal (input) + risk_book (combined output) examples."""
+    sleeve = examples["sleeve_signal"]
+    book = examples["risk_book"]
+
+    # sleeve_signal: research artifact, position-form, sleeve tag in enum.
+    if sleeve["is_production"] is not False:
+        raise AssertionError("sleeve_signal example must keep is_production=false")
+    if sleeve["sleeve"] not in SLEEVE_VALUES:
+        raise AssertionError(f"sleeve_signal.sleeve invalid: {sleeve['sleeve']}")
+    for p in sleeve["positions"]:
+        if p["leg"] not in (LEG_VALUES | {"hedge"}):
+            raise AssertionError(f"sleeve_signal position leg invalid: {p['leg']}")
+    print("sleeve_signal: position-form sleeve + is_production OK")
+
+    # risk_book: research artifact; limits respected; total_gross = directional + hedge; sides consistent.
+    if book["is_production"] is not False:
+        raise AssertionError("risk_book example must keep is_production=false")
+    lim = book["limits"]
+    if not (lim["name_caps_ok"] and lim["sector_caps_ok"] and lim["gross_cap_ok"]):
+        raise AssertionError("risk_book example must respect every limit (name/sector/gross)")
+    for p in book["net_positions"]:
+        if abs(p["weight"]) > lim["max_name_weight"] + 1e-6:
+            raise AssertionError(f"risk_book {p['ticker']} exceeds max_name_weight")
+        if (p["weight"] > 0) != (p["side"] == "LONG"):
+            raise AssertionError(f"risk_book {p['ticker']} side/sign mismatch")
+    sec_gross: dict[str, float] = {}
+    for p in book["net_positions"]:
+        sec_gross[p["sector"]] = sec_gross.get(p["sector"], 0.0) + abs(p["weight"])
+    if any(g > lim["max_sector_gross"] + 1e-6 for g in sec_gross.values()):
+        raise AssertionError("risk_book per-sector gross exceeds max_sector_gross")
+    rs = book["risk_scalars"]
+    hedge_gross = sum(abs(leg["weight"]) for leg in book["hedge"]["legs"])
+    if not math.isclose(rs["total_gross"], rs["directional_gross"] + hedge_gross, abs_tol=1e-4):
+        raise AssertionError("risk_book total_gross != directional_gross + hedge gross")
+    if book["hedge"]["mode"] not in HEDGE_MODES:
+        raise AssertionError(f"risk_book hedge.mode invalid: {book['hedge']['mode']}")
+    # Linkage: the book's sleeve provenance includes the sleeve_signal's sleeve.
+    if sleeve["sleeve"] not in {s["sleeve"] for s in book["sleeves"]}:
+        raise AssertionError("risk_book.sleeves must record the sleeve_signal provenance")
+    print("risk_book: netting + limits + hedge + sleeve linkage OK")
+
+
 def validate_supported_tickers() -> None:
     data = load_optional_yaml(CONFIG_DIR / "supported_tickers.yaml")
     tickers = data.get("tickers", [])
@@ -288,6 +351,7 @@ def main() -> int:
     validate_schema_shapes(schemas)
     validate_jsonschema_if_available(schemas, examples)
     validate_cross_contracts(examples)
+    validate_v3_sleeve_contracts(examples)
     validate_supported_tickers()
     validate_optional_generated_ml_prediction(schemas["ml_prediction"])
     print("All contract checks passed.")
