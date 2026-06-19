@@ -20,8 +20,9 @@ shadow-треком. Слив S3-смежный в мульти-стратеги
   медиана зазора 37 ТД. `ml/scripts/h9_nolookahead_verify.py`, `data/news/dividend_announcements.csv`.
 
 ## Артефакты сервинга
-- `src/service/dividend_sleeve.py`: `target_positions(as_of)` (past-only, inv-vol, кап 0.34, hedge),
-  `build_sleeve_signal(as_of)` → JSON для risk_manager `{sleeve:"s3_event", positions[], gross, ...}`.
+- `src/service/dividend_sleeve.py`: `target_positions(as_of)` (past-only, inv-vol, кап 0.34),
+  `build_sleeve_signal(as_of)` → JSON `{sleeve:"s3_event", positions[long], hedge_recommendation:
+  {method:"sector_index"}, gross_long, ...}`. Хедж — на уровне книги (risk_manager), сектор-метод (P0).
 - `ml/scripts/dividend_sleeve_monitor.py`: **forward-shadow монитор** — берёт живой календарь дивидендов
   с MOEX ISS, находит имена в окне входа сейчас, сайзит, пишет снапшот в
   `data/reports/dividend_shadow_log.csv`. `--as-of YYYY-MM-DD` — демо/тест на прошлой дате.

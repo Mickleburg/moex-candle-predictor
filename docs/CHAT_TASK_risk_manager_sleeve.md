@@ -11,8 +11,11 @@ MOEX trading agent, ветка `change-strategy`, мульти-стратеги�
 
 ## Что уже готово (входы для тебя)
 - **Сигнал слива H9:** `ml/src/service/dividend_sleeve.py::build_sleeve_signal(as_of)` → JSON
-  `{sleeve:"s3_event", strategy:"dividend_runup", positions:[{ticker,weight,leg}], gross,
-  market_neutral:true, is_production:false}`. Длинные ноги + хедж IMOEX, inverse-vol веса.
+  `{sleeve:"s3_event", strategy:"dividend_runup", positions:[{ticker,weight,leg:"long"}],
+  hedge_recommendation:{method:"sector_index", fallback:"imoex_beta_adjusted", notional}, gross_long,
+  market_neutral:true, is_production:false}`. **Только ДЛИННЫЕ ноги** (inverse-vol, кап 0.34); хедж
+  слив НЕ эмитит — ты хеджируешь на УРОВНЕ КНИГИ по сектору (см. ниже). Ёмкость слива ~130-190 млн ₽
+  (P0-анализ `ml/scripts/h9_capacity.py`) — учти в лимитах.
 - **Риск-аналитика (H4/H5):** `ml/src/service/risk_analytics.py` + CLI `predict_risk_analytics.py` →
   контракт `contracts/risk_analytics.schema.json`: пер-тикер vol-прогноз (H4) + режимный гейт (H5,
   `exposure_scalar∈[0,1]`, срезает гросс в шоковом режиме).
