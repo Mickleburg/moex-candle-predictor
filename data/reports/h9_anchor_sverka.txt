@@ -1,0 +1,21 @@
+H9 anchor sverka — does the forward feed trade the SAME anchor the research validated on?
+==============================================================================
+
+[1] anchor columns present  ->  PASS
+    dividends.csv: ['ticker', 'date', 'value', 'ccy']  (anchor = 'date' = ISS registryclosedate = RECORD)
+    feed: record_date, ex_date present = True
+    -> research anchored on RECORD date; sleeve merges feed.record_date -> 'date'. Same object.
+
+[2] ex_date == record_date - 1 trading day (T+1)  ->  PASS
+    7/7 rows consistent; trading-day gap values = [1]
+
+[3] merged calendar's FUTURE rows == feed record_date  ->  PASS
+    feed events 7; merged future rows 7; feed (ticker,record) all present in merged = True
+
+[4] exit sits before the ex-gap  ->  PASS
+    anchor=record; ex=record-1 TD (T+1); entry=record-12, exit=record-2
+    last held return is INTO record-2 (= ex-1); ex-gap at record-1 NOT captured -> OK
+    note: the sleeve uses ONLY record_date as the anchor; ex_date is informational (not traded).
+
+==============================================================================
+VERDICT: PASS — feed anchor == research anchor; deployed window trades the right event.
