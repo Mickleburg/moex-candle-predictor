@@ -132,8 +132,12 @@ record_date дословно из `data/raw/dividends.csv` для join). No-look
    `event_type` — правила по `event_name` (см. `_EVENT_RULES`), сверять с `/api/data/sevent-types`.
 3. **Прогон фич по вселенной**: сгенерировать `llm_analysis` по сетке (ticker × as_of) под
    feature_bundle; решить гранулярность окна (`window_hours`) и сетку времён.
-4. **(опц.) Догрузка тела сообщения** по `pseudoGUID` (`event.aspx?eventid=...`) — если LLM-слою
-   нужен полный текст, не только заголовок. Эндпоинт тела ещё не вскрыт.
+4. ✅ **Догрузка тела сообщения** по `pseudoGUID` — ВСКРЫТО (2026-06-19). URL тела:
+   `https://www.e-disclosure.ru/portal/event.aspx?EventId=<pseudoGUID>` (pseudoGUID дословно, с
+   хвостом `-B-B`). За тем же WAF — берём Playwright-ом, читаем `inner_text("body")`, режем ядро
+   между маркером «код сообщения» и футером «Версия для печати». Фетчер+кэш:
+   `llm/scripts/edisc_fetch_bodies.py` → `data/news/edisclosure_bodies/<TICKER>_<guid>.txt`
+   (fetch-once, парсинг офлайн). См. раздел «Forward-фид дивидендов» ниже.
 5. ✅ **LLM-уточнение** — интегрирован внутренний шлюз Positive LLM (OpenAI-совместимый,
    `https://api-llm.ml.ptsecurity.ru/v1`, ключ `POSITIVE_LLM_API_KEY`). Дефолт `--provider positive`
    = `positive-llm-chat` (Gemma-4-31B). Подтверждено живым вызовом на SBER (structured output
@@ -141,3 +145,39 @@ record_date дословно из `data/raw/dividends.csv` для join). No-look
    vLLM учтены: не temperature=0, extra_body→top-level, retry на 429/5xx, обход прокси. DeepSeek —
    на перспективу (`--provider deepseek`). Throughput: RPM 30 / TPM (Gemma 25k) — троттлить.
 6. **Валидация вклада** H2/H3 — только deployment-симуляцией.
+
+## Forward-фид предстоящих дивидендов (H9 run-up, 2026-06-19)
+
+Слив S3 входит за ~12 ТД до record-даты, значит record-дату надо знать ЗАРАНЕЕ. MOEX ISS
+`dividends.json` отдаёт только ПОДТВЕРЖДЁННЫЕ даты и лагает (на 2026-06-19 у LKOH/SBER/ROSN/SNGS
+в ISS НЕТ ни одной даты 2026 — проверено живым запросом). Рекомендация СД на e-disclosure несёт
+record-дату за ~37 ТД вперёд — это и есть запас, который даёт фид.
+
+Что в parquet только ЗАГОЛОВКИ; размер дивиденда и record-дата — в ТЕЛЕ. Поэтому:
+- `llm/scripts/edisc_fetch_bodies.py` — тянет+кэширует тела дивидендной цепочки (СД / созыв ОСА /
+  решения ОСА / пресс-релиз о рекомендации) с `FETCH_FLOOR=2026-02-01`.
+- `llm/scripts/build_dividend_calendar_upcoming.py` — парсит тела офлайн и собирает фид.
+
+**Извлечение из тела (правила, покрыты `llm/test_dividend_calendar.py`):**
+- *record-дата дивиденда* = дата, СОСЕДНЯЯ с фразой «…на которую определяются лица, имеющие право
+  на получение дивидендов…» (дата может стоять ДО или ПОСЛЕ фразы; поддержаны «4 мая 2026 г.» и
+  `DD.MM.YYYY`). Фраза «право ГОЛОСА / на участие» — это дата ОСА-голосования, НЕ дивиденда, и
+  отбрасывается. Агендные упоминания без даты игнорируются.
+- *размер на акцию* — берём ближайшую к якорю «на одну [обыкновенную] акцию» сумму; формы
+  `278 рублей`, `2 руб. 27 коп.`, `47,23 (...) рублей`, `9,71 рубля`, `56 (…) рублей 80 (…) копеек`.
+  Префы отбрасываем, обыкновенные/единственный класс — берём. При интерим-неттинге (TATN: годовой
+  итог 34.09 vs выплата к этой дате 11.61) предпочитаем сумму у «Произвести выплату».
+- *отказ* = «дивиденды … не объявлять / не выплачивать / прибыль не распределять». Ключ: у отказа
+  НЕТ дивидендной record-даты → отказники чисто отделяются от плательщиков.
+- *статус*: `recommended` (только СД) → `confirmed` (есть решение ОСА). Разные циклы одного имени
+  (PLZL: финал-2025 record 18.05 vs квартал-1-2026 record 13.07) разводятся группировкой по record.
+
+**Выход:** `data/news/dividend_calendar_upcoming.csv` (колонки `ticker, record_date, ex_date,
+board_reco_date, agm_date, value, status, source_url, as_of, confidence, notes`; `ex_date` = record−1ТД;
+оставляем `record_date ≥ today−30д`). `source_url` пинит конкретное раскрытие (`event.aspx?EventId=`).
+
+**Результат на 2026-06-19:** 7 предстоящих дивидендов (record в июле-2026): MTSS 35.00, ROSN 2.27,
+PLZL 29.05, TATN 11.61, SNGS 0.85, SBER 37.64, VTBR 9.71. Приёмка board_reco ≤ record−12ТД: **7/7
+PASS**, медиана запаса 39 кал. дн (мин 29). Плюс 7 имён ОТКАЗались от дивиденда за 2025 (GAZP GMKN
+MGNT CHMF ALRS MAGN NLMK — ML не ждать). 3 подтверждённых уже прошли record (NVTK/LKOH/PLZL-финал) —
+вне фида, но проверяют ветку `confirmed`. No-lookahead соблюдён: все даты — `pubDate` раскрытий.
