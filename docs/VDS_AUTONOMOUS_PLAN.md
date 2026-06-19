@@ -72,8 +72,10 @@ H9-валидация (эдж/no-lookahead/P0) · risk_manager-комбинат�
 4. ✅ **ВЫПОЛНЕНО. Сверка якоря (record vs ex date)** — `ml/scripts/h9_anchor_sverka.py`, **PASS 4/4**:
    оба источника якорятся на RECORD-дату (тот же объект, что в research); фид ex=record−1 ТД (T+1) 7/7;
    мерж корректен 7/7; выход −2 ТД до ex-гэпа. Слив торгует правильное событие, off-by-one нет.
-5. *(опц.)* **Live serving-CLI + emit контракта.** `predict_dividend_sleeve.py` пишет `sleeve_signal`
-   JSON в известный путь, чтобы `agent/` потреблял ML без импорта внутренностей. По запросу оркестратора.
+5. ✅ **ВЫПОЛНЕНО. Serving-CLI** — `ml/scripts/predict_dividend_sleeve.py --as-of <date> --out <path>`
+   (или `--out -` в stdout) пишет валидный `sleeve_signal` JSON. CLI-шов для оркестратора: agent зовёт
+   ML сабпроцессом, не импортируя pandas/numpy в stdlib-only ядро. Структурный чек контракта внутри;
+   контракты зелёные. Остаётся только шаг 2 (свежий панель) — ждёт первый backend EOD-ingest.
 
 ## Фронт productionization → разбивка по чатам
 **Одного чата НЕ хватит** — это мульти-блочный productionization, и проект уже идёт по схеме
