@@ -1,0 +1,47 @@
+{
+  "_comment": "Agent orchestrator config. NO SECRETS HERE (broker keys / bot token come from the environment / .env). mode=paper + block_mode=mock is the safe default that runs end-to-end with no other block wired. Flip blocks.<name>.mode to 'live' as each block lands; live trading additionally requires enable_live=true AND mode=live.",
+  "mode": "paper",
+  "enable_live": false,
+  "block_mode": "mock",
+  "capital_rub": 10000000,
+  "timeframe": "1D",
+  "universe": ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
+               "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"],
+  "paths": {
+    "state_db": "data/agent/state.sqlite",
+    "cycle_results_dir": "data/agent/cycles",
+    "shadow_log": "data/agent/shadow_pnl.jsonl",
+    "log_dir": "data/agent/logs"
+  },
+  "schedule": {
+    "timezone": "Europe/Moscow",
+    "eod": "19:05",
+    "preopen": "09:30",
+    "deadman_check_minutes": 30,
+    "deadman_max_stale_hours": 26
+  },
+  "alerts": {
+    "channel": "stdout"
+  },
+  "blocks": {
+    "backend": {
+      "mode": "mock",
+      "ingest_cmd": null,
+      "integrity_cmd": null,
+      "prices_cmd": null
+    },
+    "sleeve": {
+      "mode": "mock",
+      "model_version": "h9_dividend_runup_v1"
+    },
+    "combiner": {
+      "mode": "mock",
+      "hedge_mode": "sector",
+      "target_book_vol_annual": 0.12
+    },
+    "execution": {
+      "mode": "mock",
+      "command": null
+    }
+  }
+}

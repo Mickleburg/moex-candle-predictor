@@ -9,6 +9,12 @@ data/reports/*.csv
 data/reports/*.json
 data/reports/*.jsonl
 
+# agent runtime state — SQLite store, cycle results, shadow log, logs, backups (regenerable)
+data/agent/
+
+# local env / secrets
+.env
+
 CLAUDE.md
 ml/SKILL.md
 

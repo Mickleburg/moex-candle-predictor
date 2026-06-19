@@ -1,0 +1,11 @@
+# Daily state-store backup (paired with moex-agent-backup.timer).
+#   sudo cp infra/systemd/moex-agent-backup.* /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now moex-agent-backup.timer
+[Unit]
+Description=MOEX agent state-store backup
+
+[Service]
+Type=oneshot
+User=agent
+WorkingDirectory=/opt/moex-candle-predictor
+ExecStart=/usr/bin/env bash /opt/moex-candle-predictor/infra/backup.sh
