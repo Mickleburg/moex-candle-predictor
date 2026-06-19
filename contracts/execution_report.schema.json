@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionReport",
+  "type": "object",
+  "required": ["client_order_id", "ticker", "status", "filled_quantity_lots", "message"],
+  "properties": {
+    "client_order_id": { "type": "string" },
+    "ticker": { "type": "string" },
+    "status": { "type": "string", "enum": ["DRY_RUN", "PLACED", "REJECTED", "FILLED", "CANCELED"] },
+    "exchange_order_id": { "type": ["string", "null"] },
+    "filled_quantity_lots": { "type": "integer", "minimum": 0 },
+    "avg_fill_price": { "type": ["number", "null"] },
+    "message": { "type": "string" }
+  }
+}

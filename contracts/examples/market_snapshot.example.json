@@ -1,0 +1,18 @@
+{
+  "ticker": "SBER",
+  "timeframe": "1H",
+  "as_of": "2026-05-15T15:00:00+03:00",
+  "latest_candle": {
+    "begin": "2026-05-15T15:00:00+03:00",
+    "open": 300.0,
+    "high": 302.0,
+    "low": 299.0,
+    "close": 301.5,
+    "volume": 123456
+  },
+  "indicators": {
+    "ema20": 299.8,
+    "ema50": 296.4,
+    "rolling_volatility_16": 0.0028
+  }
+}

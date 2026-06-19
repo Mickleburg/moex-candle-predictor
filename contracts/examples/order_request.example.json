@@ -1,0 +1,8 @@
+{
+  "ticker": "SBER",
+  "side": "BUY",
+  "quantity_lots": 2,
+  "order_type": "LIMIT",
+  "limit_price": 301.5,
+  "client_order_id": "demo-20260515-SBER-001"
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PortfolioSnapshot",
+  "type": "object",
+  "required": ["as_of", "cash", "equity", "positions"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "cash": { "type": "number" },
+    "equity": { "type": "number" },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "lots", "avg_price", "market_price", "market_value", "unrealized_pnl"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "lots": { "type": "integer" },
+          "avg_price": { "type": "number" },
+          "market_price": { "type": "number" },
+          "market_value": { "type": "number" },
+          "unrealized_pnl": { "type": "number" }
+        }
+      }
+    }
+  }
+}

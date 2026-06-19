@@ -1,4 +1,16 @@
-"""Load candle data from raw storage."""
+"""Load candle data from raw storage.
+
+Timezone convention (IMPORTANT):
+    MOEX candle timestamps are **Europe/Moscow (MSK, UTC+3)** wall-clock. Historically the
+    raw parquet `begin` was stored as MSK wall-clock but mislabelled with a UTC tz tag
+    (e.g. ``2020-01-03 09:00:00+00:00`` actually means 09:00 MSK). The wall-clock hour/dow
+    are correct MSK — which is what the models learned — only the tz LABEL was wrong.
+
+    `load_candles(..., tz_aware=True)` returns correctly-labelled MSK timestamps (wall-clock
+    preserved, so hour/dow are unchanged and models stay valid). The default stays False for
+    backward compatibility with legacy research scripts that re-parse with ``utc=True``.
+    Use `to_moscow_time()` to canonicalise any `begin` series.
+"""
 
 from pathlib import Path
 from typing import Optional
@@ -6,6 +18,21 @@ from typing import Optional
 import pandas as pd
 
 from ..utils.io import read_csv, read_parquet
+
+MOEX_TZ = "Europe/Moscow"
+
+
+def to_moscow_time(series: pd.Series) -> pd.Series:
+    """Return `begin` as correctly-labelled Europe/Moscow time, preserving wall-clock.
+
+    The stored timestamps are MSK wall-clock (possibly tagged UTC by a legacy ingestion
+    bug). We strip any tz label and relabel as MSK, so 09:00(+00:00 legacy) -> 09:00+03:00.
+    Wall-clock hour/dayofweek are unchanged, keeping trained models valid.
+    """
+    s = pd.to_datetime(series)
+    if getattr(s.dt, "tz", None) is not None:
+        s = s.dt.tz_localize(None)
+    return s.dt.tz_localize(MOEX_TZ)
 
 
 # Column name mapping for normalization
@@ -47,19 +74,23 @@ def load_candles(
     path: str | Path,
     ticker: Optional[str] = None,
     timeframe: Optional[str] = None,
-    format: Optional[str] = None
+    format: Optional[str] = None,
+    tz_aware: bool = False,
 ) -> pd.DataFrame:
     """Load candles from file or directory.
-    
+
     Args:
         path: Path to file or directory containing candle data.
         ticker: Optional ticker filter.
         timeframe: Optional timeframe filter.
         format: File format ('parquet' or 'csv'). If None, inferred from extension.
-        
+        tz_aware: If True, return `begin` as correctly-labelled Europe/Moscow time
+            (wall-clock preserved). Default False keeps the legacy stored value so
+            scripts that re-parse with ``utc=True`` are unaffected. See module docstring.
+
     Returns:
         DataFrame with normalized candle schema.
-        
+
     Raises:
         FileNotFoundError: If path does not exist.
         ValueError: If format is unsupported or data is empty.
@@ -102,8 +133,11 @@ def load_candles(
             df = df[df["timeframe"] == timeframe]
         else:
             raise ValueError("Timeframe filter requested but 'timeframe' column not found")
-    
-    return df.reset_index(drop=True)
+
+    df = df.reset_index(drop=True)
+    if tz_aware and "begin" in df.columns:
+        df["begin"] = to_moscow_time(df["begin"])
+    return df
 
 
 def _load_single_file(path: Path, format: str) -> pd.DataFrame:

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarketSnapshot",
+  "type": "object",
+  "required": ["ticker", "timeframe", "as_of", "latest_candle"],
+  "properties": {
+    "ticker": { "type": "string" },
+    "timeframe": { "type": "string" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "latest_candle": { "$ref": "candle_batch.schema.json#/properties/candles/items" },
+    "indicators": { "type": "object", "additionalProperties": true }
+  }
+}
