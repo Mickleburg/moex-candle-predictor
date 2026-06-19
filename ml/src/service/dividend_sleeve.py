@@ -124,11 +124,14 @@ def build_sleeve_signal(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.T
         "strategy": "dividend_runup",
         "as_of": tp["as_of"],
         "market_neutral": True,
+        # LONG target positions only; hedging is applied by risk_manager at BOOK level (more efficient
+        # netting across sleeves). P0 robustness: SECTOR-index hedge >> broad IMOEX (Sharpe +0.92 vs
+        # +0.54, DD halved) because the run-up is a name-vs-sector effect — recommended below.
         "positions": [{"ticker": t, "weight": round(w, 4), "leg": "long"}
-                      for t, w in sorted(tp["longs"].items(), key=lambda kv: -kv[1])]
-                     + ([{"ticker": "IMOEX", "weight": round(tp["market_hedge"], 4), "leg": "hedge"}]
-                        if tp["longs"] else []),
-        "gross": round(sum(tp["longs"].values()) * 2.0, 4),
+                      for t, w in sorted(tp["longs"].items(), key=lambda kv: -kv[1])],
+        "hedge_recommendation": {"method": "sector_index", "fallback": "imoex_beta_adjusted",
+                                 "notional": round(sum(tp["longs"].values()), 4)},
+        "gross_long": round(sum(tp["longs"].values()), 4),
         "model_version": model_version,
         "is_production": False,
     }
