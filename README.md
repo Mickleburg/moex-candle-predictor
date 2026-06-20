@@ -1,72 +1,95 @@
 # MOEX Candle Predictor
 
-Модульная research-платформа для торгового агента на MOEX. Блоки общаются через JSON-контракты
-(`contracts/`). Весь стек — **Python**.
+Мульти-стратегийный торговый агент на MOEX. Блоки общаются через JSON-контракты (`contracts/`).
+Весь стек — **Python**. Развёртывание — автономный сервис на Linux-VDS (сам собирает данные, мониторит,
+управляет портфелем). Торговля по умолчанию — **paper**; live за двойным флагом.
 
-> **Направление V3 (2026-06-16).** Поиск ОДНОЙ модели направления/относит. силы исчерпан (см.
-> леджер закрытого). Новая цель — **мульти-стратегийный агент**: портфель слабо-коррелированных
-> стратегийных сливов (пары · макро-тилт · события · риск-кор) + общий риск-слой. Прибыль из
-> агрегата и контроля риска. Источник правды: [`docs/ARCHITECTURE_V3.md`](docs/ARCHITECTURE_V3.md),
-> [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md) (КАНОН-леджер),
+> **Источник правды:** [`docs/ARCHITECTURE_V3.md`](docs/ARCHITECTURE_V3.md) ·
+> [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md) (КАНОН-леджер закрытого/активного) ·
+> [`docs/VDS_AUTONOMOUS_PLAN.md`](docs/VDS_AUTONOMOUS_PLAN.md) (автономный деплой) ·
 > [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). Рабочая ветка: `change-strategy`.
+
+## Статус (2026-06-20)
+
+**Найден первый робастный эдж — H9 «дивидендный пред-ex run-up» (слив S3).** Купить ~12 торговых дней
+до record-date, выйти ~2 ТД до (перед ex-гэпом), сектор-хедж, inverse-vol сайзинг. Доказан по 4 осям
+(per-year, окно входа, dose-response, placebo), no-lookahead сертифицирован, P0 пройден (издержки 4-10×
+запас, робастность 24/24, ёмкость ~130-190 млн ₽). Сервинг: `ml/src/service/dividend_sleeve.py`.
+
+**Автономный стек собран и проверен end-to-end** (206 тестов, оркестратор гоняет полный цикл в paper):
+данные → слив → комбинатор → риск-слой → execution → оркестратор+планировщик. `is_production=false` —
+снимается после forward-shadow гейта + sign-off.
+
+**Закрыто ⛔ (не переоткрывать):** направление 1H одной бумаги (V1); кросс-секционное ранжирование —
+цена (H1), новости-заголовки (H2), макро-тилт (H6); попарная реверсия (H7). Робастная market-neutral
+альфа на этой вселенной испробованными методами недоступна → сливы S1/S2 отложены. Тест 2025-2026 сожжён.
 
 ## Архитектура V3
 
 ```text
-ДАННЫЕ      свечи (12+ бумаг) + market context (Brent/USDRUB/RGBI/IMOEX) + news ingestion
+ДАННЫЕ      свечи (16 бумаг) + market context (Brent/RGBI/IMOEX/сектора) + дивидендный календарь
+                          │  backend: идемпотентный ingest + integrity-гейт + RU-holiday календарь
+ПРИЗНАКИ    событийный календарь (H9) ⊕ риск-аналитика (H4 vol / H5 режим)
                           │
-ПРИЗНАКИ    quant (цена/технички, кросс-секц.) ⊕ макро-беты (нефть/FX) ⊕ LLM news-события
+СЛИВЫ       S3 событийный (H9 дивиденды) ✅ активен · S1 пары / S2 макро — закрыты · S4 риск-кор
+                          │  ← risk_manager: нетит сливы, shadow-гейт (неподтверждённый слив → 0 риска)
+ПОРТФЕЛЬ    vol-targeting (H4) × режимный гейт (H5) × лимиты × сектор-хедж × кап корреляции
                           │
-СЛИВЫ       S1 пары-статарбитраж · S2 макро-тилт · S3 событийные новости · S4 риск-кор
-                          │  ← комбинатор (нетит позиции, веса по риску)
-ПОРТФЕЛЬ    risk_manager: vol-targeting (H4) + режимный гейт (H5) + лимиты + кап корреляции
+ИСПОЛНЕНИЕ   execution (paper/dry-run → live за флагом): дисциплина −12/−2, лоты, kill-switch, аудит
                           │
-ИСПОЛНЕНИЕ   execution (paper/dry-run, комиссия+проскальзывание)
+ОРКЕСТРАТОР  agent: суточный цикл (EOD+pre-open) + SQLite-состояние + планировщик + алерты
 ```
 
-Прибыль — из агрегата слабо-коррелированных сливов и контроля риска; отдельные сделки/сливы могут
-быть в минусе. Альфа ищется в экзогенных причинах (нефть/FX/события) и бета-нейтральных спредах
-(пары), НЕ в новой геометрии тех же цен (это закрыто).
+**Shadow-гейт (инварианты #9/#4):** слив получает живой капитал только если `is_production=true` И
+forward-гейт MET. Иначе — shadow-книга (0 живого капитала), папер-трек для атрибуции. H9 сегодня
+(`is_production=false`) → shadow: оркестратор ставит **0 live-ордеров**, копит forward-трек.
 
 ## Блоки
 
-- `ml/` — активный Python research-блок: сливы **S1 (пары)** + **S2 (макро-тилт)** + риск-аналитика (H4/H5).
-- `llm/` — извлекатель новостных **событий** (S3): event_type/surprise/affected/impact из тел сообщений.
-- `backend/` — данные (свечи + market context). **Python** (Go-версия удалена).
-- `risk_manager/` — **комбинатор сливов** + vol-targeting + режимный гейт + лимиты.
-- `execution/` — dry-run/paper/live adapter к брокеру/MOEX (пока только paper).
-- `agent/` — orchestrator полного цикла.
-- `contracts/` — общие JSON-схемы. `config/` — общая конфигурация.
-- `aggregator/` — **удалён**: роль комбинатора ушла в risk_manager.
+| Блок | Роль | Статус |
+|------|------|--------|
+| `backend/` | данные: ingest свечей+контекста, integrity-гейт, торговый календарь, метаданные инструментов | ✅ автономный |
+| `ml/` | сервинг слива H9 (S3) + риск-аналитика (H4/H5); research закрыт по market-neutral | ✅ H9 готов |
+| `llm/` | самообновляемый дивидендный фид (события из тел e-disclosure, no-lookahead) | ✅ EOD-рефреш |
+| `risk_manager/` | комбинатор сливов + риск-слой + **shadow-гейт** + сектор-хедж | ✅ |
+| `execution/` | брокер-адаптер (T-Invest), дисциплина −12/−2, kill-switch, аудит | ✅ paper (live загейчен) |
+| `agent/` | оркестратор суточного цикла + состояние + планировщик + алерты | ✅ |
+| `infra/` | Docker/compose + systemd + бэкапы для VDS | ✅ |
+| `contracts/` · `config/` | общие JSON-схемы · конфигурация | — |
+
+## Автономный суточный цикл (на VDS)
+
+EOD (~19:05 МСК, торговые дни): ingest свечей → integrity-гейт (HALT ⇒ не торговать) → LLM-рефреш фида →
+ML-слив → комбинатор+риск+shadow-гейт → execution (paper) → персист состояния+P&L → алерт-дайджест.
+Pre-open (~09:30): ночные гэпы/халты, подтверждение ордеров, kill-switch. Деплой — `docs/VDS_AUTONOMOUS_PLAN.md`,
+`infra/`. **Данные на VDS регенерируются сами** (первый ingest добивает историю свечей; первый LLM-рефреш
+фетчит тела e-disclosure) — в гите только код/генераторы и дистиллированные срезы (см. ниже).
 
 ## Метод валидации
 
-Только **deployment-симуляция** (скользящий ретрейн сквозь свежий forward-период, с комиссией).
-Обычный walk-forward обманул нас в V1. Тест-сплит 2025-2026 сожжён — для честного гейта нужен
-свежий forward. Подробности — в `docs/RESEARCH_HYPOTHESES.md`.
+Только **deployment-симуляция** на свежем forward, с комиссией (обычный walk-forward обманул в V1).
+Тест-сплит 2025-2026 сожжён. Forward-shadow гейт измеряет реализованный run-up на свежих ex-датах
+(`ml/scripts/h9_shadow_pnl.py`) — сейчас **NOT MET** (forward тонкий/минус) → копим сезон. Робастность важнее пика.
 
-## Safety
+## Safety / инварианты
 
-- Реальная торговля по умолчанию запрещена; первый режим — dry-run/paper.
-- Risk manager сильнее всех: может заблокировать любой сигнал.
-- LLM не торгует и не принимает финальное решение (в V2 он вообще выдаёт только фичи).
-- Тест-сплит нельзя использовать для тюнинга.
-- `is_production=false` до честного forward-гейта + sign-off.
+- Реальная торговля запрещена по умолчанию; первый режим — dry-run/paper; live за двойным флагом.
+- risk_manager сильнее всех: shadow-гейт даёт неподтверждённому сливу 0 живого капитала.
+- Тест-сплит нельзя использовать для тюнинга; `is_production=false` до forward-гейта + sign-off.
+- Весь JSON I/O валидируется схемами `contracts/`; каждый блок коммитит только свои файлы.
 
 ## Проверки
 
 ```powershell
-$PYTHON = "ml\.venv-win\Scripts\python.exe"
-& $PYTHON -m pytest ml/test_smoke.py          # смоук-тесты ML
-& $PYTHON scripts/validate_contracts.py        # валидация контрактов
+$PY = "ml\.venv-win\Scripts\python.exe"
+& $PY -m pytest ml/test_smoke.py agent/tests execution/tests backend/tests risk_manager/tests   # тесты блоков
+& $PY scripts/validate_contracts.py                                                              # контракты
+& $PY -m agent.src.cli run-eod --force                                                           # один суточный цикл (mock-дефолт, безопасно)
 ```
 
 ## Документация
 
-- Архитектура V2: `docs/ARCHITECTURE_V2.md`
-- Гипотезы исследования: `docs/RESEARCH_HYPOTHESES.md`
-- Источники данных (ISS/новости): `docs/DATA_SOURCES.md`
-- ML-блок: `ml/README.md`, `ml/CLAUDE.md`
-- LLM-блок: `llm/README.md`, `llm/CLAUDE.md`
-- Контракты: `contracts/README.md`
-- История ML-research: `ml/docs/research/`
+- Архитектура V3: [`docs/ARCHITECTURE_V3.md`](docs/ARCHITECTURE_V3.md) · леджер гипотез: [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md)
+- Автономный деплой: [`docs/VDS_AUTONOMOUS_PLAN.md`](docs/VDS_AUTONOMOUS_PLAN.md) · аудит интеграции: [`docs/INTEGRATION_AUDIT_2026-06-20.md`](docs/INTEGRATION_AUDIT_2026-06-20.md)
+- H9 слив: [`ml/docs/H9_DIVIDEND_SLEEVE_2026-06-18.md`](ml/docs/H9_DIVIDEND_SLEEVE_2026-06-18.md) · источники данных: [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md)
+- Блоки: `*/README.md` · история ML-research: `ml/docs/research/`

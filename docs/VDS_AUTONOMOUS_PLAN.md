@@ -118,6 +118,23 @@ execution — параллельно (его узкое место — выбо�
 - **Канал алертов:** Telegram-бот (рекоменд.) vs email.
 - **Капитал/лимиты live:** ёмкость слива ~130-190 млн ₽ (P0) — реальный размер задаёт лимиты.
 
+## Bootstrap данных на VDS (что в гите, что регенерируется)
+В гите — **только код, генераторы и дистиллированные срезы**; объёмные/регенерируемые данные не
+коммитятся (`.gitignore`) и восстанавливаются автономными джобами при первом прогоне:
+
+| Данные | В гите? | Как появляются на VDS |
+|--------|---------|------------------------|
+| Свечи `data/raw/*.parquet` | ❌ ignored | первый `backend` EOD-ingest добивает полную историю из MOEX ISS (идемпотентно) |
+| Тела e-disclosure `data/news/edisclosure_bodies/` | ❌ ignored | первый `llm/scripts/refresh_dividend_feed.py` фетчит тела (network, WAF-обход) |
+| Дистиллированный дивидендный фид `dividend_calendar_upcoming.csv` | ✅ (`git add -f`) | коммитится LLM-чатом; обновляется EOD-рефрешем |
+| Сертификация no-lookahead `dividend_announcements.csv` | ✅ (`git add -f`) | мелкий, не регенерируется без сети — трекается |
+| Фичи `data/features/` (decision_grid) | ❌ ignored | V2-закрытая линия; H9 не использует; при нужде — `ml/src/features/decision_grid.py` |
+| Состояние агента `data/agent/` | ❌ ignored | создаётся оркестратором при первом цикле (SQLite + логи + бэкапы) |
+
+**Порядок bootstrap на чистом VDS:** clone → `pip install -r requirements.txt` → `.env` (секреты) →
+`backend` ingest (история свечей) → `llm` refresh (фид+тела) → `agent init-db` → запуск планировщика
+(paper). Деплой-механика (Docker/systemd/бэкапы) — `infra/`.
+
 ## Дисциплина (на всех этапах, для всех чатов)
 Валидация только deployment-sim на свежем forward · no-lookahead (цена ≤ as_of, новость по публикации) ·
 кросс-блочный git: каждый чат коммитит **ТОЛЬКО свои файлы** · `is_production=false` до shadow-гейта +
