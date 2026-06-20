@@ -25,14 +25,17 @@
   },
   "blocks": {
     "backend": {
+      "_comment": "mode=live calls backend.ingest/integrity/store in-process. Keep mock until data/raw is seeded (a clean clone has no candles -> integrity HALTs).",
       "mode": "mock",
       "ingest_cmd": null,
       "integrity_cmd": null,
       "prices_cmd": null
     },
     "sleeve": {
+      "_comment": "mode=live shells out to ml/scripts/predict_dividend_sleeve.py --out - (needs data/raw panels). Override command to pin an interpreter, e.g. [\"ml/.venv-win/Scripts/python.exe\", \"ml/scripts/predict_dividend_sleeve.py\"].",
       "mode": "mock",
-      "model_version": "h9_dividend_runup_v1"
+      "model_version": "h9_dividend_runup_v1",
+      "command": null
     },
     "combiner": {
       "mode": "mock",
@@ -40,8 +43,18 @@
       "target_book_vol_annual": 0.12
     },
     "execution": {
-      "mode": "mock",
+      "_comment": "mode=live drives the REAL execution ExecutionEngine (paper broker sim) in-process: discipline -12/-2, lot rounding, dup-ledger, audit. State lands in the backed-up data tree. live trading still needs allow_live + EXECUTION_ALLOW_LIVE=1.",
+      "mode": "live",
+      "broker_backend": "sim",
+      "allow_live": false,
+      "state_dir": "data/agent/execution/state",
+      "audit_dir": "data/agent/execution/audit",
       "command": null
+    },
+    "llm": {
+      "_comment": "EOD step 2: refresh the upcoming-dividend feed BEFORE the sleeve. Best-effort (failure alerts, never blocks). Recommended: the canonical one-shot refresh CLI, with pass_as_of=true so the orchestrator appends --as-of <trade_date> (no-lookahead). e.g. refresh_cmd=[\"ml/.venv-win/Scripts/python.exe\", \"llm/scripts/refresh_dividend_feed.py\"], pass_as_of=true.",
+      "refresh_cmd": null,
+      "pass_as_of": true
     }
   }
 }

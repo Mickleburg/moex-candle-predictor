@@ -27,6 +27,7 @@ from .notifier import Notifier, build_notifier
 from .state_store import StateStore
 
 MSK_OFFSET = "+03:00"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Orchestrator:
@@ -66,6 +67,11 @@ class Orchestrator:
 
         # step 1 — ingest
         ingest = self.adapters.backend.run_ingest(as_of)
+
+        # step 2 — refresh the dividend knowledge base (upcoming ex-dates) BEFORE the sleeve so a
+        # newly-disclosed record date is in the feed the sleeve reads. Best-effort: a feed-refresh
+        # failure alerts but never blocks trading (the sleeve falls back to the existing CSV + ISS).
+        self._llm_refresh(td)
 
         # step 3 — integrity gate (HALT => no trading)
         integrity = self.adapters.backend.integrity_gate(as_of)
@@ -184,6 +190,29 @@ class Orchestrator:
         if self.config.mode == "live" and not self.config.live_enabled():
             return "paper", "live requested but enable_live gate is off -> forced paper (paper-first)."
         return self.config.mode, ""
+
+    def _llm_refresh(self, td: str) -> None:
+        """EOD step 2: run the configured LLM dividend-feed refresh (blocks.llm.refresh_cmd).
+
+        Best-effort: keeps the knowledge base (upcoming ex-dates) self-updating, but a scrape/
+        network failure must NOT block the cycle — it alerts and the sleeve uses the last feed.
+        """
+        llm_cfg = self.config.blocks.get("llm", {})
+        cmd = list(llm_cfg.get("refresh_cmd") or [])
+        if not cmd:
+            return
+        # pass the no-lookahead boundary when the configured CLI supports it (the canonical
+        # llm/scripts/refresh_dividend_feed.py does): the feed must use only disclosures <= td.
+        if llm_cfg.get("pass_as_of"):
+            cmd = [*cmd, "--as-of", td]
+        import subprocess
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900, cwd=str(REPO_ROOT))
+            if proc.returncode != 0:
+                self._alert("LLM feed refresh failed (non-blocking)",
+                            f"trade_date={td}\nrc={proc.returncode}\n{(proc.stderr or proc.stdout)[-400:]}")
+        except Exception as exc:  # noqa: BLE001 - feed refresh must never crash the cycle
+            self._alert("LLM feed refresh error (non-blocking)", f"trade_date={td}\n{type(exc).__name__}: {exc}")
 
     def _record_orders_and_fills(self, td: str, phase: str, orders: list[dict], reports: list[dict]) -> None:
         report_status = {r["client_order_id"]: r["status"] for r in reports}
