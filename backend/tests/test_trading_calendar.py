@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backend.trading_calendar import MoexTradingCalendar, RU_HOLIDAYS
+from backend.trading_calendar import (MoexTradingCalendar, RU_HOLIDAYS,
+                                      RU_HOLIDAYS_THROUGH_YEAR, holidays_cover)
 
 
 def test_weekends_are_non_trading():
@@ -75,6 +76,12 @@ def test_panel_ground_truth_overrides_model():
     # entry "N trading days" matches the actual bar spacing of the panel
     assert cal.trading_days_between(date(2026, 3, 2), date(2026, 3, 9)) == 3
     assert cal.next_trading_day(date(2026, 3, 4)) == date(2026, 3, 6)
+
+
+def test_holiday_coverage_marker():
+    """Forward holiday coverage is advertised so a stale list is observable, not silent."""
+    assert holidays_cover(f"{RU_HOLIDAYS_THROUGH_YEAR}-06-12") is True
+    assert holidays_cover(f"{RU_HOLIDAYS_THROUGH_YEAR + 1}-06-12") is False
 
 
 def test_imoex_overlay_forward_uses_holidays():

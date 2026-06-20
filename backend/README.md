@@ -13,6 +13,8 @@
 | `backend/universe.py` | Вселенная ingest (16 имён + market context + фьючерсы), какие свежесть/целостность HALT-worthy (`required`). |
 | `backend/ingest.py` | **Шаг 1.** Идемпотентная инкрементальная докачка (только недостающие свежие бары, ретраи/бэкофф, безопасно к повтору). |
 | `backend/integrity.py` | **Шаг 3.** Гейт целостности → машинно-читаемый `OK`/`HALT` с причинами (свежесть/дыры/NaN/sync). |
+| `backend/instruments.py` | Метаданные инструментов: **FIGI + round-lot + price-step** по 16 именам (для execution/agent). Источник — `config/instruments.json`. |
+| `backend/api.py` | **Замороженный in-process контракт для оркестратора.** Agent импортирует ТОЛЬКО отсюда; внутренности можно рефакторить, пока держатся сигнатуры. |
 
 ## Запуск (PowerShell из корня)
 
@@ -53,6 +55,49 @@ from backend.trading_calendar import (
 `RU_HOLIDAYS` — **поддерживаемый список**; обновлять ежегодно из официального торгового календаря
 MOEX / постановления о нерабочих днях. Для дат внутри панели актуальные торговые дни IMOEX
 переопределяют список (ловят и ad-hoc закрытия).
+
+## Оркестратор — стабильный in-process entry point
+
+Agent зовёт backend живьём в процессе (без HTTP), импортируя ТОЛЬКО `backend.api` —
+замороженную поверхность контракта. Сигнатуры и ключи возвращаемых словарей зафиксированы
+тестом `backend/tests/test_api_contract.py` (если он падает — фасад менять осознанно).
+
+```python
+from backend import api
+ingest  = api.run_ingest(with_futures=True)        # шаг 1; ingest["status"] in {ok,error}
+verdict = api.check_integrity()                     # шаг 3; verdict["status"] in {OK,HALT}
+if not api.is_tradeable(verdict): halt(verdict["reasons"])
+if api.is_trading_day(today): enter = api.add_trading_days(record_date, -12)
+figi = api.figi_for("SBER"); qty = api.round_to_lot("SBER", raw_qty)
+```
+
+`run_ingest(...) -> report` ключи: `status, reference_date, n_instruments, n_errors, n_updated, results[]`.
+`check_integrity(...) -> verdict` ключи: `status, reference_date, n_fail, n_warn, reasons[], warnings[], checks[]`.
+
+## Метаданные инструментов (FIGI / лот / шаг цены)
+
+`config/instruments.json` — общий артефакт для execution + agent. Строится
+`scripts/build_instrument_metadata.py`: **lot/min_price_step/isin** тянутся живьём из MOEX ISS
+(авторитетно, без авторизации; VTBR после реверс-сплита — lot=1), **FIGI** из курируемой
+T-Invest-таблицы. FIGI помечены `figi_verified=false` → ПРОВЕРИТЬ против дампа T-Invest
+(sandbox-токен) перед live:
+
+```powershell
+& $PY scripts/build_instrument_metadata.py                          # ISS + curated FIGI
+& $PY scripts/build_instrument_metadata.py --tinvest-dump dump.json # валидировать/перекрыть FIGI
+```
+
+`backend.instruments`: `figi_for / lot_for / round_to_lot / round_price / all_verified /
+unverified_figis`. `all_verified()` — live-гейт: пока False, FIGI не подтверждены.
+
+## Календарь: ежегодное обновление RU-праздников
+
+`RU_HOLIDAYS` покрыт по **2027** (`RU_HOLIDAYS_THROUGH_YEAR`). Каждую осень добавлять следующий
+год из официального торгового календаря MOEX (он может отличаться от федерального — MOEX иногда
+торгует в «мостовой» день). `holidays_cover(date)` → False, если год за пределами покрытия, чтобы
+устаревший список был ВИДИМ, а не молча мис-считал форвардные даты. Внутри панели даты
+самокорректируются по фактическим торговым дням IMOEX, так что устаревание бьёт только по датам
+за пределами ценовой панели.
 
 ## Решение по хранилищу (зафиксировано)
 
