@@ -105,7 +105,8 @@ def _drain_window(pg, query: str, d0: dt.date, d1: dt.date) -> tuple[list[dict],
     return raw, len(raw) >= RESULT_CAP
 
 
-def extract_ticker(pg, ticker: str, company_id: int, query: str, end_date: dt.date) -> list[dict]:
+def extract_ticker(pg, ticker: str, company_id: int, query: str,
+                   start_date: dt.date, end_date: dt.date) -> list[dict]:
     """Adaptive date-range split: subdivide any window that hits the server cap so no
     rows are silently dropped. dateFinish is clamped to today by the caller (end_date)."""
     seen: set[str] = set()
@@ -137,7 +138,7 @@ def extract_ticker(pg, ticker: str, company_id: int, query: str, end_date: dt.da
                 "corrected": e.get("isCorrectedByAnotherEvent"),
             })
 
-    recurse(START_DATE, end_date)
+    recurse(start_date, end_date)
     print(f"  [{ticker}] done: kept {len(rows)} rows", flush=True)
     return rows
 
@@ -146,7 +147,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tickers", nargs="*", default=list(UNIVERSE),
                     help="subset of tickers (default: all 12)")
+    ap.add_argument("--since", default=None,
+                    help="pull window start YYYY-MM-DD (default 2020-01-01; use a recent date for "
+                         "a light incremental EOD update)")
+    ap.add_argument("--merge", action="store_true",
+                    help="merge the pulled window into the existing parquet (dedup by pseudo_guid, "
+                         "keep history) instead of overwriting — for incremental refresh")
     args = ap.parse_args()
+    start_date = dt.date.fromisoformat(args.since) if args.since else START_DATE
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -171,14 +179,22 @@ def main() -> int:
             pg.wait_for_timeout(1200)
 
             cid, query = UNIVERSE[tk]
-            print(f"=== {tk} (companyID={cid}, query='{query}') ===", flush=True)
-            rows = extract_ticker(pg, tk, cid, query, end_date)
+            print(f"=== {tk} (companyID={cid}, query='{query}', since={start_date}) ===", flush=True)
+            rows = extract_ticker(pg, tk, cid, query, start_date, end_date)
             df = pd.DataFrame(rows)
+            out = OUT_DIR / f"{tk}.parquet"
+            if args.merge and out.exists():
+                prior = pd.read_parquet(out)
+                before = len(prior)
+                df = pd.concat([prior, df], ignore_index=True)
+                df = df.drop_duplicates(subset=["pseudo_guid"], keep="last")
+                added = len(df) - before
+            else:
+                added = len(df)
             if not df.empty:
                 df = df.sort_values("pub_date").reset_index(drop=True)
-            out = OUT_DIR / f"{tk}.parquet"
             df.to_parquet(out, index=False)
-            print(f"--> wrote {out}  rows={len(df)}", flush=True)
+            print(f"--> wrote {out}  rows={len(df)} (+{added} new)", flush=True)
         b.close()
     return 0
 

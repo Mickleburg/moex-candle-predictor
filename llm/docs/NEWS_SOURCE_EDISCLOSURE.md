@@ -176,6 +176,26 @@ record-дату за ~37 ТД вперёд — это и есть запас, к
 board_reco_date, agm_date, value, status, source_url, as_of, confidence, notes`; `ex_date` = record−1ТД;
 оставляем `record_date ≥ today−30д`). `source_url` пинит конкретное раскрытие (`event.aspx?EventId=`).
 
+### Самообновление на VDS — `llm/scripts/refresh_dividend_feed.py` (EOD entry point)
+
+ОДНА идемпотентная, устойчивая к сети команда, которую оркестратор зовёт на EOD (свойство автономности):
+`extract` (инкрементальный долив титулов за окно ~45д с merge по `pseudo_guid` → ловит НОВЫЕ
+рекомендации/отказы) → `bodies` (докачка только новых тел) → `build` (в ВРЕМЕННЫЙ файл) →
+`verify` (НЕЗАВИСИМЫЙ no-lookahead) → `sverka` (best-effort `ml/scripts/h9_anchor_sverka.py`) →
+`swap` (атомарная замена живого CSV ТОЛЬКО при прохождении проверок; иначе — откат к last-good).
+
+- **Независимый no-lookahead** (`llm/scripts/verify_dividend_feed.py`, своя реализация регэкспов):
+  по каждому ряду из СЫРЫХ `pub_date` parquet проверяет, что `board_reco_date` — реальная дата
+  публикации raskрытия reco-класса, `≤ as_of`, и `≤ record − 12 ТД`; что `ex = record − 1 ТД`;
+  что `value` парсится во float > 0 (иначе ML-лоадер тихо дропнет ряд). Покрыт
+  `llm/test_dividend_refresh.py` (по падающему кейсу на каждый инвариант).
+- **Контракт для оркестратора:** один JSON-объект в STDOUT (логи — в STDERR), exit 0 ⟺ фид
+  ДОВЕРЕННЫЙ (verify прошёл, нет явного FAIL sverka) даже если сеть не дала свежих данных
+  (флаг `degraded`); exit ≠ 0 только если фид НЕЛЬЗЯ доверять (verify/sverka FAIL или build упал).
+  Так транзиентный сбой сети не валит торговлю, а реально сломанный фид — алертит.
+- **Идемпотентность:** build детерминирован → повторный прогон в тот же день даёт байт-идентичный
+  CSV (`changed:false`). Флаги: `--no-extract --extract-since DATE --no-anchor-sverka --retries N --as-of DATE`.
+
 **Результат на 2026-06-19:** 7 предстоящих дивидендов (record в июле-2026): MTSS 35.00, ROSN 2.27,
 PLZL 29.05, TATN 11.61, SNGS 0.85, SBER 37.64, VTBR 9.71. Приёмка board_reco ≤ record−12ТД: **7/7
 PASS**, медиана запаса 39 кал. дн (мин 29). Плюс 7 имён ОТКАЗались от дивиденда за 2025 (GAZP GMKN
