@@ -282,13 +282,25 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
     return allev, declined
 
 
-def main() -> int:
+FEED_COLUMNS = ["ticker", "record_date", "ex_date", "board_reco_date", "agm_date",
+                "value", "status", "source_url", "as_of", "confidence", "notes"]
+
+
+def feed_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return (feed, passed, declined). `feed` = forward rows (record_date >= today-30d) to write to
+    the CSV; `passed` = extracted-but-already-passed records (record_date < floor); `declined` =
+    names that refused a dividend. Shared by main() and the scheduled refresh entry point so both go
+    through exactly one build path (deterministic -> idempotent)."""
     allev, declined = build()
     if allev.empty:
-        feed, passed = allev, allev
-    else:
-        feed = allev[allev["_rec"] >= RECENT_FLOOR].drop(columns="_rec").reset_index(drop=True)
-        passed = allev[allev["_rec"] < RECENT_FLOOR].drop(columns="_rec").reset_index(drop=True)
+        return allev, allev, declined
+    feed = allev[allev["_rec"] >= RECENT_FLOOR].drop(columns="_rec").reset_index(drop=True)
+    passed = allev[allev["_rec"] < RECENT_FLOOR].drop(columns="_rec").reset_index(drop=True)
+    return feed, passed, declined
+
+
+def main() -> int:
+    feed, passed, declined = feed_frames()
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     feed.to_csv(OUT_CSV, index=False, encoding="utf-8")
 
