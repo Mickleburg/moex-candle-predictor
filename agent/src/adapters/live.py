@@ -1,11 +1,13 @@
 """Live block adapters — call the real blocks (read-only) and validate their JSON.
 
-- LiveSleeve / LiveCombiner import the ml + risk_manager PUBLIC functions (the same handshake
-  risk_manager/scripts/demo_combine_h9.py uses) — read-only, no edits to their code. Imports
-  are lazy so the orchestrator core stays stdlib-only until the live path is actually used.
-- LiveBackend / LiveExecution shell out to the backend/execution block CLIs (parallel chats)
-  via configured commands and parse the contract JSON they emit. Until those CLIs exist, the
-  registry keeps these blocks on the mock path; LiveExecution refuses to silently no-op.
+- LiveSleeve shells out to the ML serving CLI `ml/scripts/predict_dividend_sleeve.py --out -`
+  (the process-boundary seam the ML block built for us) so NO pandas/ML internals enter the
+  stdlib-only orchestrator core.
+- LiveCombiner imports risk_manager's pure-Python combiner + ml risk_analytics (the same
+  handshake risk_manager/scripts/demo_combine_h9.py uses) — read-only, lazy import.
+- LiveBackend calls the backend block's functions in-process (ingest/integrity/store).
+- LiveExecution drives the real execution `ExecutionEngine` in-process (discipline + dup-ledger
+  + audit + paper broker), or a configured subprocess command if the block adds a JSON CLI.
 
 Everything below is INFORMATION flowing on contracts; is_production stays false until sign-off.
 """
@@ -36,25 +38,23 @@ def _run_json_cmd(command: list[str], payload: Optional[dict] = None, timeout: f
 
 
 class LiveSleeve:
-    """The real ML H9 sleeve: load_panels -> build_sleeve_signal(as_of)."""
+    """The real ML H9 sleeve via its serving CLI seam — keeps pandas/ML out of the agent core.
+
+    Shells out to `python ml/scripts/predict_dividend_sleeve.py --as-of <date> --out -`, which
+    emits a validated `sleeve_signal` JSON on stdout. `command` defaults to running that script
+    with the orchestrator's own interpreter (which carries the data deps on the VDS); override
+    blocks.sleeve.command to pin a specific interpreter/path.
+    """
+
+    DEFAULT_SCRIPT = REPO_ROOT / "ml" / "scripts" / "predict_dividend_sleeve.py"
 
     def __init__(self, universe: list[str], timeframe: str = "1D",
-                 model_version: str = "h9_dividend_runup_v1"):
-        self._universe = universe
-        self._timeframe = timeframe
-        self._model_version = model_version
+                 model_version: str = "h9_dividend_runup_v1",
+                 command: Optional[list[str]] = None):
+        self._command = command or [sys.executable, str(self.DEFAULT_SCRIPT)]
 
     def build_sleeve(self, as_of: str) -> dict:
-        import pandas as pd  # lazy: heavy dep only on the live path
-        sys.path.insert(0, str(REPO_ROOT / "ml"))
-        from src.features.cross_sectional import load_panels  # type: ignore
-        from src.service.dividend_sleeve import build_sleeve_signal, load_dividend_calendar  # type: ignore
-
-        panel, _, _ = load_panels(self._universe, timeframe=self._timeframe)
-        calendar = load_dividend_calendar()
-        ts = pd.Timestamp(as_of[:19] if "T" in as_of else as_of, tz="Europe/Moscow") \
-            if not str(as_of).endswith(("+03:00",)) else pd.Timestamp(as_of)
-        sig = build_sleeve_signal(panel, calendar, ts, model_version=self._model_version)
+        sig = _run_json_cmd([*self._command, "--as-of", str(as_of)[:10], "--out", "-"])
         return contracts.validate(sig, "sleeve_signal")
 
 
@@ -90,6 +90,12 @@ def _as_of_date(as_of: str):
     """Parse the YYYY-MM-DD prefix of an as_of timestamp to a date."""
     import datetime as _dt
     return _dt.date.fromisoformat(str(as_of)[:10])
+
+
+def _resolve(path: str) -> Path:
+    """Resolve a config path against the repo root unless it is already absolute."""
+    p = Path(path)
+    return p if p.is_absolute() else (REPO_ROOT / p)
 
 
 class LiveBackend:
@@ -130,23 +136,62 @@ class LiveBackend:
 
 
 class LiveExecution:
-    """execution block via its CLI (parallel chat). Configured command in blocks.execution.
+    """The real execution block — drives `execution.src.engine.ExecutionEngine` in-process.
 
-    The command receives the reconciliation request (risk_book + current book + prices +
-    capital + mode) as JSON on stdin and must return {orders, reports, positions, rejected}.
-    Refuses to run if unconfigured — we never silently skip real execution.
+    The engine owns reconciliation, the H9 −12/−2 discipline check, lot rounding (MOEX lot
+    sizes), the idempotent duplicate-order ledger, the paper broker (sim) and the audit log.
+    The agent persists the resulting book + per-sleeve P&L. `mode` maps dry-run/paper/live;
+    live is additionally gated inside execution (allow_live + EXECUTION_ALLOW_LIVE=1).
+
+    If blocks.execution.command is set, a subprocess CLI is used instead (JSON request on
+    stdin -> {orders, reports, positions, rejected}) for when execution adds such a CLI.
     """
 
     def __init__(self, cfg: dict):
         self._command = cfg.get("command")
+        self._broker_backend = cfg.get("broker_backend", "sim")
+        self._allow_live = bool(cfg.get("allow_live", False))
+        self._state_dir = cfg.get("state_dir")
+        self._audit_dir = cfg.get("audit_dir")
 
     def reconcile_and_execute(self, *, risk_book: dict, positions: list[dict],
                               prices: dict[str, float], capital: float, mode: str,
                               trade_date: str, phase: str) -> ExecutionResult:
-        if not self._command:
-            raise RuntimeError(
-                "block_mode=live but blocks.execution.command is unset — the execution block "
-                "CLI is not wired yet. Keep execution on the mock path until it lands.")
+        if self._command:
+            return self._via_cli(risk_book, positions, prices, capital, mode, trade_date, phase)
+        return self._via_engine(risk_book, positions, prices, capital, mode)
+
+    def _via_engine(self, risk_book: dict, positions: list[dict], prices: dict[str, float],
+                    capital: float, mode: str) -> ExecutionResult:
+        from execution.src.config import ExecutionConfig, Mode  # type: ignore
+        from execution.src.engine import ExecutionEngine  # type: ignore
+
+        cfg = ExecutionConfig(mode=Mode(mode), broker_backend=self._broker_backend,
+                              capital=capital, allow_live=self._allow_live)
+        if self._state_dir:
+            cfg.state_dir = _resolve(self._state_dir)
+        if self._audit_dir:
+            cfg.audit_dir = _resolve(self._audit_dir)
+        engine = ExecutionEngine(cfg)
+
+        snapshot = {"positions": [{"ticker": p["ticker"], "lots": int(p["lots"]), "avg_price": 0,
+                                   "market_price": 0, "market_value": 0, "unrealized_pnl": 0}
+                                  for p in positions]} if positions else None
+        # on_critical='warn': the agent owns the kill-switch/halt; execution findings are surfaced,
+        # not auto-killed (auto-kill would wedge future cycles via its KILL file).
+        res = engine.run_cycle(risk_book, prices, current_positions=snapshot, on_critical="warn")
+        for rep in res.reports:
+            contracts.validate(rep, "execution_report")
+
+        rejected = [{"ticker": s.get("instrument", "*"), "reason": s.get("reason", "")}
+                    for s in res.skipped]
+        rejected += [{"ticker": "*", "reason": f"discipline:{f.get('rule', f)}"} for f in res.findings]
+        post_positions = ([] if mode == "dry-run"
+                          else _enrich_book(engine.broker.positions(), risk_book, prices))
+        return ExecutionResult(orders=res.submitted, reports=res.reports,
+                               positions=post_positions, rejected=rejected)
+
+    def _via_cli(self, risk_book, positions, prices, capital, mode, trade_date, phase) -> ExecutionResult:
         req = {"risk_book": risk_book, "positions": positions, "prices": prices,
                "capital": capital, "mode": mode, "trade_date": trade_date, "phase": phase}
         out = _run_json_cmd([*self._command, "--mode", mode], payload=req)
@@ -156,6 +201,24 @@ class LiveExecution:
             contracts.validate(order, "order_request")
         return ExecutionResult(orders=out.get("orders", []), reports=out.get("reports", []),
                                positions=out.get("positions", []), rejected=out.get("rejected", []))
+
+
+def _enrich_book(broker_positions: dict[str, int], risk_book: dict,
+                 prices: dict[str, float]) -> list[dict]:
+    """Turn execution's signed lot map into the agent's position rows, re-attaching the sleeve
+    attribution + hedge flag from the risk_book (execution does not track those)."""
+    hedge = {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
+    sc = {p["ticker"]: p.get("sleeve_contributions", {}) for p in risk_book.get("net_positions", [])}
+    out: list[dict] = []
+    for ticker, lots in broker_positions.items():
+        if not lots:
+            continue
+        price = prices.get(ticker)
+        out.append({"ticker": ticker, "lots": int(lots),
+                    "avg_price": round(price, 4) if price else 0.0,
+                    "last_price": round(price, 4) if price else None,
+                    "is_hedge": ticker in hedge, "sleeve_contributions": sc.get(ticker, {})})
+    return out
 
 
 def _prices_from_store(universe: list[str], as_of: str, timeframe: str = "1D") -> dict[str, float]:

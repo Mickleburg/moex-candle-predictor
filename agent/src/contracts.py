@@ -38,19 +38,32 @@ def _has_jsonschema() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
+def _registry():
+    """A `referencing` Registry of every contract schema keyed by '<name>.schema.json', so
+    cross-schema $refs (e.g. agent_cycle_result -> order_request.schema.json) resolve in-memory.
+
+    Uses the modern `referencing` API (jsonschema >= 4.18), replacing the deprecated RefResolver.
+    """
+    from referencing import Registry, Resource
+    from referencing.jsonschema import DRAFT202012
+
+    resources = []
+    for path in CONTRACTS_DIR.glob("*.schema.json"):
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        resources.append((path.name, Resource(contents=schema, specification=DRAFT202012)))
+    return Registry().with_resources(resources)
+
+
 def validate(payload: dict[str, Any], contract: str) -> dict[str, Any]:
     """Validate `payload` against `contract` (e.g. 'risk_book'). Returns it on success."""
     schema = _schema(contract)
     if _has_jsonschema():
         import jsonschema
-        from jsonschema import Draft202012Validator, RefResolver
+        from jsonschema import Draft202012Validator
 
-        store = {f"{contract}.schema.json": schema}
-        resolver = RefResolver(
-            base_uri=f"file:///{CONTRACTS_DIR.as_posix()}/", referrer=schema, store=store
-        )
         try:
-            jsonschema.Draft202012Validator(schema, resolver=resolver).validate(payload)
+            Draft202012Validator(schema, registry=_registry()).validate(payload)
         except jsonschema.ValidationError as exc:  # pragma: no cover - exercised via live deps
             raise ContractError(f"{contract}: {exc.message}") from exc
         return payload

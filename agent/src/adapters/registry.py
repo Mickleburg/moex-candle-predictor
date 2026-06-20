@@ -46,7 +46,8 @@ def build_adapters(config: AgentConfig) -> Adapters:
         from .live import LiveSleeve
         sleeve: SleeveAdapter = LiveSleeve(
             config.universe, timeframe=config.timeframe,
-            model_version=sleeve_cfg.get("model_version", "h9_dividend_runup_v1"))
+            model_version=sleeve_cfg.get("model_version", "h9_dividend_runup_v1"),
+            command=sleeve_cfg.get("command"))
     else:
         sleeve = mock.MockSleeve(model_version=sleeve_cfg.get("model_version",
                                                               "h9_dividend_runup_v1_mock"))

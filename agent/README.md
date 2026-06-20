@@ -22,8 +22,9 @@ realises each one.
 | # | Step | Block (adapter) | Property |
 |---|------|-----------------|----------|
 | 1 | ingest today's candles + market context | backend | (1) |
+| 2 | refresh the upcoming-dividend feed (best-effort; failure alerts, never blocks) | llm | (1)(4) |
 | 3 | data-integrity gate — **HALT ⇒ do not trade** | backend | (2) |
-| 4 | ML sleeve `build_sleeve_signal(as_of)` → `sleeve_signal` | ml | (5) |
+| 4 | ML sleeve `predict_dividend_sleeve.py --out -` → `sleeve_signal` | ml | (5) |
 | 5 | combiner: net × vol-target × **H5 regime gate** × limits × hedge → `risk_book` | risk_manager | (5) |
 | 6 | reconcile vs current book → LIMIT delta-orders (paper) | execution | (5) |
 | 7 | persist book + orders + **per-sleeve P&L attribution** + shadow log | agent/state | (2)(4) |
@@ -69,9 +70,13 @@ today; flip to live as each block is ready.
 | Block | live path | mock path |
 |-------|-----------|-----------|
 | backend | `backend.ingest`/`backend.integrity`/`backend.store` in-process (or CLI) | healthy/HALT-injectable stub + synthetic prices |
-| sleeve (ml) | `ml…dividend_sleeve.build_sleeve_signal` | canned long book + hedge rec |
+| sleeve (ml) | `ml/scripts/predict_dividend_sleeve.py --out -` (subprocess seam — no pandas in the agent core) | canned long book + hedge rec |
 | combiner (risk_manager) | `risk_manager.src.combine` + ml `risk_analytics` | self-contained netting + regime/vol knobs |
-| execution | execution-block CLI (paper→live) | deterministic paper broker (LIMIT, lot-rounding, fills) |
+| execution | the real `execution.ExecutionEngine` in-process (discipline −12/−2, lot rounding, dup-ledger, audit, paper broker) | deterministic paper broker stub |
+
+The default config runs **execution live (paper sim)** + the other blocks mock, so the cycle goes
+through real execution-block code out of the box; flip the rest to `live` as data is seeded. The
+trading calendar is a re-export of the canonical `backend.trading_calendar` (one source of truth).
 
 ## Usage
 
