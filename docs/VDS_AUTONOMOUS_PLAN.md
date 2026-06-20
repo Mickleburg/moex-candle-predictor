@@ -63,8 +63,10 @@ H9-валидация (эдж/no-lookahead/P0) · risk_manager-комбинат�
    graceful fallback на np.busday_count с warning, если backend не на path). Регрессии нет (июль-2026
    без праздников → live-сигналы идентичны: smoke 19/19, sim hedged +0.526/IS +0.84, handshake 5 имён);
    майско-июньские праздники теперь корректно пропускаются (May20→Jun15: 18→17, skip 12 июня).
-2. ⏳ **Свежий ценовой панель до сегодня + сверка live inverse-vol.** Ждёт автономный ingest backend-чата
-   (панель сейчас по 2026-06-16). Сверка: `target_positions` на свежей панели воспроизводит размеры монитора.
+2. ✅ **ВЫПОЛНЕНО. Свежий ценовой панель + сверка live inverse-vol.** backend прогнал первый EOD-ingest →
+   store до 2026-06-19 (1H-паркеты обновлены). Панель свежая; live-сайзинг больше НЕ клампится
+   (`vol_pos_clamped=False`); слив сайзит на актуальных vol (06-25: 3 лонга, 07-06: 7). **Все ML-шаги 1-5
+   H9 закрыты.** Интеграция проверена — `docs/INTEGRATION_AUDIT_2026-06-20.md`.
 3. ✅ **ВЫПОЛНЕНО. Realized-P&L shadow-гейт** — `ml/scripts/h9_shadow_pnl.py`. Методология идентична
    `runup_capture` (cross-check OK). IS-бенчмарк n=117 net **+1.24%** %pos 0.65 dose-response держится;
    FORWARD ≥2025 n=12 net **−0.93%** dose-инвертирована, не отделён от placebo. **Гейт NOT MET** →
