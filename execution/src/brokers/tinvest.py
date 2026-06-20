@@ -75,7 +75,7 @@ class TInvestBroker(BrokerAdapter):
         body = {
             "figi": self._figi(order["ticker"]),
             "quantity": str(order["quantity_lots"]),
-            "price": _to_quotation(order["limit_price"]),
+            "price": _to_quotation(_snap_price(order["ticker"], float(order["limit_price"]))),
             "direction": "ORDER_DIRECTION_BUY" if order["side"] == "BUY" else "ORDER_DIRECTION_SELL",
             "accountId": self.account_id,
             "orderType": "ORDER_TYPE_LIMIT",
@@ -98,6 +98,18 @@ class TInvestBroker(BrokerAdapter):
 
     def cancel_all(self) -> list[dict]:
         return [self.cancel(coid) for coid in list(self._open)]
+
+
+def _snap_price(ticker: str, price: float) -> float:
+    """Snap a limit price to the instrument's MINSTEP grid via backend metadata (no-op if absent).
+
+    MOEX rejects limit prices off the price step; backend owns the per-instrument step.
+    """
+    try:
+        from backend.instruments import round_price  # type: ignore
+        return float(round_price(ticker, price))
+    except Exception:
+        return price
 
 
 def _to_quotation(price: float) -> dict:

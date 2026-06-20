@@ -20,7 +20,7 @@ from .brokers import BrokerAdapter, make_broker
 from .config import ExecutionConfig, Mode
 from .discipline import DisciplineChecker
 from .reconcile import reconcile
-from .trading_calendar import TradingCalendar, _as_date
+from .trading_calendar import TradingCalendar, _as_date, default_trading_calendar
 
 
 @dataclass
@@ -51,6 +51,83 @@ def positions_from_snapshot(snapshot: dict | None) -> dict[str, int]:
     return {p["ticker"]: int(p["lots"]) for p in snapshot.get("positions", [])}
 
 
+def _update_position(lots: int, avg: float, fill_signed: int, price: float) -> tuple[int, float]:
+    """Apply a signed fill at ``price`` to a (lots, avg_price) position; return the new pair."""
+    new_lots = lots + fill_signed
+    if lots == 0 or (lots > 0) == (fill_signed > 0):          # opening or adding to the same side
+        notional = abs(lots) * avg + abs(fill_signed) * price
+        new_avg = notional / abs(new_lots) if new_lots != 0 else 0.0
+    elif abs(fill_signed) <= abs(lots):                        # reducing the existing side
+        new_avg = avg
+    else:                                                      # crossing through zero
+        new_avg = price
+    return new_lots, (new_avg if new_lots != 0 else 0.0)
+
+
+def _resulting_book(positions: list[dict], prices: dict[str, float], risk_book: dict,
+                    result: "CycleResult") -> list[dict]:
+    """Book AFTER fills: current positions + FILLED reports, enriched from the risk_book.
+
+    Shape matches what the orchestrator's `_replace_book` expects
+    ({ticker, lots, avg_price, last_price, is_hedge, sleeve_contributions}). PLACED (resting live
+    limit) / DRY_RUN reports do not move the book — only FILLED (paper) does.
+    """
+    meta: dict[str, dict] = {}
+    for p in risk_book.get("net_positions", []):
+        meta[p["ticker"]] = {"is_hedge": False, "sector": p.get("sector"),
+                             "sleeve_contributions": p.get("sleeve_contributions", {})}
+    for leg in (risk_book.get("hedge") or {}).get("legs", []):
+        meta[leg["instrument"]] = {"is_hedge": True, "sector": leg["instrument"],
+                                   "sleeve_contributions": {}}
+
+    book: dict[str, dict] = {}
+    for p in positions:
+        book[p["ticker"]] = {"lots": int(p.get("lots", 0)),
+                             "avg_price": float(p.get("avg_price", 0.0) or 0.0)}
+
+    for rep, order in zip(result.reports, result.submitted):
+        if rep["status"] != "FILLED":
+            continue
+        t = rep["ticker"]
+        filled = int(rep["filled_quantity_lots"])
+        price = float(rep["avg_fill_price"] if rep["avg_fill_price"] is not None else order["limit_price"])
+        signed = filled if order["side"] == "BUY" else -filled
+        cur = book.get(t, {"lots": 0, "avg_price": 0.0})
+        new_lots, new_avg = _update_position(cur["lots"], cur["avg_price"], signed, price)
+        book[t] = {"lots": new_lots, "avg_price": new_avg}
+
+    out: list[dict] = []
+    for t, b in book.items():
+        if b["lots"] == 0:
+            continue
+        m = meta.get(t, {})
+        lp = prices.get(t)
+        out.append({"ticker": t, "lots": int(b["lots"]), "avg_price": round(float(b["avg_price"]), 6),
+                    "last_price": float(lp) if lp is not None else None,
+                    "is_hedge": bool(m.get("is_hedge", False)),
+                    "sleeve_contributions": m.get("sleeve_contributions", {})})
+    return sorted(out, key=lambda x: x["ticker"])
+
+
+def _ticker_from_coid(client_order_id: str) -> str:
+    """Recover the ticker from a deterministic client_order_id (exec-DATE-TICKER-SIDE-QTY)."""
+    parts = client_order_id.split("-")
+    return parts[2] if len(parts) >= 5 else client_order_id
+
+
+def _collect_rejected(result: "CycleResult") -> list[dict]:
+    """[{ticker, reason}] for everything not turned into a live order this cycle."""
+    rejected: list[dict] = []
+    for sk in result.skipped:
+        rejected.append({"ticker": sk.get("instrument"), "reason": sk.get("reason")})
+    for coid in result.duplicates:
+        rejected.append({"ticker": _ticker_from_coid(coid), "reason": "duplicate_intent"})
+    for f in result.findings:
+        if f.get("severity") == "critical":
+            rejected.append({"ticker": f.get("instrument"), "reason": f.get("message")})
+    return rejected
+
+
 class ExecutionEngine:
     def __init__(
         self,
@@ -61,7 +138,7 @@ class ExecutionEngine:
     ) -> None:
         self.config = config or ExecutionConfig()
         self.broker = broker or make_broker(self.config)
-        self.calendar = calendar or TradingCalendar()
+        self.calendar = calendar or default_trading_calendar()
         self.audit = audit or AuditLog(self.config.audit_dir, self.config.is_production)
         self.checker = DisciplineChecker(self.config, self.calendar)
         self.config.state_dir = Path(self.config.state_dir)
@@ -155,6 +232,37 @@ class ExecutionEngine:
 
         self.audit.record("cycle_done", {"as_of": as_of, "summary": result.summary_line()})
         return result
+
+    # --- orchestrator seam ----------------------------------------------------------
+    def reconcile_and_execute(
+        self,
+        *,
+        risk_book: dict,
+        positions: list[dict],
+        prices: dict[str, float],
+        anchors: dict[str, object] | None = None,
+        on_critical: str = "halt",
+    ) -> dict:
+        """One EOD reconciliation+execution, in the envelope the agent orchestrator consumes.
+
+        Mirrors `agent/src/adapters/live.py::LiveExecution.reconcile_and_execute`: takes the target
+        `risk_book`, the current book (`positions`), latest `prices` and the already-configured
+        capital/mode, and returns ``{orders, reports, positions, rejected}`` — orders are
+        `order_request`s, reports are `execution_report`s, positions is the book AFTER fills, rejected
+        is ``[{ticker, reason}]``. This is what the `serve` CLI wraps with stdin/stdout JSON.
+        """
+        current = {"positions": [{"ticker": p["ticker"], "lots": int(p.get("lots", 0))}
+                                 for p in positions]}
+        res = self.run_cycle(risk_book, prices, current_positions=current,
+                             anchors=anchors, on_critical=on_critical)
+        return {
+            "orders": res.submitted,
+            "reports": res.reports,
+            "positions": _resulting_book(positions, prices, risk_book, res),
+            "rejected": _collect_rejected(res),
+            "halted": res.halted,
+            "is_production": res.is_production,
+        }
 
     # --- season replay --------------------------------------------------------------
     def run_season(

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from .config import ExecutionConfig
-from .trading_calendar import TradingCalendar, _as_date
+from .trading_calendar import TradingCalendar, _as_date, default_trading_calendar
 
 
 @dataclass
@@ -42,7 +42,7 @@ class DisciplineChecker:
     def __init__(self, config: ExecutionConfig | None = None,
                  calendar: TradingCalendar | None = None) -> None:
         self.config = config or ExecutionConfig()
-        self.calendar = calendar or TradingCalendar()
+        self.calendar = calendar or default_trading_calendar()
 
     def _td(self, as_of: date, anchor: date) -> int:
         return self.calendar.trading_days_between(as_of, anchor)
