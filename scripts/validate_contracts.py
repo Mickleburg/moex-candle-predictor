@@ -288,26 +288,45 @@ def validate_v3_sleeve_contracts(examples: dict[str, dict[str, Any]]) -> None:
     lim = book["limits"]
     if not (lim["name_caps_ok"] and lim["sector_caps_ok"] and lim["gross_cap_ok"]):
         raise AssertionError("risk_book example must respect every limit (name/sector/gross)")
-    for p in book["net_positions"]:
-        if abs(p["weight"]) > lim["max_name_weight"] + 1e-6:
-            raise AssertionError(f"risk_book {p['ticker']} exceeds max_name_weight")
-        if (p["weight"] > 0) != (p["side"] == "LONG"):
-            raise AssertionError(f"risk_book {p['ticker']} side/sign mismatch")
-    sec_gross: dict[str, float] = {}
-    for p in book["net_positions"]:
-        sec_gross[p["sector"]] = sec_gross.get(p["sector"], 0.0) + abs(p["weight"])
-    if any(g > lim["max_sector_gross"] + 1e-6 for g in sec_gross.values()):
-        raise AssertionError("risk_book per-sector gross exceeds max_sector_gross")
+    # both the live book and the shadow (gated-out) book must respect every cap + be sign-consistent
+    for label in ("net_positions", "shadow_positions"):
+        sec_gross: dict[str, float] = {}
+        for p in book.get(label, []):
+            if abs(p["weight"]) > lim["max_name_weight"] + 1e-6:
+                raise AssertionError(f"risk_book {label} {p['ticker']} exceeds max_name_weight")
+            if (p["weight"] > 0) != (p["side"] == "LONG"):
+                raise AssertionError(f"risk_book {label} {p['ticker']} side/sign mismatch")
+            sec_gross[p["sector"]] = sec_gross.get(p["sector"], 0.0) + abs(p["weight"])
+        if any(g > lim["max_sector_gross"] + 1e-6 for g in sec_gross.values()):
+            raise AssertionError(f"risk_book {label} per-sector gross exceeds max_sector_gross")
     rs = book["risk_scalars"]
     hedge_gross = sum(abs(leg["weight"]) for leg in book["hedge"]["legs"])
     if not math.isclose(rs["total_gross"], rs["directional_gross"] + hedge_gross, abs_tol=1e-4):
-        raise AssertionError("risk_book total_gross != directional_gross + hedge gross")
+        raise AssertionError("risk_book total_gross != directional_gross + live hedge gross")
     if book["hedge"]["mode"] not in HEDGE_MODES:
         raise AssertionError(f"risk_book hedge.mode invalid: {book['hedge']['mode']}")
     # Linkage: the book's sleeve provenance includes the sleeve_signal's sleeve.
     if sleeve["sleeve"] not in {s["sleeve"] for s in book["sleeves"]}:
         raise AssertionError("risk_book.sleeves must record the sleeve_signal provenance")
-    print("risk_book: netting + limits + hedge + sleeve linkage OK")
+
+    # Shadow gate (invariants #9/#4): every sleeve has a gating verdict; a NON-production sleeve must
+    # be SHADOW (0 live capital). The H9 example sleeve is is_production=false -> must be gated out.
+    gating = {g["sleeve"]: g for g in book.get("gating", [])}
+    book_sleeves = {s["sleeve"] for s in book["sleeves"]}
+    if set(gating) != book_sleeves:
+        raise AssertionError("risk_book.gating must cover exactly the book's sleeves")
+    for sid, g in gating.items():
+        if g["capital_state"] not in ("live", "shadow"):
+            raise AssertionError(f"risk_book gating {sid} capital_state invalid")
+        if g["is_production"] is False and g["capital_state"] != "shadow":
+            raise AssertionError(f"risk_book gating {sid}: non-production sleeve must be shadow (0 live)")
+    live_sleeves = {sid for sid, g in gating.items() if g["capital_state"] == "live"}
+    live_contrib = {s for p in book["net_positions"] for s in p.get("sleeve_contributions", {})}
+    if not live_contrib.issubset(live_sleeves):
+        raise AssertionError("risk_book.net_positions carry capital from a shadow-gated sleeve")
+    if not live_sleeves and rs["directional_gross"] not in (0, 0.0):
+        raise AssertionError("risk_book: no live sleeve but directional_gross != 0")
+    print("risk_book: netting + limits + hedge + sleeve linkage + shadow gate OK")
 
 
 def validate_supported_tickers() -> None:

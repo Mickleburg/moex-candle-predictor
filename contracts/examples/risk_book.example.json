@@ -8,7 +8,22 @@
       "gross": 2.0
     }
   ],
-  "net_positions": [
+  "gating": [
+    {
+      "sleeve": "s3_event",
+      "strategy": "dividend_runup",
+      "capital_state": "shadow",
+      "is_production": false,
+      "gate": "NOT_MET",
+      "reason": "is_production=false"
+    }
+  ],
+  "net_positions": [],
+  "hedge": {
+    "mode": "sector",
+    "legs": []
+  },
+  "shadow_positions": [
     {
       "ticker": "SBER",
       "weight": 0.34,
@@ -37,7 +52,7 @@
       }
     }
   ],
-  "hedge": {
+  "shadow_hedge": {
     "mode": "sector",
     "legs": [
       {
@@ -52,12 +67,14 @@
   },
   "risk_scalars": {
     "target_book_vol_annual": 0.12,
-    "book_vol_estimate_annual": 0.081219,
-    "vol_scalar": 1.477486,
+    "book_vol_estimate_annual": 0.0,
+    "vol_scalar": 1.0,
     "exposure_scalar": 1.0,
     "regime_novel": false,
-    "directional_gross": 0.94,
-    "total_gross": 1.88
+    "directional_gross": 0,
+    "total_gross": 0,
+    "shadow_gross": 0.94,
+    "shadow_total_gross": 1.88
   },
   "limits": {
     "max_name_weight": 0.34,
@@ -66,13 +83,7 @@
     "name_caps_ok": true,
     "sector_caps_ok": true,
     "gross_cap_ok": true,
-    "binding": [
-      "name_cap:LKOH",
-      "name_cap:SBER",
-      "name_cap:TATN",
-      "sector_cap:MOEXOG",
-      "vol_target"
-    ]
+    "binding": []
   },
   "model_version": "risk_combiner_v0",
   "is_production": false
