@@ -18,6 +18,17 @@ REPO_ROOT = EXEC_ROOT.parent
 
 # Env var that must equal "1" to even consider live trading (belt-and-suspenders over allow_live).
 LIVE_ENV_FLAG = "EXECUTION_ALLOW_LIVE"
+# Runtime dirs are env-overridable so the VDS (systemd) and tests can redirect them off the repo.
+AUDIT_DIR_ENV = "EXECUTION_AUDIT_DIR"
+STATE_DIR_ENV = "EXECUTION_STATE_DIR"
+
+
+def _default_audit_dir() -> Path:
+    return Path(os.environ.get(AUDIT_DIR_ENV, EXEC_ROOT / "var" / "audit"))
+
+
+def _default_state_dir() -> Path:
+    return Path(os.environ.get(STATE_DIR_ENV, EXEC_ROOT / "var" / "state"))
 
 
 class Mode(str, Enum):
@@ -67,8 +78,8 @@ class ExecutionConfig:
     entry_offset: int = 12                 # H9: enter ~this many trading days before the anchor
     exit_offset: int = 2                   # H9: exit ~this many trading days before the anchor
     allow_live: bool = False               # must be True (and env flag set) to permit LIVE
-    audit_dir: Path = EXEC_ROOT / "var" / "audit"
-    state_dir: Path = EXEC_ROOT / "var" / "state"
+    audit_dir: Path = field(default_factory=_default_audit_dir)
+    state_dir: Path = field(default_factory=_default_state_dir)
     is_production: bool = False            # propagated onto every artifact; flips only after sign-off
 
     def lot_size(self, ticker: str) -> int:

@@ -35,6 +35,42 @@ live     ── real orders — REFUSED unless ALL of:
 
 There is no accidental live path: `make_broker` raises `PermissionError` if any gate is unmet.
 
+## Orchestrator integration — the `serve` seam (agent step 6)
+
+The agent invokes execution exactly the way it invokes the ML/risk_manager CLIs
+(`agent/src/adapters/live.py::LiveExecution`): it appends `--mode <mode>`, feeds a request envelope as
+JSON on **stdin**, and parses the result JSON from **stdout**. Only `serve` writes to stdout, and it
+writes JSON *only* (the human summary goes to stderr), so `json.loads(proc.stdout)` is safe.
+
+```
+stdin  request = {risk_book, positions, prices, capital, mode, trade_date, phase, [anchors]}
+stdout result  = {orders, reports, positions, rejected, halted, is_production}
+                  orders   -> order_request[]      reports -> execution_report[]
+                  positions-> book after fills      rejected-> [{ticker, reason}]
+```
+
+Wire it into `agent/config/agent_config.json` (then flip `blocks.execution.mode` off `mock`):
+
+```json
+"execution": {
+  "mode": "live",
+  "command": ["ml/.venv-win/Scripts/python.exe", "-m", "execution.src.cli", "serve"]
+}
+```
+
+On the Linux VDS the command is the same with that environment's interpreter, e.g.
+`["python", "-m", "execution.src.cli", "serve"]` (run from the repo root). The agent appends
+`--mode paper|live`; execution maps it to its mode and the live gate still applies. Manual check:
+
+```powershell
+Get-Content execution/examples/serve_request.example.json -Raw `
+  | & "ml\.venv-win\Scripts\python.exe" -m execution.src.cli serve --mode paper
+```
+
+Runtime dirs are env-overridable (`EXECUTION_STATE_DIR`, `EXECUTION_AUDIT_DIR`) so the VDS/systemd can
+place the dedupe ledger + audit off the repo; the kill-switch (`KILL` file) lives in the state dir, so
+`serve`, `kill`, and `unkill` must share it.
+
 ## What it does
 
 1. **Reconciliation** (`src/reconcile.py`) — `risk_book` weights × book capital ÷ reference price →
@@ -54,25 +90,37 @@ There is no accidental live path: `make_broker` raises `PermissionError` if any 
 5. **Paper↔sim reconciliation** — `engine.run_season()` replays a sequence of daily books through the
    simulator; the holdings trace matches the sleeve's −12/−2 window (one entry, no churn, one exit).
 
-## Trading calendar (seam, not a duplicate)
+## Trading calendar — the backend RU-holiday canon
 
-The canonical **RU-holiday** trading calendar is owned by the backend/data block (and the ML sleeve).
-`src/trading_calendar.py` provides only what execution needs locally — the **weekend-skip** policy and
-trading-day arithmetic — over an **injected** holiday set / predicate. In production the orchestrator
-passes the backend calendar in (`holidays=…` or `is_trading_day=…`); the default is weekday-only,
-which is already correct except across multi-day holiday clusters (May/June).
+The −12/−2 discipline counts trading days on the **same canon as the sleeve and monitor**:
+`default_trading_calendar()` delegates to `backend.trading_calendar` (RU holidays + the real IMOEX
+panel overlay) when importable, so the timing cannot drift on a private holiday list across the
+May–July record-date cluster. `trading_days_between` uses the `np.busday_count` `[start, end)`
+convention the sleeve uses (`td = trading_days_between(as_of, record_date)`). If backend is not
+importable (isolated env), execution falls back to a weekday-only `TradingCalendar` with the same
+counting convention; you can still inject holidays explicitly (`TradingCalendar(holidays=…)`).
+`active_calendar_source()` reports which is live (`backend_canon` vs `weekday_fallback`).
 
-## Instrument reference data (seam)
+## Instrument reference data (lot sizes / FIGI) — backend-first
 
-Lot sizes (`src/config.py::DEFAULT_LOT_SIZES`) and FIGI mapping are **defaults to be confirmed /
-overridden from backend instrument metadata** (MOEX ISS securities table) — execution is not the
-source of truth for instrument data. Sector/market hedge legs (`MOEX*`) are not directly lot-traded;
-in live they are worked via index futures/ETF (lot=1 here is a paper placeholder).
+`src/instruments.py::load_lot_sizes()` / `load_figi_map()` prefer a backend source and fall back to
+`config.DEFAULT_LOT_SIZES` (defaults to confirm) + an empty FIGI map. Execution is not the source of
+truth for instrument data. **Open dependency:** `backend.universe.Instrument` currently carries no
+`lot_size` / `figi`; when backend exposes them (a `backend.instruments.lot_sizes()/figi_map()` lookup,
+or a `lot_size` field on the universe), the loaders pick them up with no change here. Until then the
+live T-Invest path must be handed a FIGI map explicitly — it refuses to guess. Sector/market hedge
+legs (`MOEX*`) are not directly lot-traded; in live they are worked via index futures/ETF (lot=1 here
+is a paper placeholder).
 
 ## Usage
 
 ```powershell
 $PY = "ml\.venv-win\Scripts\python.exe"
+
+# Orchestrator seam: request envelope on stdin -> result JSON on stdout
+& $PY execution/scripts/demo_serve.py
+Get-Content execution/examples/serve_request.example.json -Raw `
+  | & $PY -m execution.src.cli serve --mode paper
 
 # Dry-run the example risk_book into delta orders (sends nothing)
 & $PY execution/scripts/demo_dry_run.py
@@ -82,16 +130,23 @@ $PY = "ml\.venv-win\Scripts\python.exe"
 # Replay the illustrative H9 run-up season through the paper simulator
 & $PY execution/scripts/demo_paper_season.py
 
+# Kill-switch (engage / clear)
+& $PY -m execution.src.cli kill --reason "manual stop"
+& $PY -m execution.src.cli unkill
+
 # Tests
 & $PY -m pytest execution/tests -q
 ```
 
 ## Acceptance (mapped)
 
+- ✅ documented CLI command emits `execution_report`s from the `risk_book` example: `serve` (stdin
+  envelope) returns `{orders, reports, …}` — see `demo_serve.py` / `test_serve.py`.
 - ✅ dry-run prints correct delta orders from the `risk_book` example, sends nothing.
+- ✅ −12/−2 discipline counts on the backend RU-holiday canon (`test_calendar_backend.py`).
 - ✅ paper (sim/sandbox) executes entry/exit on the −12/−2 discipline; full audit log; kill-switch
   cancels all + halts.
-- ✅ duplicate protection blocks a second order for the same intent.
+- ✅ duplicate protection blocks a second order for the same intent (within and across processes).
 - ✅ live path exists but is **blocked** without the explicit flag; `is_production=false` on artifacts.
 - ✅ paper season replay matches the sleeve's hold window (`test_paper_season.py`).
 - ✅ `python -m pytest ml/test_smoke.py` green; contract validation green (no contract changes).
@@ -103,18 +158,19 @@ execution/
   README.md            this file
   .env.example         secrets/flags template (copy to .env; .env is gitignored)
   src/
-    config.py          modes, lot sizes, sanity limits, live gate
-    trading_calendar.py weekend-skip + injectable RU-holiday seam
+    config.py          modes, lot sizes, sanity limits, live gate, env-overridable runtime dirs
+    trading_calendar.py backend RU-holiday canon (default) + weekday fallback, np.busday_count count
+    instruments.py     lot-size / FIGI loaders (backend-first, fall back to defaults)
     reconcile.py       risk_book + prices + positions -> delta LIMIT orders
     discipline.py      H9 -12/-2 entry/exit guard
     audit.py           append-only JSONL audit log
-    engine.py          cycle orchestration, dedupe, kill-switch, season replay
-    cli.py             dry-run / paper-season CLI
+    engine.py          cycle orchestration, reconcile_and_execute, dedupe, kill-switch, season replay
+    cli.py             serve (orchestrator seam) / dry-run / paper-season / kill / unkill
     brokers/           base ABC, DryRun, PaperBroker (sim), TInvestBroker (sandbox/live, gated)
-  examples/            prices + illustrative season
-  scripts/             demo_dry_run.py, demo_paper_season.py
-  tests/               reconcile, discipline, protections, season, contract conformance, calendar
-  var/                 runtime audit/state (gitignored)
+  examples/            prices, illustrative season, serve request envelope
+  scripts/             demo_serve.py, demo_dry_run.py, demo_paper_season.py
+  tests/               reconcile, discipline, protections, season, serve, contract conformance, calendar
+  var/                 runtime audit/state (gitignored; override via EXECUTION_STATE_DIR/AUDIT_DIR)
 ```
 
 ## Discipline

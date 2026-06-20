@@ -1,0 +1,27 @@
+{
+  "_comment": "Example reconciliation request envelope the agent orchestrator feeds execution on stdin (agent/src/adapters/live.py::LiveExecution). `positions` is the current book (empty here -> every leg is an entry). The `serve` CLI returns {orders, reports, positions, rejected}. mode=paper -> internal simulator fills at the limit. anchors is optional (enables the -12/-2 discipline guard).",
+  "mode": "paper",
+  "trade_date": "2025-06-02",
+  "phase": "eod",
+  "capital": 100000000,
+  "positions": [],
+  "prices": {
+    "SBER": 312.4, "LKOH": 7050.0, "TATN": 695.5, "MOEXFN": 11800.0, "MOEXOG": 8450.0
+  },
+  "risk_book": {
+    "as_of": "2025-06-02 00:00:00+03:00",
+    "net_positions": [
+      { "ticker": "SBER", "weight": 0.34, "side": "LONG", "sector": "MOEXFN", "sleeve_contributions": { "s3_event": 0.34 } },
+      { "ticker": "LKOH", "weight": 0.30, "side": "LONG", "sector": "MOEXOG", "sleeve_contributions": { "s3_event": 0.36 } },
+      { "ticker": "TATN", "weight": 0.30, "side": "LONG", "sector": "MOEXOG", "sleeve_contributions": { "s3_event": 0.30 } }
+    ],
+    "hedge": {
+      "mode": "sector",
+      "legs": [
+        { "instrument": "MOEXFN", "weight": -0.34 },
+        { "instrument": "MOEXOG", "weight": -0.60 }
+      ]
+    },
+    "is_production": false
+  }
+}

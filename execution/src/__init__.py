@@ -17,11 +17,12 @@ from __future__ import annotations
 
 from .audit import AuditLog
 from .brokers import BrokerAdapter, DryRunBroker, PaperBroker, make_broker
-from .trading_calendar import TradingCalendar
 from .config import DEFAULT_LOT_SIZES, ExecutionConfig, Mode, SanityLimits
 from .discipline import DisciplineChecker, DisciplineFinding
 from .engine import CycleResult, ExecutionEngine
+from .instruments import load_figi_map, load_lot_sizes
 from .reconcile import DeltaOrder, reconcile
+from .trading_calendar import TradingCalendar, active_calendar_source, default_trading_calendar
 
 __all__ = [
     "AuditLog",
@@ -38,6 +39,10 @@ __all__ = [
     "PaperBroker",
     "SanityLimits",
     "TradingCalendar",
+    "active_calendar_source",
+    "default_trading_calendar",
+    "load_figi_map",
+    "load_lot_sizes",
     "make_broker",
     "reconcile",
 ]

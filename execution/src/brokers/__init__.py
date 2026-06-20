@@ -17,19 +17,26 @@ __all__ = [
 ]
 
 
+def _default_figi_map() -> dict[str, str]:
+    from ..instruments import load_figi_map
+    return load_figi_map()
+
+
 def make_broker(config: ExecutionConfig, **broker_kwargs) -> BrokerAdapter:
     """Construct the adapter for ``config.mode``, enforcing the live gate.
 
     DRY_RUN -> DryRunBroker (sends nothing).
     PAPER   -> PaperBroker (internal sim, default) or TInvest sandbox if broker_backend=="tinvest".
-    LIVE    -> TInvest production, but ONLY if config.live_enabled() (allow_live AND env flag).
-               Any gate not satisfied raises PermissionError — there is no accidental live path.
+    LIVE    -> TInvest production, but ONLY if config.live_enabled() (allow_live AND env flag) AND
+               every backend FIGI is verified. Any gate unmet raises PermissionError — there is no
+               accidental live path. The T-Invest paths auto-load the FIGI map from backend metadata.
     """
     if config.mode is Mode.DRY_RUN:
         return DryRunBroker()
 
     if config.mode is Mode.PAPER:
         if config.broker_backend == "tinvest":
+            broker_kwargs.setdefault("figi_by_ticker", _default_figi_map())
             return TInvestBroker(sandbox=True, **broker_kwargs)
         return PaperBroker()
 
@@ -40,6 +47,12 @@ def make_broker(config: ExecutionConfig, **broker_kwargs) -> BrokerAdapter:
                 f"{LIVE_ENV_FLAG}=1. Refusing to place real orders.")
         if config.broker_backend != "tinvest":
             raise PermissionError("LIVE requires broker_backend='tinvest' (a real broker).")
+        from ..instruments import figis_all_verified
+        if not figis_all_verified():
+            raise PermissionError(
+                "LIVE refused: backend reports unverified FIGIs. Verify them against a T-Invest "
+                "dump (backend.instruments.all_verified()) before trading real money.")
+        broker_kwargs.setdefault("figi_by_ticker", _default_figi_map())
         return TInvestBroker(sandbox=False, **broker_kwargs)
 
     raise ValueError(f"unknown mode: {config.mode}")

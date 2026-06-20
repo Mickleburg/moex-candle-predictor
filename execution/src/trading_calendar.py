@@ -86,10 +86,12 @@ class TradingCalendar:
         return d
 
     def trading_days_between(self, start: date | datetime | str, end: date | datetime | str) -> int:
-        """Signed count of trading days in (start, end]: positive if end is after start.
+        """Signed count of trading days in the half-open interval [start, end).
 
-        ``trading_days_between(t, ex)`` is the H9 "trading days until the anchor" used to decide the
-        -12/-2 window. Endpoints themselves are not counted; intermediate trading days are.
+        This mirrors ``numpy.busday_count`` (and the backend ``MoexTradingCalendar``) exactly, so the
+        H9 "trading days until the anchor" — ``trading_days_between(as_of, record_date)`` — is computed
+        on the SAME convention the sleeve/monitor use (``np.busday_count(as_of, rec)``). ``start`` is
+        counted if it trades; ``end`` is not. Negative if ``end < start``.
         """
         a, b = _as_date(start), _as_date(end)
         if a == b:
@@ -97,9 +99,38 @@ class TradingCalendar:
         sign = 1 if b > a else -1
         lo, hi = (a, b) if b > a else (b, a)
         count = 0
-        d = lo + timedelta(days=1)
-        while d <= hi:
+        d = lo
+        while d < hi:
             if self.is_trading_day(d):
                 count += 1
             d += timedelta(days=1)
         return sign * count
+
+
+def default_trading_calendar():
+    """The calendar execution uses by default: the **backend RU-holiday canon** if importable,
+    else the weekday-only fallback.
+
+    The −12/−2 discipline MUST count on the same trading-day canon as the sleeve and monitor, which
+    now share ``backend.trading_calendar`` (RU holidays + the real IMOEX panel overlay). We delegate
+    to that so execution never drifts on a private holiday list. The fallback (weekday-only) keeps the
+    block importable in an isolated environment without backend/pandas; both share the same
+    ``[start, end)`` counting convention, so they agree on every date that is a trading day.
+
+    The backend ``MoexTradingCalendar`` exposes a compatible ``is_trading_day`` / ``trading_days_between``,
+    so it is used directly (no adapter needed for the discipline path).
+    """
+    try:
+        from backend.trading_calendar import get_calendar  # type: ignore
+        return get_calendar()
+    except Exception:
+        return TradingCalendar()
+
+
+def active_calendar_source() -> str:
+    """Label for logging/README: which canon ``default_trading_calendar`` resolves to here."""
+    try:
+        import backend.trading_calendar  # type: ignore  # noqa: F401
+        return "backend_canon"
+    except Exception:
+        return "weekday_fallback"
