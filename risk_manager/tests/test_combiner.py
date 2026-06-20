@@ -1,7 +1,13 @@
-"""Unit tests for the risk_manager combiner (netting, regime gate, limits, hedge, contract render).
+"""Unit tests for the risk_manager combiner.
+
+Covers: netting, the shadow gate (invariants #9/#4: live iff production + forward gate MET),
+vol-target x regime gate, limits, sector/market hedge, per-sleeve correlation cap, contract render.
 
 Pure-dict inputs (no ml/ or data/ dependency) so the suite is fast and robust. One optional test
 exercises the LIVE 2022 shock case via the ML block when its data/deps are present, else skips.
+
+NOTE: `_sleeve(..., is_production=True)` by default so the risk-layer MATH is exercised on the LIVE
+book; the shadow-gate tests pass is_production=False (or a forward-P&L status) explicitly.
 """
 
 from __future__ import annotations
@@ -15,13 +21,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from risk_manager.src import CombinerConfig, combine, to_risk_decisions  # noqa: E402
+from risk_manager.src import (  # noqa: E402
+    CombinerConfig, combine, shadow_gate_status, to_risk_decisions,
+)
 
 CONTRACTS = REPO_ROOT / "contracts"
 
 
 def _sleeve(positions, sleeve="s3_event", strategy="dividend_runup", market_neutral=True,
-            is_production=False):
+            is_production=True):
     return {
         "sleeve": sleeve, "strategy": strategy, "as_of": "2025-06-02 00:00:00+03:00",
         "market_neutral": market_neutral,
@@ -50,7 +58,6 @@ def test_nets_same_ticker_across_sleeves():
                   {"ticker": "GAZP", "weight": -0.15, "leg": "short"}], sleeve="s2_macro")
     book = combine([s1, s2], _risk_analytics(["SBER", "GAZP"]), CombinerConfig(hedge_mode="none"))
     by = {p["ticker"]: p for p in book.net_positions}
-    # SBER netted 0.2 + 0.1 = 0.3 (pre-scale); sign positive, both sleeves attributed
     assert by["SBER"]["side"] == "LONG"
     assert set(by["SBER"]["sleeve_contributions"]) == {"s3_event", "s2_macro"}
     assert by["GAZP"]["side"] == "SHORT"
@@ -63,7 +70,76 @@ def test_opposite_legs_cancel():
     assert book.net_positions == []  # fully netted out
 
 
-# ── regime gate (H5) ────────────────────────────────────────────────────────────────────────
+# ── shadow gate (invariants #9 / #4) ──────────────────────────────────────────────────────────
+def test_nonproduction_sleeve_is_shadow_zero_live():
+    """H9 today: is_production=false -> SHADOW book, ZERO live capital, no risk_decisions."""
+    book = combine([_sleeve([{"ticker": "SBER", "weight": 0.3, "leg": "long"}],
+                            is_production=False)], _risk_analytics(["SBER"]))
+    assert book.net_positions == []                       # no live capital
+    assert book.risk_scalars["directional_gross"] == 0.0
+    assert book.risk_scalars["total_gross"] == 0.0
+    assert [p["ticker"] for p in book.shadow_positions] == ["SBER"]   # paper-tracked
+    assert book.risk_scalars["shadow_gross"] > 0
+    assert book.gating[0]["capital_state"] == "shadow"
+    assert book.gating[0]["gate"] == "NOT_MET"
+    assert book.is_production is False
+    assert to_risk_decisions(book) == []                 # nothing for execution to place
+
+
+def test_production_sleeve_is_live():
+    book = combine([_sleeve([{"ticker": "SBER", "weight": 0.3, "leg": "long"}],
+                            is_production=True)], _risk_analytics(["SBER"]))
+    assert [p["ticker"] for p in book.net_positions] == ["SBER"]
+    assert book.shadow_positions == []
+    assert book.gating[0]["capital_state"] == "live"
+    assert book.gating[0]["gate"] == "MET"
+
+
+def test_force_live_disables_gate():
+    cfg = CombinerConfig(require_production_for_live=False)
+    book = combine([_sleeve([{"ticker": "SBER", "weight": 0.3, "leg": "long"}],
+                            is_production=False)], _risk_analytics(["SBER"]), cfg)
+    assert [p["ticker"] for p in book.net_positions] == ["SBER"]   # gate disabled -> live
+    assert book.gating[0]["gate"] == "DISABLED"
+
+
+def test_forward_pnl_gate_forces_shadow_even_if_production():
+    """A signed-off sleeve with a NEGATIVE forward-P&L attribution stays shadow (gate NOT MET)."""
+    pos = [{"ticker": "SBER", "weight": 0.3, "leg": "long"}]
+    status = {"s3_event": {"gate": "NOT_MET", "reason": "forward n=12 net -0.93%"}}
+    book = combine([_sleeve(pos, is_production=True)], _risk_analytics(["SBER"]),
+                   sleeve_status=status)
+    assert book.net_positions == []
+    assert book.gating[0]["capital_state"] == "shadow"
+    # also via a raw forward_pnl number
+    book2 = combine([_sleeve(pos, is_production=True)], _risk_analytics(["SBER"]),
+                    sleeve_status={"s3_event": {"forward_pnl": -0.0093}})
+    assert book2.net_positions == []
+
+
+def test_shadow_gate_status_helper():
+    sig = _sleeve([{"ticker": "SBER", "weight": 0.3, "leg": "long"}], is_production=False)
+    g = shadow_gate_status(sig)
+    assert g["capital_state"] == "shadow" and g["gate"] == "NOT_MET"
+    g2 = shadow_gate_status({**sig, "is_production": True})
+    assert g2["capital_state"] == "live" and g2["gate"] == "MET"
+
+
+def test_book_is_production_reflects_live_sleeves():
+    pos = [{"ticker": "SBER", "weight": 0.3, "leg": "long"}]
+    assert combine([_sleeve(pos, is_production=False)], _risk_analytics(["SBER"])).is_production is False
+    assert combine([_sleeve(pos, is_production=True)], _risk_analytics(["SBER"])).is_production is True
+    # a non-production sleeve mixed in is shadow-gated, so it cannot taint the live book's flag
+    mixed = combine([_sleeve(pos, is_production=True),
+                     _sleeve([{"ticker": "GAZP", "weight": 0.2, "leg": "long"}],
+                             sleeve="s2_macro", is_production=False)],
+                    _risk_analytics(["SBER", "GAZP"]))
+    assert mixed.is_production is True
+    assert {p["ticker"] for p in mixed.net_positions} == {"SBER"}          # only the live sleeve
+    assert {p["ticker"] for p in mixed.shadow_positions} == {"GAZP"}       # shadow sleeve paper-only
+
+
+# ── regime gate (H5) on the live book ─────────────────────────────────────────────────────────
 def test_regime_gate_cuts_gross_when_novel():
     positions = [{"ticker": "SBER", "weight": 0.2, "leg": "long"},
                  {"ticker": "GAZP", "weight": 0.2, "leg": "long"}]
@@ -73,7 +149,6 @@ def test_regime_gate_cuts_gross_when_novel():
     gated = combine([_sleeve(positions)], _risk_analytics(tickers, exposure_scalar=0.2, novel=True), cfg)
     assert gated.risk_scalars["exposure_scalar"] == pytest.approx(0.2)
     assert gated.risk_scalars["regime_novel"] is True
-    # gross is cut by ~the exposure scalar
     assert gated.risk_scalars["directional_gross"] == pytest.approx(
         0.2 * normal.risk_scalars["directional_gross"], rel=1e-6)
     assert "regime_gate" in gated.limits["binding"]
@@ -88,14 +163,12 @@ def test_regime_gate_zero_exposure_empties_book():
 
 # ── limits ────────────────────────────────────────────────────────────────────────────────────
 def test_all_limits_respected():
-    # three names, two in the same sector -> name + sector + gross caps must all bind/hold
     positions = [{"ticker": "LKOH", "weight": 0.36, "leg": "long"},
                  {"ticker": "TATN", "weight": 0.30, "leg": "long"},   # LKOH+TATN = MOEXOG
                  {"ticker": "SBER", "weight": 0.34, "leg": "long"}]
     cfg = CombinerConfig(max_name_weight=0.34, max_sector_gross=0.60, max_gross=1.0)
     book = combine([_sleeve(positions)], _risk_analytics(["LKOH", "TATN", "SBER"]), cfg)
     assert book.limits["name_caps_ok"] and book.limits["sector_caps_ok"] and book.limits["gross_cap_ok"]
-    # explicit numeric checks
     for p in book.net_positions:
         assert abs(p["weight"]) <= cfg.max_name_weight + 1e-6
     sec = {}
@@ -107,11 +180,22 @@ def test_all_limits_respected():
 
 
 def test_name_cap_clips_even_with_vol_leverage():
-    # a single low-vol name with high vol_scalar must still be clipped to the name cap
     positions = [{"ticker": "SBER", "weight": 0.5, "leg": "long"}]
     cfg = CombinerConfig(max_name_weight=0.34, target_book_vol_annual=100.0, max_vol_leverage=1.5)
     book = combine([_sleeve(positions)], _risk_analytics(["SBER"], vol=0.001), cfg)
     assert book.net_positions[0]["weight"] == pytest.approx(0.34)
+
+
+def test_per_sleeve_gross_cap_correlation_cap():
+    """max_sleeve_gross caps any single sleeve's directional gross (correlation cap by sleeve-id)."""
+    big = _sleeve([{"ticker": "SBER", "weight": 0.5, "leg": "long"},
+                   {"ticker": "MTSS", "weight": 0.5, "leg": "long"}])   # sleeve gross 1.0
+    cfg = CombinerConfig(max_sleeve_gross=0.5, max_vol_leverage=1.0, target_book_vol_annual=100.0,
+                         hedge_mode="none")
+    book = combine([big], _risk_analytics(["SBER", "MTSS"]), cfg)
+    # the sleeve's gross was scaled to 0.5 before netting -> each name 0.25
+    assert book.risk_scalars["directional_gross"] == pytest.approx(0.5, abs=1e-6)
+    assert "sleeve_cap:s3_event" in book.limits["binding"]
 
 
 # ── hedge ─────────────────────────────────────────────────────────────────────────────────────
@@ -123,7 +207,6 @@ def test_sector_hedge_neutralizes_each_sector():
     book = combine([_sleeve(positions)], _risk_analytics(["LKOH", "TATN", "SBER"]), cfg)
     legs = {leg["instrument"]: leg["weight"] for leg in book.hedge["legs"]}
     assert book.hedge["mode"] == "sector"
-    # each sector index shorted by that sector's net long weight
     assert legs["MOEXOG"] == pytest.approx(-0.4, abs=1e-6)
     assert legs["MOEXFN"] == pytest.approx(-0.2, abs=1e-6)
 
@@ -140,13 +223,12 @@ def test_market_hedge_single_index_leg():
 
 
 def test_sleeve_suggested_hedge_is_dropped_for_book_hedge():
-    # H9 ships an IMOEX hedge leg; the combiner ignores it and builds its own (sector) hedge
     positions = [{"ticker": "SBER", "weight": 0.2, "leg": "long"},
                  {"ticker": "IMOEX", "weight": -0.2, "leg": "hedge"}]
     book = combine([_sleeve(positions)], _risk_analytics(["SBER"]),
                    CombinerConfig(hedge_mode="sector", max_vol_leverage=1.0, target_book_vol_annual=100.0))
     tickers = {p["ticker"] for p in book.net_positions}
-    assert "IMOEX" not in tickers                       # suggested hedge not treated as a directional name
+    assert "IMOEX" not in tickers
     assert book.hedge["legs"][0]["instrument"] == "MOEXFN"
 
 
@@ -160,7 +242,7 @@ def test_consumes_ranking_form_aggregated_signal():
             {"ticker": "LKOH", "score": 0.0, "rank": 2, "percentile": 0.5, "leg": "flat"},
             {"ticker": "GAZP", "score": -1.2, "rank": 3, "percentile": 0.05, "leg": "short"},
         ],
-        "market_neutral": True, "model_version": "xsec_v0", "is_production": False,
+        "market_neutral": True, "model_version": "xsec_v0", "is_production": True,
     }
     book = combine([agg], _risk_analytics(["SBER", "LKOH", "GAZP"]), CombinerConfig(hedge_mode="none"))
     by = {p["ticker"]: p for p in book.net_positions}
@@ -186,22 +268,17 @@ def test_risk_book_validates_against_schema():
     schema = json.loads((CONTRACTS / "risk_book.schema.json").read_text(encoding="utf-8"))
     positions = [{"ticker": "LKOH", "weight": 0.3, "leg": "long"},
                  {"ticker": "SBER", "weight": 0.3, "leg": "long"}]
-    book = combine([_sleeve(positions)], _risk_analytics(["LKOH", "SBER"]), CombinerConfig())
-    jsonschema.Draft202012Validator(schema).validate(book.to_dict())
-
-
-def test_is_production_false_unless_all_sleeves_production():
-    pos = [{"ticker": "SBER", "weight": 0.3, "leg": "long"}]
-    assert combine([_sleeve(pos, is_production=False)], _risk_analytics(["SBER"])).is_production is False
-    # even a production sleeve nets to a non-production book unless every sleeve is production
-    mixed = combine([_sleeve(pos, is_production=True), _sleeve(pos, is_production=False)],
-                    _risk_analytics(["SBER"]))
-    assert mixed.is_production is False
+    # validate both a live book and a shadow (gated) book
+    for prod in (True, False):
+        book = combine([_sleeve(positions, is_production=prod)], _risk_analytics(["LKOH", "SBER"]),
+                       CombinerConfig())
+        jsonschema.Draft202012Validator(schema).validate(book.to_dict())
 
 
 def test_empty_sleeve_yields_empty_book():
-    book = combine([_sleeve([])], _risk_analytics(["SBER"]))
+    book = combine([_sleeve([], is_production=False)], _risk_analytics(["SBER"]))
     assert book.net_positions == []
+    assert book.shadow_positions == []
     assert book.hedge["legs"] == []
     assert book.risk_scalars["total_gross"] == 0.0
     assert book.is_production is False
@@ -233,6 +310,8 @@ def test_live_2022_shock_cuts_gross():
     if not any(p["leg"] == "long" for p in sig["positions"]):
         pytest.skip("no active run-up names on the probed 2022 date")
     assert ra["regime"]["novel"] is True
-    gated = combine([sig], ra, CombinerConfig())
-    ungated = combine([sig], {**ra, "regime": {**ra["regime"], "exposure_scalar": 1.0}}, CombinerConfig())
+    # force-live to observe the regime gate cutting the LIVE book (H9 is is_production=false -> shadow)
+    cfg = CombinerConfig(require_production_for_live=False)
+    gated = combine([sig], ra, cfg)
+    ungated = combine([sig], {**ra, "regime": {**ra["regime"], "exposure_scalar": 1.0}}, cfg)
     assert gated.risk_scalars["directional_gross"] < ungated.risk_scalars["directional_gross"]

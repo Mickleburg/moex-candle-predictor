@@ -62,6 +62,8 @@ def main() -> int:
     ap.add_argument("--write-example", action="store_true",
                     help="write contracts/examples/risk_book.example.json from this run")
     ap.add_argument("--canned", action="store_true", help="force canned examples (skip ML)")
+    ap.add_argument("--force-live", action="store_true",
+                    help="disable the shadow gate (require_production_for_live=False) to show the live book")
     args = ap.parse_args()
 
     if args.canned:
@@ -73,23 +75,34 @@ def main() -> int:
             print(f"[live ML handshake unavailable: {type(exc).__name__}: {exc}] -> falling back\n")
             sig, ra, src = _canned()
 
-    book = combine([sig], ra, CombinerConfig(hedge_mode=args.hedge))
+    cfg = CombinerConfig(hedge_mode=args.hedge, require_production_for_live=not args.force_live)
+    book = combine([sig], ra, cfg)
     d = book.to_dict()
 
     print(f"=== risk_manager combiner — source: {src} ===")
     print(f"as_of={d['as_of']}  sleeves={[s['sleeve'] for s in d['sleeves']]}")
+    print("gating (shadow gate, invariants #9/#4):")
+    for g in d.get("gating", []):
+        print(f"  {g['sleeve']:9} {g['capital_state'].upper():6} gate={g['gate']:8} "
+              f"is_production={g['is_production']}  ({g['reason']})")
     reg = d["risk_scalars"]
     print(f"risk scalars: vol_scalar={reg['vol_scalar']}  exposure_scalar={reg['exposure_scalar']} "
-          f"(novel={reg['regime_novel']})  ->  directional_gross={reg['directional_gross']} "
-          f"total_gross={reg['total_gross']}")
+          f"(novel={reg['regime_novel']})  ->  LIVE directional_gross={reg['directional_gross']} "
+          f"total_gross={reg['total_gross']}  | shadow_gross={reg.get('shadow_gross')}")
     print(f"limits: name_ok={d['limits']['name_caps_ok']} sector_ok={d['limits']['sector_caps_ok']} "
           f"gross_ok={d['limits']['gross_cap_ok']} binding={d['limits']['binding']}")
-    print("net positions:")
+    print(f"LIVE net positions ({len(d['net_positions'])}):")
     for p in d["net_positions"]:
         print(f"  {p['ticker']:6} {p['side']:5} w={p['weight']:+.4f}  sector={p['sector']}")
-    print(f"hedge ({d['hedge']['mode']}):")
-    for leg in d["hedge"]["legs"]:
-        print(f"  {leg['instrument']:8} w={leg['weight']:+.4f}")
+    print(f"LIVE hedge ({d['hedge']['mode']}): " +
+          ", ".join(f"{leg['instrument']}={leg['weight']:+.4f}" for leg in d["hedge"]["legs"]) or "—")
+    if d.get("shadow_positions"):
+        print(f"SHADOW positions (0 live capital, paper-only) ({len(d['shadow_positions'])}):")
+        for p in d["shadow_positions"]:
+            print(f"  {p['ticker']:6} {p['side']:5} w={p['weight']:+.4f}  sector={p['sector']}")
+        print(f"SHADOW hedge ({d.get('shadow_hedge', {}).get('mode')}): " +
+              ", ".join(f"{leg['instrument']}={leg['weight']:+.4f}"
+                        for leg in d.get("shadow_hedge", {}).get("legs", [])))
     print(f"is_production={d['is_production']}")
 
     dec = to_risk_decisions(book)

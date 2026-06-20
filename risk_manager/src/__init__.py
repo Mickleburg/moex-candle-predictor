@@ -9,5 +9,6 @@ from .combiner import (  # noqa: F401
     CombinerConfig,
     RiskBook,
     combine,
+    shadow_gate_status,
     to_risk_decisions,
 )
