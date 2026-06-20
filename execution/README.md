@@ -35,6 +35,23 @@ live     ── real orders — REFUSED unless ALL of:
 
 There is no accidental live path: `make_broker` raises `PermissionError` if any gate is unmet.
 
+## Shadow gate — which book each mode trades
+
+The risk_manager splits the `risk_book` by a shadow gate (invariants #9/#4): proven LIVE sleeves go to
+`net_positions` (+ live `hedge`); gated-out, paper-only sleeves go to `shadow_positions` (+
+`shadow_hedge`) with **zero live capital**. Execution honours that split **by mode**:
+
+```
+dry-run / paper -> effective book = net_positions ∪ shadow_positions  (+ hedge ∪ shadow_hedge)
+                   -> paper-trades the shadow book so the forward-shadow track accrues through the
+                      real execution path (the point of the paper track)
+live            -> net_positions + live hedge ONLY
+                   -> an all-shadow book (e.g. H9 while is_production=false) places ZERO real orders
+```
+
+So while H9 is `is_production=false` its whole book is shadow: paper/dry-run reconcile and paper-fill
+it; live places nothing. Names appearing in both the live and shadow books net by ticker.
+
 ## Orchestrator integration — the `serve` seam (agent step 6)
 
 The agent invokes execution exactly the way it invokes the ML/risk_manager CLIs
@@ -73,9 +90,10 @@ place the dedupe ledger + audit off the repo; the kill-switch (`KILL` file) live
 
 ## What it does
 
-1. **Reconciliation** (`src/reconcile.py`) — `risk_book` weights × book capital ÷ reference price →
-   target lots, **rounded DOWN** to MOEX round lots, per-name sanity-capped, diffed against current
-   holdings. Only non-zero diffs become orders. Names that **drop out** of the book are flattened
+1. **Reconciliation** (`src/reconcile.py`) — the effective-book (per the shadow gate above) weights ×
+   book capital ÷ reference price → target lots, **rounded DOWN** to MOEX round lots, per-name
+   sanity-capped, diffed against current holdings. Only non-zero diffs become orders. Names that
+   **drop out** of the book are flattened
    (that is the exit). Limit price = reference close, so a paper replay reproduces the close-to-close
    sleeve sim. Output conforms to `contracts/order_request.schema.json`.
 2. **H9 discipline guard** (`src/discipline.py`) — given a dividend anchor (record/ex date) per name,

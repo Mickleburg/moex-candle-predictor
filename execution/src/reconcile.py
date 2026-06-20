@@ -1,10 +1,17 @@
 """Reconciliation: target book (risk_book) vs current positions -> delta LIMIT orders.
 
-The risk_manager emits a `risk_book` of signed final weights (names in `net_positions`, book-level
-hedge legs in `hedge.legs`). Execution turns each weight into a target lot count at the given book
-capital and reference price, rounds DOWN to MOEX round lots, applies per-name sanity caps, and diffs
-against current holdings. Only the non-zero diffs become orders, and every order is a LIMIT order
-priced at the reference close (so a paper replay reproduces the close-to-close sleeve backtest).
+The risk_manager's `risk_book` is split by a SHADOW GATE (invariants #9/#4): proven LIVE sleeves sit in
+`net_positions` (+ live `hedge`); gated-out, paper-only sleeves sit in `shadow_positions` (+
+`shadow_hedge`) with ZERO live capital. Execution honours that split by MODE:
+
+  * dry-run / paper -> effective book = net_positions ∪ shadow_positions (+ hedge ∪ shadow_hedge).
+    Paper-trades the shadow book so the forward-shadow track accrues through the real execution path.
+  * live            -> net_positions + live hedge ONLY -> an all-shadow book places ZERO real orders.
+
+Each weight becomes a target lot count at the given book capital and reference price, rounded DOWN to
+MOEX round lots, per-name sanity-capped, and diffed against current holdings. Only non-zero diffs
+become orders, priced at the reference close (so a paper replay reproduces the close-to-close sleeve
+backtest).
 
 Sizing: target_notional = weight * capital ; shares = target_notional / price ;
 lots = trunc(shares / lot_size) (round toward zero = "round down" in lot magnitude).
@@ -17,17 +24,18 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .config import ExecutionConfig
+from .config import ExecutionConfig, Mode
 
 
 @dataclass
 class Target:
-    """One row of the target book after flattening names + hedge legs."""
+    """One row of the target book after flattening + netting names + hedge legs."""
 
     instrument: str
     weight: float           # signed final book fraction (negative = short)
     is_hedge: bool
     sector: str | None = None
+    sleeve_contributions: dict | None = None
 
 
 @dataclass
@@ -68,18 +76,54 @@ class ReconcileResult:
         return [o.to_order_request() for o in self.orders]
 
 
-def book_targets(risk_book: dict) -> list[Target]:
-    """Flatten net_positions (names) and hedge.legs (index proxies) into one signed target list."""
-    targets: list[Target] = []
-    for p in risk_book.get("net_positions", []):
-        targets.append(Target(instrument=p["ticker"], weight=float(p["weight"]),
-                              is_hedge=False, sector=p.get("sector")))
-    hedge = risk_book.get("hedge") or {}
-    if hedge.get("mode") not in (None, "none"):
-        for leg in hedge.get("legs", []):
-            targets.append(Target(instrument=leg["instrument"], weight=float(leg["weight"]),
-                                  is_hedge=True, sector=leg["instrument"]))
-    return targets
+def _hedge_legs(hedge: dict | None) -> list[dict]:
+    """Legs of a hedge block, or [] when absent or mode='none'."""
+    hedge = hedge or {}
+    if hedge.get("mode") in (None, "none"):
+        return []
+    return list(hedge.get("legs", []))
+
+
+def book_targets(risk_book: dict, include_shadow: bool = False) -> list[Target]:
+    """Flatten + net the effective book into one signed target list.
+
+    ``include_shadow`` (paper/dry-run) folds `shadow_positions` and `shadow_hedge` into the book so it
+    is paper-traded; live (``include_shadow=False``) sees only `net_positions` + live `hedge`. Names
+    and hedge legs are merged by instrument (weights summed) so a ticker that appears in both the live
+    and shadow books nets to a single target order.
+    """
+    pos_rows = list(risk_book.get("net_positions", []))
+    hedge_legs = _hedge_legs(risk_book.get("hedge"))
+    if include_shadow:
+        pos_rows += list(risk_book.get("shadow_positions", []))
+        hedge_legs += _hedge_legs(risk_book.get("shadow_hedge"))
+
+    # Merge names by ticker (sum weights; merge sleeve_contributions; keep first-seen sector/order).
+    names: dict[str, Target] = {}
+    for p in pos_rows:
+        t = p["ticker"]
+        tgt = names.get(t)
+        if tgt is None:
+            names[t] = Target(instrument=t, weight=float(p["weight"]), is_hedge=False,
+                              sector=p.get("sector"),
+                              sleeve_contributions=dict(p.get("sleeve_contributions") or {}))
+        else:
+            tgt.weight += float(p["weight"])
+            for k, v in (p.get("sleeve_contributions") or {}).items():
+                tgt.sleeve_contributions[k] = tgt.sleeve_contributions.get(k, 0.0) + float(v)
+
+    # Merge hedge legs by instrument (sum weights).
+    hedges: dict[str, Target] = {}
+    for leg in hedge_legs:
+        inst = leg["instrument"]
+        tgt = hedges.get(inst)
+        if tgt is None:
+            hedges[inst] = Target(instrument=inst, weight=float(leg["weight"]), is_hedge=True,
+                                  sector=inst, sleeve_contributions={})
+        else:
+            tgt.weight += float(leg["weight"])
+
+    return list(names.values()) + list(hedges.values())
 
 
 def _as_of_tag(as_of: str) -> str:
@@ -130,8 +174,10 @@ def reconcile(
     tag = _as_of_tag(as_of)
     result = ReconcileResult(as_of=as_of)
 
+    # Live trades only proven (net) sleeves; dry-run/paper also paper-trade the shadow book.
+    include_shadow = config.mode is not Mode.LIVE
     seen: set[str] = set()
-    for tgt in book_targets(risk_book):
+    for tgt in book_targets(risk_book, include_shadow):
         seen.add(tgt.instrument)
         price = prices.get(tgt.instrument)
         if price is None or not (price > 0):

@@ -19,7 +19,7 @@ from .audit import AuditLog
 from .brokers import BrokerAdapter, make_broker
 from .config import ExecutionConfig, Mode
 from .discipline import DisciplineChecker
-from .reconcile import reconcile
+from .reconcile import book_targets, reconcile
 from .trading_calendar import TradingCalendar, _as_date, default_trading_calendar
 
 
@@ -65,20 +65,19 @@ def _update_position(lots: int, avg: float, fill_signed: int, price: float) -> t
 
 
 def _resulting_book(positions: list[dict], prices: dict[str, float], risk_book: dict,
-                    result: "CycleResult") -> list[dict]:
-    """Book AFTER fills: current positions + FILLED reports, enriched from the risk_book.
+                    result: "CycleResult", include_shadow: bool = False) -> list[dict]:
+    """Book AFTER fills: current positions + FILLED reports, enriched from the EFFECTIVE risk_book.
 
     Shape matches what the orchestrator's `_replace_book` expects
-    ({ticker, lots, avg_price, last_price, is_hedge, sleeve_contributions}). PLACED (resting live
-    limit) / DRY_RUN reports do not move the book — only FILLED (paper) does.
+    ({ticker, lots, avg_price, last_price, is_hedge, sleeve_contributions}). Metadata is taken from the
+    same effective book reconciliation traded (shadow-inclusive for paper/dry-run), so the enrichment
+    matches the orders. PLACED (resting live limit) / DRY_RUN reports do not move the book — only
+    FILLED (paper) does.
     """
     meta: dict[str, dict] = {}
-    for p in risk_book.get("net_positions", []):
-        meta[p["ticker"]] = {"is_hedge": False, "sector": p.get("sector"),
-                             "sleeve_contributions": p.get("sleeve_contributions", {})}
-    for leg in (risk_book.get("hedge") or {}).get("legs", []):
-        meta[leg["instrument"]] = {"is_hedge": True, "sector": leg["instrument"],
-                                   "sleeve_contributions": {}}
+    for tgt in book_targets(risk_book, include_shadow):
+        meta[tgt.instrument] = {"is_hedge": tgt.is_hedge, "sector": tgt.sector,
+                               "sleeve_contributions": tgt.sleeve_contributions or {}}
 
     book: dict[str, dict] = {}
     for p in positions:
@@ -255,10 +254,11 @@ class ExecutionEngine:
                                  for p in positions]}
         res = self.run_cycle(risk_book, prices, current_positions=current,
                              anchors=anchors, on_critical=on_critical)
+        include_shadow = self.config.mode is not Mode.LIVE
         return {
             "orders": res.submitted,
             "reports": res.reports,
-            "positions": _resulting_book(positions, prices, risk_book, res),
+            "positions": _resulting_book(positions, prices, risk_book, res, include_shadow),
             "rejected": _collect_rejected(res),
             "halted": res.halted,
             "is_production": res.is_production,
