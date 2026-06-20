@@ -87,19 +87,23 @@ def parse_supported_tickers_fallback(path: Path) -> dict[str, Any]:
 
 def validate_jsonschema_if_available(schemas: dict[str, dict[str, Any]], examples: dict[str, dict[str, Any]]) -> None:
     try:
-        import jsonschema
-        from jsonschema import Draft202012Validator, RefResolver
+        from jsonschema import Draft202012Validator
+        from referencing import Registry, Resource
+        from referencing.jsonschema import DRAFT202012
     except ImportError:
         print("jsonschema is not installed; skipped schema-vs-example validation.")
         print("Install with: pip install jsonschema")
         return
 
-    store = {f"{name}.schema.json": schema for name, schema in schemas.items()}
+    # Modern `referencing` Registry (jsonschema >= 4.18) — resolves cross-schema $refs (e.g.
+    # agent_cycle_result -> order_request.schema.json) in-memory, replacing the deprecated RefResolver.
+    registry = Registry().with_resources(
+        (f"{name}.schema.json", Resource(contents=schema, specification=DRAFT202012))
+        for name, schema in schemas.items()
+    )
     for name, schema in schemas.items():
         Draft202012Validator.check_schema(schema)
-        resolver = RefResolver(base_uri=f"file:///{CONTRACTS_DIR.as_posix()}/", referrer=schema, store=store)
-        validator = jsonschema.Draft202012Validator(schema, resolver=resolver)
-        validator.validate(examples[name])
+        Draft202012Validator(schema, registry=registry).validate(examples[name])
 
 
 def validate_schema_shapes(schemas: dict[str, dict[str, Any]]) -> None:
