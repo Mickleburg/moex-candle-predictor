@@ -53,10 +53,18 @@ _GEN_END = np.datetime64("2035-12-31", "D")
 # ---------------------------------------------------------------------------
 # Maintained RU public-holiday list (MOEX non-trading WEEKDAYS).
 # Weekends are handled separately, so only list holidays that fall on a weekday
-# (incl. the Monday a weekend holiday is officially observed on). Update yearly
-# from the official MOEX trading calendar / government non-working-days decree.
-# Historical years are best-effort: for in-panel dates the actual IMOEX trading
-# days override this list anyway (see overlay below).
+# (incl. the Monday a weekend holiday is officially observed on).
+#
+# ANNUAL MAINTENANCE (do this every autumn for the NEXT year, currently covered
+# through 2027 -> add 2028+ here):
+#   1. The RU government publishes the official non-working-days decree ~Sep/Oct.
+#   2. MOEX then publishes its trading calendar (it can differ from the federal
+#      calendar -- MOEX sometimes trades on a "bridge" day or adds a short session).
+#      Source of truth for forward years = the MOEX trading-calendar page.
+#   3. Add each non-trading WEEKDAY (incl. observed-shift Mondays) for the new year.
+#   This is the ONLY forward-looking input; in-panel dates self-correct from the
+#   actual IMOEX trading days (overlay below), so a stale list only mis-times dates
+#   that are beyond the price panel -- check this list before each dividend season.
 # ---------------------------------------------------------------------------
 RU_HOLIDAYS: tuple[str, ...] = (
     # 2024 (Jan 1 = Mon) New-year week, + standard federal holidays
@@ -78,6 +86,17 @@ RU_HOLIDAYS: tuple[str, ...] = (
     "2027-01-08", "2027-02-23", "2027-03-08", "2027-05-03", "2027-05-10",
     "2027-06-14", "2027-11-04",
 )
+
+# Last calendar year the forward holiday list is maintained through. Beyond this, forward
+# dates fall back to weekends-only (federal holidays would be mis-counted) -> bump this and
+# extend RU_HOLIDAYS each autumn. ``holidays_cover()`` lets callers warn on stale coverage.
+RU_HOLIDAYS_THROUGH_YEAR = 2027
+
+
+def holidays_cover(day: DateLike) -> bool:
+    """False if ``day``'s year is past the maintained forward holiday coverage."""
+    year = int(_to_d64(day).astype("datetime64[Y]").astype(int)) + 1970
+    return year <= RU_HOLIDAYS_THROUGH_YEAR
 
 
 def _to_d64(value: DateLike) -> np.datetime64:
