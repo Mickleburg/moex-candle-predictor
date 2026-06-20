@@ -90,14 +90,53 @@ def test_zero_delta_is_a_noop():
     assert res.noops == ["SBER"]
 
 
-def test_real_example_risk_book_reconciles():
+def _example_book_and_prices():
     book = json.loads((REPO_ROOT / "contracts" / "examples" / "risk_book.example.json").read_text("utf-8"))
     prices = json.loads((REPO_ROOT / "execution" / "examples" / "prices.example.json").read_text("utf-8"))
+    return book, prices
+
+
+def test_real_example_risk_book_reconciles():
+    # The canonical example is all-SHADOW (is_production=false). dry-run/paper paper-trade it:
+    # 3 long names (BUY) + 2 hedge legs (SELL) = 5 entry orders from a flat book.
+    book, prices = _example_book_and_prices()
     config = ExecutionConfig(mode=Mode.DRY_RUN, capital=100_000_000.0)
     res = reconcile(book, prices, current_lots={}, config=config)
-    # 3 long names (BUY) + 2 hedge legs (SELL) = 5 entry orders from a flat book
     sides = sorted(o.side for o in res.orders)
     assert sides == ["BUY", "BUY", "BUY", "SELL", "SELL"]
     by_name = {o.instrument: o for o in res.orders}
     assert by_name["SBER"].side == "BUY" and by_name["SBER"].quantity_lots > 0
     assert by_name["MOEXOG"].side == "SELL" and by_name["MOEXOG"].is_hedge
+
+
+def test_paper_paper_trades_the_shadow_book():
+    book, prices = _example_book_and_prices()
+    assert book["net_positions"] == [] and book["shadow_positions"]   # guard: example is all-shadow
+    res = reconcile(book, prices, current_lots={},
+                    config=ExecutionConfig(mode=Mode.PAPER, capital=100_000_000.0))
+    assert sorted(o.side for o in res.orders) == ["BUY", "BUY", "BUY", "SELL", "SELL"]
+
+
+def test_live_ignores_shadow_book_zero_orders():
+    # Prod-safety: in LIVE, an all-shadow book (gated-out sleeve) places NO real orders.
+    book, prices = _example_book_and_prices()
+    res = reconcile(book, prices, current_lots={},
+                    config=ExecutionConfig(mode=Mode.LIVE, capital=100_000_000.0))
+    assert res.orders == []
+    assert res.noops == [] and res.skipped == []
+
+
+def test_live_trades_only_net_positions_not_shadow():
+    # A mixed book: one live name + one shadow name. LIVE trades only the live one.
+    book = {
+        "as_of": "2025-06-02 00:00:00+03:00",
+        "net_positions": [{"ticker": "SBER", "weight": 0.2, "side": "LONG", "sector": "MOEXFN"}],
+        "hedge": {"mode": "none", "legs": []},
+        "shadow_positions": [{"ticker": "LKOH", "weight": 0.3, "side": "LONG", "sector": "MOEXOG"}],
+        "shadow_hedge": {"mode": "none", "legs": []},
+    }
+    prices = {"SBER": 312.4, "LKOH": 7050.0}
+    live = reconcile(book, prices, current_lots={}, config=ExecutionConfig(mode=Mode.LIVE, capital=1e8))
+    assert [o.instrument for o in live.orders] == ["SBER"]
+    paper = reconcile(book, prices, current_lots={}, config=ExecutionConfig(mode=Mode.PAPER, capital=1e8))
+    assert sorted(o.instrument for o in paper.orders) == ["LKOH", "SBER"]
