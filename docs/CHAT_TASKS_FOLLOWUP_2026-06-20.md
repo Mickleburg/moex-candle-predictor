@@ -7,6 +7,24 @@
 > Дисциплина прежняя: коммить ТОЛЬКО свои файлы; live за явным флагом; `is_production=false` до shadow-гейта
 > + sign-off; `python -m pytest ml/test_smoke.py` зелёный.
 
+## ⬆ ОБНОВЛЕНИЕ ПОСЛЕ АУДИТА (2026-06-20, `docs/INTEGRATION_AUDIT_2026-06-20.md`)
+Вторая волна доставлена параллельно; интеграция ЦЕЛА (206 тестов зелёные на HEAD, оркестратор гоняет
+end-to-end live sleeve→combiner→execution). Закрыто из списка ниже: backend-1 (ingest, store до 06-19),
+backend-2/3/4 (метаданные, api-seam, RU_HOLIDAYS), execution-1/2/3 (serve-CLI, backend-календарь,
+lot/FIGI), agent-1/2/3/4 (execution off mock, единый календарь, LLM-рефреш в EOD, ML-CLI-шов), LLM-1/2
+(refresh CLI + сезон), **ML 1/2/5 + 3/4 (вся ML-сторона H9 закрыта)**. ОСТАЁТСЯ (приоритет):
+- **risk_manager (ТОП, корректность):** гейт слива по shadow-статусу — H9 при `is_production=false`/shadow
+  NOT MET должен идти в книгу с НУЛЕВЫМ живым риском (инвариант #9/#4). Сейчас комбинатор даёт полный риск.
+- **agent:** (a) «paper»-профиль конфига — все блоки live (абс. пути интерпретатора! относительный падает
+  на Windows), `llm.refresh_cmd` задан, backend live; mock — дефолт для тестов. (b) мигрировать импорты на
+  замороженный `backend.api`. (c) выбрать канонический шов execution (in-process vs serve-CLI).
+- **execution:** sandbox wire-тест T-Invest (нужны `TINVEST_TOKEN` + верифицированные FIGI) — перед live.
+- **LLM:** сдвинуть `FETCH_FLOOR` на следующий сезон (мелочь).
+- **backend:** валидация FIGI против дампа T-Invest перед live (live уже загейчен `all_verified()`).
+- **ML:** H9 закрыт; остаётся сезонное накопление shadow-трека. Опц. гигиена: импорт через `backend.api`.
+
+Ниже — исходный полный список (исторический контекст).
+
 Главные кросс-блочные швы, которые надо закрыть (ниже расписаны по владельцам):
 - **execution ↔ orchestrator не сведены** (agent на paper-mock; нужен стабильный CLI execution).
 - **3 дубля trading_calendar** (backend — канон; agent и execution должны потреблять его, не свой).
