@@ -27,11 +27,22 @@ _COMMANDS = {
     "pnl": "pnl",
     "prices": "prices",
     "gate": "gate",
+    "shadowlog": "shadowlog",
     "cycle": "cycle",
     "integrity": "integrity",
     "help": "help",
     "start": "help",
 }
+
+
+def _first_int(args: list[str] | None) -> int | None:
+    """Parse the first CLI arg as a positive int (the N in /shadowlog N); None if absent/bad."""
+    if not args:
+        return None
+    try:
+        return int(args[0])
+    except (ValueError, TypeError):
+        return None
 
 
 def build_application(config: BotConfig):
@@ -58,6 +69,8 @@ def build_application(config: BotConfig):
             try:
                 if method_name == "prices":
                     text = monitor.prices(context.args or None)
+                elif method_name == "shadowlog":
+                    text = monitor.shadowlog(_first_int(context.args))
                 else:
                     text = getattr(monitor, method_name)()
             except Exception:  # noqa: BLE001 - a read/format error must not kill the poller
