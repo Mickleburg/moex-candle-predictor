@@ -48,6 +48,19 @@ def test_order_dedup(tmp_path):
     assert len(s.open_orders()) == 1
 
 
+def test_orders_tagged_by_capital_state(tmp_path):
+    s = _store(tmp_path)
+    s.record_order({"client_order_id": "L1", "ticker": "SBER", "side": "BUY", "quantity_lots": 1,
+                    "order_type": "LIMIT", "limit_price": 1.0}, trade_date="2026-06-18",
+                   phase="eod", status="FILLED", capital_state="live")
+    s.record_order({"client_order_id": "S1", "ticker": "LKOH", "side": "BUY", "quantity_lots": 2,
+                    "order_type": "LIMIT", "limit_price": 1.0}, trade_date="2026-06-18",
+                   phase="eod", status="FILLED", capital_state="shadow")
+    assert [o["client_order_id"] for o in s.recent_orders("shadow")] == ["S1"]
+    assert [o["client_order_id"] for o in s.recent_orders("live")] == ["L1"]
+    assert len(s.recent_orders()) == 2
+
+
 def test_pnl_attribution_upsert(tmp_path):
     s = _store(tmp_path)
     s.record_pnl_attribution("2026-06-18", "s3_event", realized=0.0, unrealized=5.0, gross=100.0)

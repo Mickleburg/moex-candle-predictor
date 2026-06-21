@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS orders (
     order_type       TEXT NOT NULL,
     limit_price      REAL,
     status           TEXT NOT NULL,
+    capital_state    TEXT NOT NULL DEFAULT 'live',   -- 'live' (real intent) | 'shadow' (paper-shadow)
     created_at       TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS executions (
@@ -145,6 +146,10 @@ class StateStore:
             cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()]
             if cols and "capital_state" not in cols:
                 self._conn.executescript(rebuild)
+        # orders: PK unchanged, so a plain ADD COLUMN suffices (old rows default to 'live').
+        ocols = [r[1] for r in self._conn.execute("PRAGMA table_info(orders)").fetchall()]
+        if ocols and "capital_state" not in ocols:
+            self._conn.execute("ALTER TABLE orders ADD COLUMN capital_state TEXT NOT NULL DEFAULT 'live'")
 
     def close(self) -> None:
         with self._lock:
@@ -250,15 +255,17 @@ class StateStore:
                 "SELECT 1 FROM orders WHERE client_order_id=?", (client_order_id,)
             ).fetchone() is not None
 
-    def record_order(self, order: dict, *, trade_date: str, phase: str, status: str) -> None:
+    def record_order(self, order: dict, *, trade_date: str, phase: str, status: str,
+                     capital_state: str = "live") -> None:
         with self._tx() as c:
             c.execute(
                 "INSERT INTO orders (client_order_id, trade_date, phase, ticker, side, "
-                "quantity_lots, order_type, limit_price, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "quantity_lots, order_type, limit_price, status, capital_state, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(client_order_id) DO UPDATE SET status=excluded.status",
                 (order["client_order_id"], trade_date, phase, order["ticker"], order["side"],
                  int(order["quantity_lots"]), order["order_type"], order.get("limit_price"),
-                 status, _now()),
+                 status, capital_state, _now()),
             )
 
     def open_orders(self) -> list[dict]:
@@ -270,6 +277,18 @@ class StateStore:
     def all_orders(self) -> list[dict]:
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM orders").fetchall()]
+
+    def recent_orders(self, capital_state: str | None = None, limit: int = 20) -> list[dict]:
+        """Most-recent orders (optionally one capital track) — for /status observability."""
+        with self._lock:
+            if capital_state is None:
+                rows = self._conn.execute(
+                    "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM orders WHERE capital_state=? ORDER BY created_at DESC LIMIT ?",
+                    (capital_state, limit)).fetchall()
+            return [dict(r) for r in rows]
 
     def set_order_status(self, client_order_id: str, status: str) -> None:
         with self._tx() as c:

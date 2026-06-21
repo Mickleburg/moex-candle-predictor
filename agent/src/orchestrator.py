@@ -108,21 +108,26 @@ class Orchestrator:
                    else self.store.get_positions(None))
         if kill:
             exec_orders, exec_reports, exec_positions, rejected = [], [], None, []
+            live_orders, shadow_orders = [], []
             exec_note = "kill-switch engaged — execution skipped, monitoring only"
         else:
             er = self.adapters.execution.reconcile_and_execute(
                 risk_book=risk_book, positions=current, prices=prices,
                 capital=self.config.capital_rub, mode=eff_mode, trade_date=td, phase=phase)
             exec_orders, exec_reports, exec_positions, rejected = er.orders, er.reports, er.positions, er.rejected
-            exec_note = f"executed {len(exec_orders)} delta-order(s) in {eff_mode} mode. {mode_note}".strip()
+            live_orders, shadow_orders = self._split_by_gate(exec_orders, risk_book)
+            exec_note = (f"executed {len(exec_orders)} delta-order(s) (live={len(live_orders)} "
+                         f"shadow={len(shadow_orders)}) in {eff_mode} mode. {mode_note}").strip()
 
         # step 7 — persist book + per-sleeve P&L attribution, split LIVE vs SHADOW capital.
-        # A filled position is LIVE capital iff it came from net_positions/hedge (passed the gate);
-        # SHADOW iff from shadow_positions/shadow_hedge. Shadow paper-fills accrue forward-P&L for
-        # the gate WITHOUT being counted as live edge.
-        self._record_orders_and_fills(td, phase, exec_orders, exec_reports)
+        # A filled position/order is LIVE capital iff it came from net_positions/hedge (passed the
+        # gate); SHADOW iff from shadow_positions/shadow_hedge. Shadow paper-fills accrue forward-P&L
+        # for the gate WITHOUT being counted as live edge.
+        self._record_fills(exec_reports)
+        self._record_orders(td, phase, live_orders, exec_reports, capital_state="live")
+        self._record_orders(td, phase, shadow_orders, exec_reports, capital_state="shadow")
         if not kill and eff_mode in ("paper", "live") and exec_positions is not None:
-            live_pos, shadow_pos = self._classify_positions(exec_positions, risk_book)
+            live_pos, shadow_pos = self._split_by_gate(exec_positions, risk_book)
             self._replace_book(live_pos, capital_state="live")
             self._replace_book(shadow_pos, capital_state="shadow")
 
@@ -153,9 +158,14 @@ class Orchestrator:
             "capital_rub": self.config.capital_rub,
             "block_modes": self.adapters.modes, "calendar": tcal.calendar_source(),
             "exec_note": exec_note,
+            # observability: selected_orders carries LIVE intents only (0 for an unproven sleeve);
+            # the paper-shadow activity is surfaced explicitly so the operator sees it, not emptiness.
+            "n_live_orders": len(live_orders),
+            "n_shadow_orders": len(shadow_orders),
+            "shadow_orders": shadow_orders,
             "live_sleeve_pnl": live_pnl, "shadow_sleeve_pnl": shadow_pnl,
         }
-        result = self._cycle_result(td, as_of, mode=eff_mode, orders=exec_orders,
+        result = self._cycle_result(td, as_of, mode=eff_mode, orders=live_orders,
                                     rejected=rejected, risk_summary=risk_summary)
         status = "killed" if kill else "completed"
         self._persist_result(td, phase, status, result)
@@ -240,16 +250,20 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001 - feed refresh must never crash the cycle
             self._alert("LLM feed refresh error (non-blocking)", f"trade_date={td}\n{type(exc).__name__}: {exc}")
 
-    def _record_orders_and_fills(self, td: str, phase: str, orders: list[dict], reports: list[dict]) -> None:
+    def _record_fills(self, reports: list[dict]) -> None:
+        for rep in reports:
+            self.store.record_execution(rep)
+
+    def _record_orders(self, td: str, phase: str, orders: list[dict], reports: list[dict],
+                       *, capital_state: str) -> None:
         report_status = {r["client_order_id"]: r["status"] for r in reports}
         for order in orders:
             coid = order["client_order_id"]
             if self.store.order_exists(coid):     # dedup guard (idempotency 2nd line of defence)
                 continue
             self.store.record_order(order, trade_date=td, phase=phase,
-                                    status=report_status.get(coid, "PLACED"))
-        for rep in reports:
-            self.store.record_execution(rep)
+                                    status=report_status.get(coid, "PLACED"),
+                                    capital_state=capital_state)
 
     def _replace_book(self, new_positions: list[dict], *, capital_state: str = "live") -> None:
         new_by_ticker = {p["ticker"]: p for p in new_positions}
@@ -263,20 +277,20 @@ class Orchestrator:
                                        capital_state=capital_state)
 
     @staticmethod
-    def _classify_positions(positions: list[dict], risk_book: dict) -> tuple[list[dict], list[dict]]:
-        """Split a post-fill book into (live, shadow) by the gate: net_positions/hedge -> live,
-        shadow_positions/shadow_hedge -> shadow. A position in neither (a stale residual) defaults
-        to live. (One-sleeve book: live and shadow instruments are disjoint.)"""
+    def _split_by_gate(rows: list[dict], risk_book: dict) -> tuple[list[dict], list[dict]]:
+        """Split rows keyed by 'ticker' (positions OR orders) into (live, shadow) by the gate:
+        net_positions/hedge -> live, shadow_positions/shadow_hedge -> shadow. A row in neither (a
+        stale residual) defaults to live. (One-sleeve book: live/shadow instruments are disjoint.)"""
         live_inst = {p["ticker"] for p in risk_book.get("net_positions", [])}
         live_inst |= {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
         shadow_inst = {p["ticker"] for p in risk_book.get("shadow_positions", [])}
         shadow_inst |= {leg["instrument"] for leg in risk_book.get("shadow_hedge", {}).get("legs", [])}
         live, shadow = [], []
-        for p in positions:
-            if p["ticker"] in shadow_inst and p["ticker"] not in live_inst:
-                shadow.append(p)
+        for r in rows:
+            if r["ticker"] in shadow_inst and r["ticker"] not in live_inst:
+                shadow.append(r)
             else:
-                live.append(p)
+                live.append(r)
         return live, shadow
 
     def _cancel_all(self, open_orders: list[dict]) -> None:
@@ -318,7 +332,8 @@ class Orchestrator:
     def _digest_text(td: str, result: dict, risk_book: dict, live_pnl: dict, shadow_pnl: dict) -> str:
         rs = result["risk_summary"]
         lines = [f"trade_date={td}  mode={result['mode']}",
-                 f"orders: {len(result['selected_orders'])}  "
+                 f"orders: live={rs.get('n_live_orders', len(result['selected_orders']))} "
+                 f"shadow={rs.get('n_shadow_orders', 0)}  "
                  f"live_gross={rs.get('directional_gross')}  shadow_gross={rs.get('shadow_gross')}",
                  f"regime: exposure_scalar={rs.get('exposure_scalar')} novel={rs.get('regime_novel')}",
                  f"hedge={rs.get('hedge_mode')}  binding={rs.get('binding_limits')}",
