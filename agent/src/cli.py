@@ -47,7 +47,8 @@ def cmd_status(args) -> int:
         "kill_switch": store.kill_switch_engaged(),
         "last_cycle": store.get_flag("last_cycle"),
         "last_successful_cycle": store.last_successful_cycle(),
-        "positions": store.get_positions(),
+        "live_positions": store.get_positions("live"),
+        "shadow_positions": store.get_positions("shadow"),
         "open_orders": store.open_orders(),
         "pnl_by_sleeve": store.pnl_by_sleeve(),
     })

@@ -39,13 +39,15 @@ CREATE TABLE IF NOT EXISTS cycle_runs (
     PRIMARY KEY (trade_date, phase)
 );
 CREATE TABLE IF NOT EXISTS positions (
-    ticker                   TEXT PRIMARY KEY,
+    ticker                   TEXT NOT NULL,
+    capital_state            TEXT NOT NULL DEFAULT 'live',   -- 'live' (passed gate) | 'shadow' (gated out)
     lots                     INTEGER NOT NULL DEFAULT 0,
     avg_price                REAL NOT NULL DEFAULT 0,
     last_price               REAL,
     is_hedge                 INTEGER NOT NULL DEFAULT 0,
     sleeve_contributions     TEXT,                       -- JSON {sleeve: weight}
-    updated_at               TEXT NOT NULL
+    updated_at               TEXT NOT NULL,
+    PRIMARY KEY (ticker, capital_state)
 );
 CREATE TABLE IF NOT EXISTS orders (
     client_order_id  TEXT PRIMARY KEY,
@@ -73,17 +75,44 @@ CREATE TABLE IF NOT EXISTS pnl_attribution (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     trade_date      TEXT NOT NULL,
     sleeve          TEXT NOT NULL,
+    capital_state   TEXT NOT NULL DEFAULT 'live',   -- 'live' vs 'shadow' capital P&L (kept separate)
     realized_pnl    REAL NOT NULL DEFAULT 0,
     unrealized_pnl  REAL NOT NULL DEFAULT 0,
     gross           REAL NOT NULL DEFAULT 0,
     ts              TEXT NOT NULL,
-    UNIQUE (trade_date, sleeve)
+    UNIQUE (trade_date, sleeve, capital_state)
 );
 CREATE TABLE IF NOT EXISTS kv (
     key         TEXT PRIMARY KEY,
     value       TEXT,
     updated_at  TEXT NOT NULL
 );
+"""
+
+
+# Migrations for DBs predating the capital_state (shadow-gate) split — preserve rows as 'live'.
+_REBUILD_POSITIONS = """
+ALTER TABLE positions RENAME TO positions_old;
+CREATE TABLE positions (
+    ticker TEXT NOT NULL, capital_state TEXT NOT NULL DEFAULT 'live', lots INTEGER NOT NULL DEFAULT 0,
+    avg_price REAL NOT NULL DEFAULT 0, last_price REAL, is_hedge INTEGER NOT NULL DEFAULT 0,
+    sleeve_contributions TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (ticker, capital_state)
+);
+INSERT INTO positions (ticker, capital_state, lots, avg_price, last_price, is_hedge, sleeve_contributions, updated_at)
+    SELECT ticker, 'live', lots, avg_price, last_price, is_hedge, sleeve_contributions, updated_at FROM positions_old;
+DROP TABLE positions_old;
+"""
+_REBUILD_PNL = """
+ALTER TABLE pnl_attribution RENAME TO pnl_attribution_old;
+CREATE TABLE pnl_attribution (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, trade_date TEXT NOT NULL, sleeve TEXT NOT NULL,
+    capital_state TEXT NOT NULL DEFAULT 'live', realized_pnl REAL NOT NULL DEFAULT 0,
+    unrealized_pnl REAL NOT NULL DEFAULT 0, gross REAL NOT NULL DEFAULT 0, ts TEXT NOT NULL,
+    UNIQUE (trade_date, sleeve, capital_state)
+);
+INSERT INTO pnl_attribution (trade_date, sleeve, capital_state, realized_pnl, unrealized_pnl, gross, ts)
+    SELECT trade_date, sleeve, 'live', realized_pnl, unrealized_pnl, gross, ts FROM pnl_attribution_old;
+DROP TABLE pnl_attribution_old;
 """
 
 
@@ -102,7 +131,20 @@ class StateStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add the capital_state dimension to DBs created before the shadow-gate split.
+
+        Old `positions` / `pnl_attribution` rows are rebuilt as capital_state='live' (they
+        predate the gate, so they were live-intent). The state store is regenerable, but we
+        preserve paper positions across the upgrade rather than dropping them.
+        """
+        for table, rebuild in (("positions", _REBUILD_POSITIONS), ("pnl_attribution", _REBUILD_PNL)):
+            cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if cols and "capital_state" not in cols:
+                self._conn.executescript(rebuild)
 
     def close(self) -> None:
         with self._lock:
@@ -175,23 +217,29 @@ class StateStore:
             return dict(row) if row else None
 
     # --- positions ---------------------------------------------------------------------
-    def get_positions(self) -> list[dict]:
+    def get_positions(self, capital_state: str | None = "live") -> list[dict]:
+        """Positions for a capital track ('live' default | 'shadow'); None = both tracks."""
         with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM positions").fetchall()]
+            if capital_state is None:
+                return [dict(r) for r in self._conn.execute("SELECT * FROM positions").fetchall()]
+            return [dict(r) for r in self._conn.execute(
+                "SELECT * FROM positions WHERE capital_state=?", (capital_state,)).fetchall()]
 
     def upsert_position(self, ticker: str, lots: int, avg_price: float, last_price: float | None,
-                        *, is_hedge: bool = False, sleeve_contributions: dict | None = None) -> None:
+                        *, is_hedge: bool = False, sleeve_contributions: dict | None = None,
+                        capital_state: str = "live") -> None:
         with self._tx() as c:
             if lots == 0:
-                c.execute("DELETE FROM positions WHERE ticker=?", (ticker,))
+                c.execute("DELETE FROM positions WHERE ticker=? AND capital_state=?",
+                          (ticker, capital_state))
                 return
             c.execute(
-                "INSERT INTO positions (ticker, lots, avg_price, last_price, is_hedge, "
-                "sleeve_contributions, updated_at) VALUES (?,?,?,?,?,?,?) "
-                "ON CONFLICT(ticker) DO UPDATE SET lots=excluded.lots, avg_price=excluded.avg_price, "
-                "last_price=excluded.last_price, is_hedge=excluded.is_hedge, "
+                "INSERT INTO positions (ticker, capital_state, lots, avg_price, last_price, is_hedge, "
+                "sleeve_contributions, updated_at) VALUES (?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(ticker, capital_state) DO UPDATE SET lots=excluded.lots, "
+                "avg_price=excluded.avg_price, last_price=excluded.last_price, is_hedge=excluded.is_hedge, "
                 "sleeve_contributions=excluded.sleeve_contributions, updated_at=excluded.updated_at",
-                (ticker, int(lots), float(avg_price), last_price, 1 if is_hedge else 0,
+                (ticker, capital_state, int(lots), float(avg_price), last_price, 1 if is_hedge else 0,
                  json.dumps(sleeve_contributions or {}, ensure_ascii=False), _now()),
             )
 
@@ -238,23 +286,43 @@ class StateStore:
                  report.get("message", ""), _now()),
             )
 
-    # --- per-sleeve P&L attribution ----------------------------------------------------
+    # --- per-sleeve P&L attribution (live vs shadow capital kept separate) --------------
     def record_pnl_attribution(self, trade_date: str, sleeve: str, *, realized: float,
-                               unrealized: float, gross: float) -> None:
+                               unrealized: float, gross: float, capital_state: str = "live") -> None:
         with self._tx() as c:
             c.execute(
-                "INSERT INTO pnl_attribution (trade_date, sleeve, realized_pnl, unrealized_pnl, "
-                "gross, ts) VALUES (?,?,?,?,?,?) "
-                "ON CONFLICT(trade_date, sleeve) DO UPDATE SET realized_pnl=excluded.realized_pnl, "
-                "unrealized_pnl=excluded.unrealized_pnl, gross=excluded.gross, ts=excluded.ts",
-                (trade_date, sleeve, float(realized), float(unrealized), float(gross), _now()),
+                "INSERT INTO pnl_attribution (trade_date, sleeve, capital_state, realized_pnl, "
+                "unrealized_pnl, gross, ts) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(trade_date, sleeve, capital_state) DO UPDATE SET "
+                "realized_pnl=excluded.realized_pnl, unrealized_pnl=excluded.unrealized_pnl, "
+                "gross=excluded.gross, ts=excluded.ts",
+                (trade_date, sleeve, capital_state, float(realized), float(unrealized),
+                 float(gross), _now()),
             )
 
-    def pnl_by_sleeve(self) -> list[dict]:
+    def pnl_by_sleeve(self, capital_state: str | None = None) -> list[dict]:
+        """Cumulative P&L per (sleeve, capital_state); pass capital_state to filter one track."""
         with self._lock:
+            if capital_state is None:
+                return [dict(r) for r in self._conn.execute(
+                    "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
+                    "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution "
+                    "GROUP BY sleeve, capital_state ORDER BY sleeve, capital_state").fetchall()]
             return [dict(r) for r in self._conn.execute(
-                "SELECT sleeve, SUM(realized_pnl) AS realized, SUM(unrealized_pnl) AS unrealized "
-                "FROM pnl_attribution GROUP BY sleeve ORDER BY sleeve").fetchall()]
+                "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
+                "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution WHERE capital_state=? "
+                "GROUP BY sleeve ORDER BY sleeve", (capital_state,)).fetchall()]
+
+    def forward_pnl_by_sleeve(self, capital_state: str = "live") -> dict[str, dict]:
+        """Per-sleeve forward P&L for the combiner's shadow gate seam: {sleeve: {"forward_pnl": x}}.
+
+        Defaults to the LIVE track — a production sleeve whose live forward P&L turns negative is
+        demoted back to shadow (invariant #9). Pass 'shadow' to inspect the shadow accrual.
+        """
+        out: dict[str, dict] = {}
+        for row in self.pnl_by_sleeve(capital_state):
+            out[row["sleeve"]] = {"forward_pnl": (row["realized"] or 0.0) + (row["unrealized"] or 0.0)}
+        return out
 
     # --- key/value flags (kill-switch, heartbeat) --------------------------------------
     def set_flag(self, key: str, value: Any) -> None:

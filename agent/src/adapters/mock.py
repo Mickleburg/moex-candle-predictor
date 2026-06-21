@@ -56,11 +56,14 @@ class MockSleeve:
     """Stands in for the ML H9 sleeve. Emits a valid sleeve_signal (long names + hedge rec)."""
 
     def __init__(self, *, longs: Optional[dict[str, float]] = None, abstain: bool = False,
-                 model_version: str = "h9_dividend_runup_v1_mock"):
+                 model_version: str = "h9_dividend_runup_v1_mock", is_production: bool = False):
         # default: 3 names in their pre-ex window, capped inverse-vol-ish weights summing to ~1.
         self._longs = longs if longs is not None else {"SBER": 0.34, "LKOH": 0.34, "TATN": 0.32}
         self._abstain = abstain
         self._model_version = model_version
+        # is_production=false by default (H9 is shadow until forward-gate + sign-off). Tests set
+        # True to exercise the LIVE-capital path (a hypothetical signed-off sleeve).
+        self._is_production = is_production
 
     def build_sleeve(self, as_of: str) -> dict:
         positions = [] if self._abstain else [
@@ -78,13 +81,17 @@ class MockSleeve:
                                      "notional": gross_long},
             "gross_long": gross_long,
             "model_version": self._model_version,
-            "is_production": False,
+            "is_production": self._is_production,
         }
 
 
 class MockCombiner:
-    """Stands in for the risk_manager combiner. Self-contained netting + the risk layer knobs
-    the orchestrator reacts to (exposure_scalar from the H5 regime gate, vol scalar, caps)."""
+    """Stands in for the risk_manager combiner: the risk-layer knobs the orchestrator reacts to
+    (regime gate, vol scalar, caps) PLUS the shadow gate (invariants #9/#4). A sleeve gets LIVE
+    capital only if it passed its gate (is_production=true AND a non-negative forward gate via
+    `sleeve_status`); otherwise it goes to `shadow_positions` (0 live capital). Mirrors the real
+    combiner's net_positions vs shadow_positions split so the agent's live/shadow attribution and
+    forward-P&L demotion can be tested offline."""
 
     def __init__(self, *, hedge_mode: str = "market", exposure_scalar: float = 1.0,
                  vol_scalar: float = 1.0, regime_novel: bool = False,
@@ -98,11 +105,73 @@ class MockCombiner:
         self._max_gross = max_gross
         self._timeframe = timeframe
 
-    def combine(self, sleeve_signals: list[dict], as_of: str) -> dict:
-        # 1. net directional weights by ticker; track per-sleeve contributions
+    @staticmethod
+    def _gate(sig: dict, status: dict | None) -> tuple[str, str, str]:
+        """Classify a sleeve live/shadow (mirror of risk_manager._shadow_gate)."""
+        if not sig.get("is_production", False):
+            return ("shadow", "NOT_MET", "is_production=false")
+        if status:
+            if str(status.get("gate", "")).upper() == "NOT_MET":
+                return ("shadow", "NOT_MET", str(status.get("reason", "forward gate not met")))
+            fpnl = status.get("forward_pnl")
+            if fpnl is not None and float(fpnl) < 0:
+                return ("shadow", "NOT_MET", f"forward_pnl={fpnl}<0")
+        return ("live", "MET", "production + forward gate met")
+
+    def combine(self, sleeve_signals: list[dict], as_of: str,
+                *, sleeve_status: dict[str, dict] | None = None) -> dict:
+        gating, live_sigs, shadow_sigs = [], [], []
+        for sig in sleeve_signals:
+            state, gate, reason = self._gate(sig, (sleeve_status or {}).get(sig.get("sleeve")))
+            gating.append({"sleeve": sig.get("sleeve"), "strategy": sig.get("strategy", ""),
+                           "capital_state": state, "is_production": sig.get("is_production", False),
+                           "gate": gate, "reason": reason})
+            (live_sigs if state == "live" else shadow_sigs).append(sig)
+
+        net_positions, hedge, live_gross, hedge_gross, binding = self._book(live_sigs)
+        shadow_positions, shadow_hedge, shadow_gross, shadow_hedge_gross, _ = self._book(shadow_sigs)
+
+        return {
+            "as_of": as_of,
+            "timeframe": self._timeframe,
+            "sleeves": [{"sleeve": s["sleeve"], "strategy": s.get("strategy", ""),
+                         "gross": round(sum(abs(float(p["weight"])) for p in s.get("positions", [])), 6)}
+                        for s in sleeve_signals],
+            "gating": gating,
+            "net_positions": net_positions,
+            "hedge": hedge,
+            "shadow_positions": shadow_positions,
+            "shadow_hedge": shadow_hedge,
+            "risk_scalars": {
+                "target_book_vol_annual": 0.12,
+                "book_vol_estimate_annual": 0.0,
+                "vol_scalar": round(self._vol_scalar, 6),
+                "exposure_scalar": round(self._exposure_scalar, 6),
+                "regime_novel": bool(self._regime_novel),
+                "directional_gross": round(live_gross, 6),
+                "total_gross": round(live_gross + hedge_gross, 6),
+                "shadow_gross": round(shadow_gross, 6),
+                "shadow_total_gross": round(shadow_gross + shadow_hedge_gross, 6),
+            },
+            "limits": {
+                "max_name_weight": self._max_name,
+                "max_sector_gross": 0.6,
+                "max_gross": self._max_gross,
+                "name_caps_ok": True,
+                "sector_caps_ok": True,
+                "gross_cap_ok": live_gross <= self._max_gross + 1e-6,
+                "binding": sorted(set(binding)),
+            },
+            "model_version": "risk_combiner_v0_mock",
+            # LIVE book is production only if there IS a live sleeve and all live sleeves are production.
+            "is_production": bool(live_sigs) and all(s.get("is_production", False) for s in live_sigs),
+        }
+
+    def _book(self, sigs: list[dict]) -> tuple[list[dict], dict, float, float, list[str]]:
+        """Net + cap + scale + hedge a set of sleeves into a sized book (live or shadow)."""
         net: dict[str, float] = {}
         contrib: dict[str, dict[str, float]] = {}
-        for sig in sleeve_signals:
+        for sig in sigs:
             for p in sig.get("positions", []):
                 if p.get("leg") not in ("long", "short"):
                     continue
@@ -112,7 +181,6 @@ class MockCombiner:
                     contrib.get(p["ticker"], {}).get(sig["sleeve"], 0.0) + w
 
         binding: list[str] = []
-        # 2. name cap
         capped = {}
         for t, w in net.items():
             if abs(w) > self._max_name + 1e-9:
@@ -120,14 +188,12 @@ class MockCombiner:
                 capped[t] = self._max_name if w > 0 else -self._max_name
             else:
                 capped[t] = w
-        # 3. risk scalars: vol-target x regime gate
         book_scalar = self._vol_scalar * self._exposure_scalar
-        if abs(self._vol_scalar - 1.0) > 1e-9:
+        if abs(self._vol_scalar - 1.0) > 1e-9 and capped:
             binding.append("vol_target")
-        if self._exposure_scalar < 1.0 - 1e-9:
+        if self._exposure_scalar < 1.0 - 1e-9 and capped:
             binding.append("regime_gate")
         scaled = {t: w * book_scalar for t, w in capped.items()}
-        # 4. gross cap (names only)
         gross = sum(abs(w) for w in scaled.values())
         if gross > self._max_gross + 1e-9:
             binding.append("gross_cap")
@@ -136,7 +202,7 @@ class MockCombiner:
         scaled = {t: w for t, w in scaled.items() if abs(w) > 1e-9}
         directional_gross = sum(abs(w) for w in scaled.values())
 
-        net_positions = [
+        positions = [
             {"ticker": t, "weight": round(w, 6), "side": "LONG" if w > 0 else "SHORT",
              "sector": _SECTOR.get(t, "IMOEX"),
              "sleeve_contributions": {k: round(v, 6) for k, v in contrib.get(t, {}).items()}}
@@ -144,40 +210,7 @@ class MockCombiner:
         ]
         hedge = self._build_hedge(scaled)
         hedge_gross = sum(abs(leg["weight"]) for leg in hedge["legs"])
-
-        sec_gross: dict[str, float] = {}
-        for p in net_positions:
-            sec_gross[p["sector"]] = sec_gross.get(p["sector"], 0.0) + abs(p["weight"])
-
-        return {
-            "as_of": as_of,
-            "timeframe": self._timeframe,
-            "sleeves": [{"sleeve": s["sleeve"], "strategy": s.get("strategy", ""),
-                         "gross": round(sum(abs(float(p["weight"])) for p in s.get("positions", [])), 6)}
-                        for s in sleeve_signals],
-            "net_positions": net_positions,
-            "hedge": hedge,
-            "risk_scalars": {
-                "target_book_vol_annual": 0.12,
-                "book_vol_estimate_annual": 0.0,
-                "vol_scalar": round(self._vol_scalar, 6),
-                "exposure_scalar": round(self._exposure_scalar, 6),
-                "regime_novel": bool(self._regime_novel),
-                "directional_gross": round(directional_gross, 6),
-                "total_gross": round(directional_gross + hedge_gross, 6),
-            },
-            "limits": {
-                "max_name_weight": self._max_name,
-                "max_sector_gross": 0.6,
-                "max_gross": self._max_gross,
-                "name_caps_ok": True,
-                "sector_caps_ok": True,
-                "gross_cap_ok": directional_gross <= self._max_gross + 1e-6,
-                "binding": sorted(set(binding)),
-            },
-            "model_version": "risk_combiner_v0_mock",
-            "is_production": False,
-        }
+        return positions, hedge, directional_gross, hedge_gross, binding
 
     def _build_hedge(self, weights: dict[str, float]) -> dict:
         if not weights or self._hedge_mode == "none":
@@ -210,13 +243,20 @@ class PaperBrokerExecution:
         if mode == "live":
             raise RuntimeError("PaperBrokerExecution cannot run in live mode (mock broker)")
 
-        # build target lots from net_positions + hedge legs
+        # Effective book mirrors execution.reconcile: live trades net_positions only; dry-run/paper
+        # ALSO paper-trade the shadow book so the forward-shadow track accrues. (mode != live here.)
         targets: dict[str, dict] = {}
         rejected: list[dict] = []
         for p in risk_book.get("net_positions", []):
             self._add_target(targets, rejected, p["ticker"], float(p["weight"]), prices, capital,
                              is_hedge=False, sleeve_contributions=p.get("sleeve_contributions", {}))
         for leg in risk_book.get("hedge", {}).get("legs", []):
+            self._add_target(targets, rejected, leg["instrument"], float(leg["weight"]), prices,
+                             capital, is_hedge=True, sleeve_contributions={})
+        for p in risk_book.get("shadow_positions", []):
+            self._add_target(targets, rejected, p["ticker"], float(p["weight"]), prices, capital,
+                             is_hedge=False, sleeve_contributions=p.get("sleeve_contributions", {}))
+        for leg in risk_book.get("shadow_hedge", {}).get("legs", []):
             self._add_target(targets, rejected, leg["instrument"], float(leg["weight"]), prices,
                              capital, is_hedge=True, sleeve_contributions={})
 

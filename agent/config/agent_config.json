@@ -32,7 +32,7 @@
       "prices_cmd": null
     },
     "sleeve": {
-      "_comment": "mode=live shells out to ml/scripts/predict_dividend_sleeve.py --out - (needs data/raw panels). Override command to pin an interpreter, e.g. [\"ml/.venv-win/Scripts/python.exe\", \"ml/scripts/predict_dividend_sleeve.py\"].",
+      "_comment": "mode=live shells out to ml/scripts/predict_dividend_sleeve.py --out - (needs data/raw panels). command=null => the orchestrator's own interpreter (sys.executable) + the script. Override with an ABSOLUTE interpreter path if needed (a relative exe like 'ml/.venv-win/Scripts/python.exe' fails on Windows and is not cross-platform), e.g. [\"/opt/moex/.venv/bin/python\", \"ml/scripts/predict_dividend_sleeve.py\"].",
       "mode": "mock",
       "model_version": "h9_dividend_runup_v1",
       "command": null
