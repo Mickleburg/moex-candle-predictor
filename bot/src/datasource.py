@@ -102,13 +102,27 @@ class ReadOnlyState:
 
     def gross(self, capital_state: str) -> float:
         """Book gross (sum |lots * last_price|) for a capital track, marked at last_price."""
-        total = 0.0
+        split = self.gross_split(capital_state)
+        return split["total"]
+
+    def gross_split(self, capital_state: str) -> dict[str, float]:
+        """Marked gross split into directional vs hedge legs (so the two are never conflated).
+
+        Returns {"directional", "hedge", "total"}. The directional gross is the real economic
+        exposure; the hedge legs offset it, so a combined gross can read >100% of capital and is
+        misleading on its own — /status shows them separately.
+        """
+        directional = hedge = 0.0
         for p in self.positions(capital_state):
             last = p.get("last_price")
             if last is None:
                 last = p.get("avg_price") or 0.0
-            total += abs(int(p.get("lots", 0)) * float(last))
-        return total
+            notional = abs(int(p.get("lots", 0)) * float(last))
+            if p.get("is_hedge"):
+                hedge += notional
+            else:
+                directional += notional
+        return {"directional": directional, "hedge": hedge, "total": directional + hedge}
 
     # --- per-sleeve P&L (live vs shadow kept separate) ---------------------------------
     def pnl_by_sleeve(self, capital_state: str | None = None) -> list[dict]:
@@ -172,6 +186,33 @@ def read_gate(path: Path | str) -> dict:
         out["forward_net"] = float(m.group(2))
         out["forward_pct_pos"] = float(m.group(3))
     return out
+
+
+def read_shadow_log(path: Path | str, limit: int = 5) -> list[dict]:
+    """Last ``limit`` records of the forward-shadow track (data/agent/shadow_pnl.jsonl).
+
+    The orchestrator appends one no-lookahead line per cycle (agent/src/pnl.append_shadow_log):
+    {trade_date, as_of, sleeves, regime, book, sleeve_pnl{sleeve:{unrealized,gross}}}. This is the
+    accrual the shadow gate watches in the July dividend season. Returns newest-last; malformed
+    lines are skipped, a missing file returns [].
+    """
+    p = Path(path)
+    if not p.exists():
+        return []
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records: list[dict] = []
+    for line in lines[-max(limit, 0):]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return records
 
 
 def last_close(ticker: str, timeframe: str, data_raw: Path | str) -> Optional[float]:

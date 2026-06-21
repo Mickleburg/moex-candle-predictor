@@ -19,11 +19,12 @@ crash.
 
 ## Commands (all read-only)
 
-- `/status` — mode, kill-switch, last cycle, live/shadow gross
+- `/status` — mode, kill-switch, last cycle, live/shadow gross (directional shown separately from hedge legs, so it never reads as a misleading >100% of capital)
 - `/positions` — live + shadow book, by name (lots / weight / sector)
 - `/pnl` — P&L by sleeve, **live separated from shadow**
 - `/prices [TICKERS]` — last close (defaults to the universe)
 - `/gate` — shadow gate: `is_production`, MET/NOT MET, forward P&L
+- `/shadowlog [N]` — last N forward-shadow cycles (`data/agent/shadow_pnl.jsonl`): date, sleeves, shadow P&L per sleeve (default 5)
 - `/cycle` — last EOD result: orders, binding limits, alerts
 - `/integrity` — data gate HALT/OK + reasons
 - `/help`

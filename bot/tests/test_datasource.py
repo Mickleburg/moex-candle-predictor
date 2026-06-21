@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bot.src.datasource import ReadOnlyState, read_gate, read_integrity
+from bot.src.datasource import (
+    ReadOnlyState,
+    read_gate,
+    read_integrity,
+    read_shadow_log,
+)
 
 
 def test_reads_positions_split_by_capital_state(seeded_db: Path):
@@ -21,6 +26,17 @@ def test_gross_marks_at_last_price(seeded_db: Path):
     # SBER 100*315 + MOEXFN 40*10100
     assert s.gross("live") == 100 * 315.0 + 40 * 10100.0
     assert s.gross("shadow") == 10 * 6800.0
+
+
+def test_gross_split_separates_directional_from_hedge(seeded_db: Path):
+    s = ReadOnlyState(seeded_db)
+    live = s.gross_split("live")
+    assert live["directional"] == 100 * 315.0       # SBER only
+    assert live["hedge"] == 40 * 10100.0            # MOEXFN hedge leg
+    assert live["total"] == live["directional"] + live["hedge"]
+    shadow = s.gross_split("shadow")
+    assert shadow["directional"] == 10 * 6800.0
+    assert shadow["hedge"] == 0.0
 
 
 def test_pnl_and_flags_and_cycle(seeded_db: Path):
@@ -49,6 +65,20 @@ def test_read_integrity(reports: dict[str, Path], tmp_path: Path):
     rep = read_integrity(reports["integrity"])
     assert rep["status"] == "OK"
     assert read_integrity(tmp_path / "absent.json") is None
+
+
+def test_read_shadow_log_tails_and_degrades(shadow_log_file: Path, tmp_path: Path):
+    recs = read_shadow_log(shadow_log_file, limit=5)
+    assert [r["trade_date"] for r in recs] == ["2026-07-08", "2026-07-09"]  # newest last
+    assert read_shadow_log(shadow_log_file, limit=1)[0]["trade_date"] == "2026-07-09"
+    assert read_shadow_log(tmp_path / "absent.jsonl") == []
+
+
+def test_read_shadow_log_skips_malformed(tmp_path: Path):
+    p = tmp_path / "shadow_pnl.jsonl"
+    p.write_text('{"trade_date":"2026-07-09"}\nnot json\n\n', encoding="utf-8")
+    recs = read_shadow_log(p)
+    assert len(recs) == 1 and recs[0]["trade_date"] == "2026-07-09"
 
 
 def test_read_gate_parses_verdict_and_forward(reports: dict[str, Path], tmp_path: Path):

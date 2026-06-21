@@ -15,6 +15,7 @@ from .datasource import (
     last_close,
     read_gate,
     read_integrity,
+    read_shadow_log,
     sector_of,
 )
 
@@ -32,8 +33,8 @@ class Monitor:
             "live_enabled": self.config.live_enabled,
             "kill_switch": s.kill_switch_engaged(),
             "last_cycle": s.last_cycle(),
-            "live_gross": s.gross("live"),
-            "shadow_gross": s.gross("shadow"),
+            "live_gross": s.gross_split("live"),
+            "shadow_gross": s.gross_split("shadow"),
         })
 
     def positions(self) -> str:
@@ -63,6 +64,10 @@ class Monitor:
             read_gate(self.config.gate_report),
             self.state.pnl_by_sleeve("shadow"),
         )
+
+    def shadowlog(self, n: int | None = None) -> str:
+        limit = n if (n and n > 0) else 5
+        return fmt.fmt_shadowlog(read_shadow_log(self.config.shadow_log, limit=limit))
 
     def cycle(self) -> str:
         return fmt.fmt_cycle(self.state.latest_cycle("eod"))

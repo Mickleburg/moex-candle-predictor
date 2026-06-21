@@ -86,6 +86,25 @@ def reports(tmp_path: Path) -> dict[str, Path]:
 
 
 @pytest.fixture
+def shadow_log_file(tmp_path: Path) -> Path:
+    """A forward-shadow track with two cycles (matches agent/src/pnl.append_shadow_log shape)."""
+    path = tmp_path / "shadow_pnl.jsonl"
+    recs = [
+        {"ts": "2026-07-08T19:05:00+00:00", "trade_date": "2026-07-08",
+         "as_of": "2026-07-08T19:05:00+03:00", "sleeves": ["s3_event"],
+         "regime": {"exposure_scalar": 1.0, "regime_novel": False},
+         "book": [], "sleeve_pnl": {}},
+        {"ts": "2026-07-09T19:05:00+00:00", "trade_date": "2026-07-09",
+         "as_of": "2026-07-09T19:05:00+03:00", "sleeves": ["s3_event"],
+         "regime": {"exposure_scalar": 1.0, "regime_novel": False},
+         "book": [{"ticker": "MTSS", "lots": 50, "last_price": 300.0, "is_hedge": False}],
+         "sleeve_pnl": {"s3_event": {"unrealized": 1200.0, "gross": 15000.0}}},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.fixture
 def bot_config(seeded_db: Path, reports: dict[str, Path], tmp_path: Path) -> BotConfig:
     return BotConfig(
         token="test-token",

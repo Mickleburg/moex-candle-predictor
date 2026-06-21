@@ -57,7 +57,10 @@ def fmt_status(d: dict) -> str:
         f"mode: {escape(d['mode'])} / block={escape(d['block_mode'])} / live_enabled={d['live_enabled']}",
         f"kill-switch: {ks}",
         f"last cycle: {escape(last)}",
-        f"gross — live {money(d['live_gross'])} | shadow {money(d['shadow_gross'])}",
+        f"gross (directional) — live {money(d['live_gross']['directional'])} | "
+        f"shadow {money(d['shadow_gross']['directional'])}",
+        f"  +hedge — live {money(d['live_gross']['hedge'])} | "
+        f"shadow {money(d['shadow_gross']['hedge'])}",
     ]
     return "\n".join(lines)
 
@@ -181,6 +184,26 @@ def fmt_integrity(report: dict | None) -> str:
     return "\n".join(lines)
 
 
+def fmt_shadowlog(records: list[dict]) -> str:
+    """Render the tail of the forward-shadow track: per cycle, sleeves + shadow P&L by sleeve."""
+    lines = [_b("Forward-shadow log (newest last)")]
+    if not records:
+        lines.append("  no shadow-log entries yet")
+        return "\n".join(lines)
+    for rec in records:
+        td = rec.get("trade_date", "?")
+        sleeves = rec.get("sleeves") or []
+        sleeve_str = ", ".join(map(str, sleeves)) if sleeves else "—"
+        lines.append(f"\n{_b(escape(str(td)))}  sleeves: {escape(sleeve_str)}")
+        sleeve_pnl = rec.get("sleeve_pnl") or {}
+        if not sleeve_pnl:
+            lines.append("  shadow P&L: (flat — no holdings)")
+        for sleeve, vals in sleeve_pnl.items():
+            unreal = (vals or {}).get("unrealized", 0.0)
+            lines.append(f"  {escape(str(sleeve))}: shadow P&L {money(unreal)}")
+    return "\n".join(lines)
+
+
 HELP_TEXT = (
     f"{_b('MOEX agent monitor')} (read-only)\n"
     "/status — mode, kill-switch, last cycle, live/shadow gross\n"
@@ -188,6 +211,7 @@ HELP_TEXT = (
     "/pnl — P&L by sleeve (live vs shadow)\n"
     "/prices [TICKERS] — last close (default: universe)\n"
     "/gate — shadow gate: is_production, MET/NOT MET, forward P&L\n"
+    "/shadowlog [N] — last N forward-shadow cycles (default 5)\n"
     "/cycle — last EOD result: orders, binding limits, alerts\n"
     "/integrity — data gate OK/HALT + reasons\n"
     "/help — this message"
