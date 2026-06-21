@@ -49,8 +49,11 @@ class SleeveAdapter(Protocol):
 
 
 class CombinerAdapter(Protocol):
-    def combine(self, sleeve_signals: list[dict], as_of: str) -> dict:
-        """Cycle step 5: net sleeves -> risk_book (vol-target x regime gate x limits x hedge)."""
+    def combine(self, sleeve_signals: list[dict], as_of: str,
+                *, sleeve_status: dict[str, dict] | None = None) -> dict:
+        """Cycle step 5: net sleeves -> risk_book (vol-target x regime gate x limits x hedge x
+        shadow gate). `sleeve_status` (per-sleeve, from the agent's LIVE forward-P&L attribution)
+        closes invariant #9: a production sleeve with negative forward P&L is demoted to shadow."""
         ...
 
 

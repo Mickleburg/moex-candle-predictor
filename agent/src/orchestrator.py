@@ -87,36 +87,58 @@ class Orchestrator:
         # step 4 — ML sleeve
         sleeve_signal = contracts.validate(self.adapters.sleeve.build_sleeve(as_of), "sleeve_signal")
 
-        # step 5 — risk_manager combiner
-        risk_book = contracts.validate(self.adapters.combiner.combine([sleeve_signal], as_of), "risk_book")
+        # step 5 — risk_manager combiner + shadow gate. Feed the LIVE forward-P&L attribution as
+        # sleeve_status so a production sleeve whose forward P&L turned negative is demoted to shadow
+        # (invariant #9). H9 is shadow anyway (is_production=false) — this closes the seam for the
+        # day a sleeve is signed off.
+        sleeve_status = self.store.forward_pnl_by_sleeve("live")
+        risk_book = contracts.validate(
+            self.adapters.combiner.combine([sleeve_signal], as_of, sleeve_status=sleeve_status),
+            "risk_book")
         rs = risk_book["risk_scalars"]
 
         # prices for sizing + marks
         prices = self.adapters.backend.latest_prices(self.config.universe, as_of)
 
-        # step 6 — execution (paper-first: live only with the hard gate)
+        # step 6 — execution (paper-first: live only with the hard gate). In paper/dry-run execution
+        # also paper-trades the SHADOW book; in live it trades net_positions only. Pass the matching
+        # current book so reconciliation sees steady state (full paper book vs live-only).
         eff_mode, mode_note = self._effective_exec_mode()
+        current = (self.store.get_positions("live") if eff_mode == "live"
+                   else self.store.get_positions(None))
         if kill:
             exec_orders, exec_reports, exec_positions, rejected = [], [], None, []
             exec_note = "kill-switch engaged — execution skipped, monitoring only"
         else:
             er = self.adapters.execution.reconcile_and_execute(
-                risk_book=risk_book, positions=self.store.get_positions(), prices=prices,
+                risk_book=risk_book, positions=current, prices=prices,
                 capital=self.config.capital_rub, mode=eff_mode, trade_date=td, phase=phase)
             exec_orders, exec_reports, exec_positions, rejected = er.orders, er.reports, er.positions, er.rejected
             exec_note = f"executed {len(exec_orders)} delta-order(s) in {eff_mode} mode. {mode_note}".strip()
 
-        # step 7 — persist book + per-sleeve P&L attribution + shadow log
+        # step 7 — persist book + per-sleeve P&L attribution, split LIVE vs SHADOW capital.
+        # A filled position is LIVE capital iff it came from net_positions/hedge (passed the gate);
+        # SHADOW iff from shadow_positions/shadow_hedge. Shadow paper-fills accrue forward-P&L for
+        # the gate WITHOUT being counted as live edge.
         self._record_orders_and_fills(td, phase, exec_orders, exec_reports)
         if not kill and eff_mode in ("paper", "live") and exec_positions is not None:
-            self._replace_book(exec_positions)
-        book = self.store.get_positions()
-        sleeve_pnl = pnl.attribute_book_pnl(book)
-        for sleeve, vals in sleeve_pnl.items():
-            self.store.record_pnl_attribution(td, sleeve, realized=0.0,
-                                               unrealized=vals["unrealized"], gross=vals["gross"])
+            live_pos, shadow_pos = self._classify_positions(exec_positions, risk_book)
+            self._replace_book(live_pos, capital_state="live")
+            self._replace_book(shadow_pos, capital_state="shadow")
+
+        live_book = self.store.get_positions("live")
+        shadow_book = self.store.get_positions("shadow")
+        live_pnl = pnl.attribute_book_pnl(live_book)
+        shadow_pnl = pnl.attribute_book_pnl(shadow_book)
+        for sleeve, vals in live_pnl.items():
+            self.store.record_pnl_attribution(td, sleeve, realized=0.0, unrealized=vals["unrealized"],
+                                               gross=vals["gross"], capital_state="live")
+        for sleeve, vals in shadow_pnl.items():
+            self.store.record_pnl_attribution(td, sleeve, realized=0.0, unrealized=vals["unrealized"],
+                                               gross=vals["gross"], capital_state="shadow")
+        # the shadow log is the forward-shadow track (the gate that lifts is_production)
         pnl.append_shadow_log(self.config.shadow_log, trade_date=td, as_of=as_of,
-                              risk_book=risk_book, positions=book, sleeve_pnl=sleeve_pnl)
+                              risk_book=risk_book, positions=shadow_book, sleeve_pnl=shadow_pnl)
 
         # step 8 — result + digest
         risk_summary = {
@@ -124,17 +146,21 @@ class Orchestrator:
             "exposure_scalar": rs.get("exposure_scalar"), "regime_novel": rs.get("regime_novel"),
             "vol_scalar": rs.get("vol_scalar"),
             "directional_gross": rs.get("directional_gross"), "total_gross": rs.get("total_gross"),
+            "shadow_gross": rs.get("shadow_gross", 0.0),
             "binding_limits": risk_book["limits"].get("binding", []),
             "hedge_mode": risk_book["hedge"]["mode"],
+            "gating": risk_book.get("gating", []),
             "capital_rub": self.config.capital_rub,
             "block_modes": self.adapters.modes, "calendar": tcal.calendar_source(),
-            "exec_note": exec_note, "sleeve_pnl": sleeve_pnl,
+            "exec_note": exec_note,
+            "live_sleeve_pnl": live_pnl, "shadow_sleeve_pnl": shadow_pnl,
         }
         result = self._cycle_result(td, as_of, mode=eff_mode, orders=exec_orders,
                                     rejected=rejected, risk_summary=risk_summary)
         status = "killed" if kill else "completed"
         self._persist_result(td, phase, status, result)
-        self._alert(f"EOD digest — {td} ({status})", self._digest_text(td, result, risk_book, sleeve_pnl))
+        self._alert(f"EOD digest — {td} ({status})",
+                    self._digest_text(td, result, risk_book, live_pnl, shadow_pnl))
         return {"status": status, "trade_date": td, "result": result}
 
     # ----------------------------------------------------------------- pre-open
@@ -225,15 +251,33 @@ class Orchestrator:
         for rep in reports:
             self.store.record_execution(rep)
 
-    def _replace_book(self, new_positions: list[dict]) -> None:
+    def _replace_book(self, new_positions: list[dict], *, capital_state: str = "live") -> None:
         new_by_ticker = {p["ticker"]: p for p in new_positions}
-        for p in self.store.get_positions():
+        for p in self.store.get_positions(capital_state):
             if p["ticker"] not in new_by_ticker:
-                self.store.upsert_position(p["ticker"], 0, 0.0, None)   # closed
+                self.store.upsert_position(p["ticker"], 0, 0.0, None, capital_state=capital_state)  # closed
         for p in new_positions:
             self.store.upsert_position(p["ticker"], int(p["lots"]), float(p.get("avg_price", 0.0)),
                                        p.get("last_price"), is_hedge=bool(p.get("is_hedge")),
-                                       sleeve_contributions=p.get("sleeve_contributions") or {})
+                                       sleeve_contributions=p.get("sleeve_contributions") or {},
+                                       capital_state=capital_state)
+
+    @staticmethod
+    def _classify_positions(positions: list[dict], risk_book: dict) -> tuple[list[dict], list[dict]]:
+        """Split a post-fill book into (live, shadow) by the gate: net_positions/hedge -> live,
+        shadow_positions/shadow_hedge -> shadow. A position in neither (a stale residual) defaults
+        to live. (One-sleeve book: live and shadow instruments are disjoint.)"""
+        live_inst = {p["ticker"] for p in risk_book.get("net_positions", [])}
+        live_inst |= {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
+        shadow_inst = {p["ticker"] for p in risk_book.get("shadow_positions", [])}
+        shadow_inst |= {leg["instrument"] for leg in risk_book.get("shadow_hedge", {}).get("legs", [])}
+        live, shadow = [], []
+        for p in positions:
+            if p["ticker"] in shadow_inst and p["ticker"] not in live_inst:
+                shadow.append(p)
+            else:
+                live.append(p)
+        return live, shadow
 
     def _cancel_all(self, open_orders: list[dict]) -> None:
         for o in open_orders:
@@ -271,16 +315,20 @@ class Orchestrator:
         self.notifier.send(subject, body)
 
     @staticmethod
-    def _digest_text(td: str, result: dict, risk_book: dict, sleeve_pnl: dict) -> str:
+    def _digest_text(td: str, result: dict, risk_book: dict, live_pnl: dict, shadow_pnl: dict) -> str:
         rs = result["risk_summary"]
         lines = [f"trade_date={td}  mode={result['mode']}",
                  f"orders: {len(result['selected_orders'])}  "
-                 f"gross(dir/total)={rs.get('directional_gross')}/{rs.get('total_gross')}",
+                 f"live_gross={rs.get('directional_gross')}  shadow_gross={rs.get('shadow_gross')}",
                  f"regime: exposure_scalar={rs.get('exposure_scalar')} novel={rs.get('regime_novel')}",
                  f"hedge={rs.get('hedge_mode')}  binding={rs.get('binding_limits')}",
                  f"kill_switch={rs.get('kill_switch')}  calendar={rs.get('calendar')}"]
-        for sleeve, vals in sleeve_pnl.items():
-            lines.append(f"  P&L[{sleeve}]: unrealized={vals['unrealized']:.2f} gross={vals['gross']:.2f}")
+        for g in rs.get("gating", []):
+            lines.append(f"  gate[{g.get('sleeve')}]: {g.get('capital_state')} ({g.get('reason')})")
+        for sleeve, vals in live_pnl.items():
+            lines.append(f"  LIVE P&L[{sleeve}]: unrealized={vals['unrealized']:.2f} gross={vals['gross']:.2f}")
+        for sleeve, vals in shadow_pnl.items():
+            lines.append(f"  SHADOW P&L[{sleeve}]: unrealized={vals['unrealized']:.2f} gross={vals['gross']:.2f}")
         for o in result["selected_orders"][:12]:
             lines.append(f"  {o['side']} {o['quantity_lots']} {o['ticker']} @ {o.get('limit_price')}")
         return "\n".join(lines)

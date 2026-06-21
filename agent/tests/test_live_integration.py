@@ -50,14 +50,17 @@ def test_full_cycle_with_real_execution_engine(tmp_path):
 
     assert out["status"] == "completed"
     assert out["result"]["mode"] == "paper"
-    # the REAL paper broker (execution block) filled the book — 3 longs + 2 sector hedge legs
-    book = {p["ticker"] for p in store.get_positions()}
-    assert {"SBER", "LKOH", "TATN"} <= book
-    assert any(p["is_hedge"] for p in store.get_positions())
+    # H9 is shadow: the REAL paper broker folds + fills the SHADOW book (3 longs + sector hedges),
+    # but it lands in the SHADOW track with zero live capital.
+    shadow = {p["ticker"] for p in store.get_positions("shadow")}
+    assert {"SBER", "LKOH", "TATN"} <= shadow
+    assert store.get_positions("live") == []
+    assert any(p["is_hedge"] for p in store.get_positions("shadow"))
     # execution persisted its own durable state (dup-ledger / audit) in the backed-up data tree
     assert (tmp_path / "exstate").exists()
-    # per-sleeve attribution still recorded by the agent
-    assert any(r["sleeve"] == "s3_event" for r in store.pnl_by_sleeve())
+    # per-sleeve attribution recorded on the shadow track, not live
+    pnl = {(r["sleeve"], r["capital_state"]) for r in store.pnl_by_sleeve()}
+    assert ("s3_event", "shadow") in pnl and ("s3_event", "live") not in pnl
 
 
 def test_real_execution_dedup_across_reruns(tmp_path):
@@ -88,5 +91,5 @@ def test_llm_refresh_failure_does_not_block_cycle(tmp_path):
     orch, store, note = _orch(cfg)
     out = orch.run_eod_cycle(trade_date=TD)
     assert out["status"] == "completed"                       # trading not blocked
-    assert store.get_positions()
+    assert store.get_positions("shadow")                      # shadow book still paper-traded
     assert any("LLM feed refresh" in s for s in note.subjects())

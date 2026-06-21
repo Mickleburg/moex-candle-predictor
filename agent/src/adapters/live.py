@@ -68,7 +68,8 @@ class LiveCombiner:
         self._hedge_mode = hedge_mode
         self._target_vol = target_book_vol_annual
 
-    def combine(self, sleeve_signals: list[dict], as_of: str) -> dict:
+    def combine(self, sleeve_signals: list[dict], as_of: str,
+                *, sleeve_status: dict[str, dict] | None = None) -> dict:
         import pandas as pd  # lazy
         sys.path.insert(0, str(REPO_ROOT))
         sys.path.insert(0, str(REPO_ROOT / "ml"))
@@ -82,7 +83,7 @@ class LiveCombiner:
         risk_analytics = build_risk_analytics(panel, market, as_of=ts)
         cfg = CombinerConfig(hedge_mode=self._hedge_mode, timeframe=self._timeframe,
                              target_book_vol_annual=self._target_vol)
-        book = combine(sleeve_signals, risk_analytics, cfg)
+        book = combine(sleeve_signals, risk_analytics, cfg, sleeve_status=sleeve_status)
         return contracts.validate(book.to_dict(), "risk_book")
 
 
@@ -186,8 +187,10 @@ class LiveExecution:
         rejected = [{"ticker": s.get("instrument", "*"), "reason": s.get("reason", "")}
                     for s in res.skipped]
         rejected += [{"ticker": "*", "reason": f"discipline:{f.get('rule', f)}"} for f in res.findings]
+        # Reconstruct the FULL post-fill book from current + applied fills (the PaperBroker is
+        # per-instance, so broker.positions() carries only THIS cycle's deltas, not the whole book).
         post_positions = ([] if mode == "dry-run"
-                          else _enrich_book(engine.broker.positions(), risk_book, prices))
+                          else _post_fill_book(positions, res.submitted, res.reports, risk_book, prices))
         return ExecutionResult(orders=res.submitted, reports=res.reports,
                                positions=post_positions, rejected=rejected)
 
@@ -203,18 +206,31 @@ class LiveExecution:
                                positions=out.get("positions", []), rejected=out.get("rejected", []))
 
 
-def _enrich_book(broker_positions: dict[str, int], risk_book: dict,
-                 prices: dict[str, float]) -> list[dict]:
-    """Turn execution's signed lot map into the agent's position rows, re-attaching the sleeve
-    attribution + hedge flag from the risk_book (execution does not track those)."""
+def _post_fill_book(current: list[dict], submitted: list[dict], reports: list[dict],
+                    risk_book: dict, prices: dict[str, float]) -> list[dict]:
+    """Resulting book = current holdings + applied fills, re-attaching sleeve attribution + the
+    hedge flag from the risk_book (net + shadow, since paper folds the shadow book in)."""
+    lots: dict[str, int] = {p["ticker"]: int(p["lots"]) for p in current}
+    filled = {r["client_order_id"] for r in reports
+              if r.get("status") in ("FILLED", "PLACED") and r.get("filled_quantity_lots", 0)}
+    fill_qty = {r["client_order_id"]: int(r.get("filled_quantity_lots", 0)) for r in reports}
+    for o in submitted:
+        coid = o["client_order_id"]
+        if coid not in filled:
+            continue
+        signed = fill_qty[coid] if o["side"] == "BUY" else -fill_qty[coid]
+        lots[o["ticker"]] = lots.get(o["ticker"], 0) + signed
+
     hedge = {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
-    sc = {p["ticker"]: p.get("sleeve_contributions", {}) for p in risk_book.get("net_positions", [])}
+    hedge |= {leg["instrument"] for leg in risk_book.get("shadow_hedge", {}).get("legs", [])}
+    sc = {p["ticker"]: p.get("sleeve_contributions", {})
+          for p in (risk_book.get("net_positions", []) + risk_book.get("shadow_positions", []))}
     out: list[dict] = []
-    for ticker, lots in broker_positions.items():
-        if not lots:
+    for ticker, l in lots.items():
+        if not l:
             continue
         price = prices.get(ticker)
-        out.append({"ticker": ticker, "lots": int(lots),
+        out.append({"ticker": ticker, "lots": int(l),
                     "avg_price": round(price, 4) if price else 0.0,
                     "last_price": round(price, 4) if price else None,
                     "is_hedge": ticker in hedge, "sleeve_contributions": sc.get(ticker, {})})
