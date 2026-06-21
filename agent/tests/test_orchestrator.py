@@ -22,9 +22,13 @@ def test_h9_default_is_shadow_paper_traded(tmp_path):
     assert out["status"] == "completed"
     result = out["result"]
     assert result["mode"] == "paper"
-    # paper folds the shadow book -> there ARE paper orders, but they are SHADOW capital
-    assert len(result["selected_orders"]) > 0
     rs = result["risk_summary"]
+    # selected_orders carries LIVE intents only -> 0 for an unproven sleeve...
+    assert result["selected_orders"] == []
+    assert rs["n_live_orders"] == 0
+    # ...but the paper-shadow activity is surfaced explicitly (count + list), not hidden.
+    assert rs["n_shadow_orders"] > 0
+    assert len(rs["shadow_orders"]) == rs["n_shadow_orders"]
     assert rs["directional_gross"] == 0.0          # ZERO live capital for an unproven sleeve
     assert rs["shadow_gross"] > 0.0
     assert any(g["sleeve"] == "s3_event" and g["capital_state"] == "shadow" for g in rs["gating"])
@@ -45,6 +49,8 @@ def test_production_sleeve_takes_live_capital(tmp_path):
     out = orch.run_eod_cycle(trade_date=TD)
     rs = out["result"]["risk_summary"]
     assert rs["directional_gross"] > 0.0           # live capital deployed
+    assert out["result"]["selected_orders"], "live orders are the selected (live-capital) intents"
+    assert rs["n_live_orders"] > 0 and rs["n_shadow_orders"] == 0
     assert store.get_positions("live"), "a signed-off sleeve trades the live book"
     assert any(g["capital_state"] == "live" for g in rs["gating"])
     pnl = {(r["sleeve"], r["capital_state"]) for r in store.pnl_by_sleeve()}
@@ -129,7 +135,9 @@ def test_dry_run_does_not_change_book(tmp_path):
     out = orch.run_eod_cycle(trade_date=TD)
     assert out["status"] == "completed"
     assert out["result"]["mode"] == "dry-run"
-    assert len(out["result"]["selected_orders"]) > 0   # orders computed
+    # H9 shadow: no live intents, but shadow delta-orders were computed (and surfaced)
+    assert out["result"]["selected_orders"] == []
+    assert out["result"]["risk_summary"]["n_shadow_orders"] > 0
     assert store.get_positions(None) == []             # but book untouched
 
 

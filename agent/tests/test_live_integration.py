@@ -64,15 +64,15 @@ def test_full_cycle_with_real_execution_engine(tmp_path):
 
 
 def test_real_execution_dedup_across_reruns(tmp_path):
-    # execution's own client_order_id ledger must stop a duplicate order on a forced re-run
+    # execution's own client_order_id ledger + steady-state reconcile must stop duplicate orders
     cfg = _config(tmp_path)
     orch, store, _ = _orch(cfg)
-    orch.run_eod_cycle(trade_date=TD)
-    n_exec_first = len(store.all_orders())
-    # force a second cycle for the same day -> execution sees identical target -> no-op/dup-skip
+    out1 = orch.run_eod_cycle(trade_date=TD)
+    assert out1["result"]["risk_summary"]["n_shadow_orders"] > 0   # built the shadow book
+    # force a second cycle for the same day -> execution sees identical target -> no new orders
     out2 = orch.run_eod_cycle(trade_date=TD, force=True)
     assert out2["status"] == "completed"
-    assert len(out2["result"]["selected_orders"]) == 0   # already at target, nothing submitted
+    assert out2["result"]["risk_summary"]["n_shadow_orders"] == 0  # already at target, nothing submitted
 
 
 def test_llm_refresh_runs_before_sleeve(tmp_path):

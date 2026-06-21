@@ -50,6 +50,10 @@ def cmd_status(args) -> int:
         "live_positions": store.get_positions("live"),
         "shadow_positions": store.get_positions("shadow"),
         "open_orders": store.open_orders(),
+        # observability: paper-shadow trading activity (the H9 forward-shadow track), so an empty
+        # live book reads as "0 live, N shadow" rather than just "nothing happening".
+        "recent_shadow_orders": store.recent_orders("shadow", limit=20),
+        "recent_live_orders": store.recent_orders("live", limit=20),
         "pnl_by_sleeve": store.pnl_by_sleeve(),
     })
     return 0
