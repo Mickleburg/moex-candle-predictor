@@ -28,15 +28,17 @@ DATA_RAW = REPO_ROOT / "data" / "raw"
 
 # Shared MOEX trading calendar (RU-holiday-aware) owned by the backend block. Future ex-date
 # countdowns must skip RU holidays (record dates cluster May-Jul around 1/9 May & 12 Jun) or the
-# entry/exit timing drifts. Fall back to weekend-only np.busday_count if backend isn't importable
-# (e.g. ML run in isolation) — LOUDLY, since that reintroduces the holiday drift.
+# entry/exit timing drifts. Consume it through the FROZEN orchestrator seam `backend.api`
+# (re-exports trading_days_between) rather than the internal module. Fall back to weekend-only
+# np.busday_count if backend isn't importable (e.g. ML run in isolation) — LOUDLY, since that
+# reintroduces the holiday drift.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 try:
-    from backend.trading_calendar import trading_days_between
+    from backend.api import trading_days_between
 except Exception:  # pragma: no cover - isolation fallback
     def trading_days_between(start, end) -> int:
-        warnings.warn("backend.trading_calendar unavailable; falling back to RU-holiday-NAIVE "
+        warnings.warn("backend.api.trading_days_between unavailable; falling back to RU-holiday-NAIVE "
                       "np.busday_count for trading-day counts", RuntimeWarning, stacklevel=2)
         return int(np.busday_count(pd.Timestamp(start).date(), pd.Timestamp(end).date()))
 
