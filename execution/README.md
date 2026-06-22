@@ -35,6 +35,52 @@ live     ── real orders — REFUSED unless ALL of:
 
 There is no accidental live path: `make_broker` raises `PermissionError` if any gate is unmet.
 
+## T-Invest sandbox — verified wire integration
+
+`TInvestBroker` (`src/brokers/tinvest.py`) speaks the public REST gateway (stdlib only). It has been
+**wire-tested end-to-end against the T-Invest SANDBOX** (`scripts/wire_test_tinvest_sandbox.py`):
+open + fund a sandbox account → pull a real-time quote → marketable LIMIT BUY **fills** → passive
+LIMIT **cancels** → **duplicate protection** holds → close the account. The `order_request` ⇄
+`execution_report` forms match the wire API. Notes learned on the wire:
+
+- the API requires the idempotency `orderId` to be a **UUID** — we map each human `client_order_id`
+  to a deterministic `uuid5`, so a re-sent intent is deduped by the broker (`code 30057`);
+- `quantity` is in **lots**; prices are `{units, nano}` quotations snapped to the instrument MINSTEP.
+
+Run it locally (needs `TINVEST_TOKEN` in `.env`):
+
+```powershell
+& "ml\.venv-win\Scripts\python.exe" execution/scripts/wire_test_tinvest_sandbox.py
+# or as an opt-in pytest (skipped by default):
+$env:EXECUTION_WIRE_TEST=1; & "ml\.venv-win\Scripts\python.exe" -m pytest execution/tests/test_tinvest_sandbox.py
+```
+
+### Order prices come from broker quotes (no paid data subscription)
+
+In **live**, `make_broker` sets `price_from_quote=True`, so the limit price is sourced from T-Invest's
+**real-time order book / last price** (`GetOrderBook` / `GetLastPrices`) at submit time, not the EOD
+reference close. These quotes are served on the brokerage account with **no separate paid market-data
+subscription**. In paper/sandbox we keep the deterministic reference-close limit so a paper run still
+reconciles against the sleeve sim.
+
+### Live cutover — exact enable sequence (do NOT enable yet)
+
+Live stays off until **every** gate below is satisfied — currently blocked (shadow gate NOT MET, FIGIs
+unverified, no sign-off):
+
+1. **Shadow gate MET** — H9 `is_production=true` + a passed forward-P&L gate (risk_manager emits the
+   sleeve in `net_positions`, not `shadow_positions`). Until then live reconciles to **0 orders**.
+2. **FIGIs verified** — `backend.instruments.all_verified()` is `true` (FIGIs checked against a
+   T-Invest dump). `make_broker` refuses live otherwise.
+3. **Double flag** — `EXECUTION_ALLOW_LIVE=1` (env) **and** `ExecutionConfig.allow_live=True`; the
+   agent additionally requires `AGENT_ENABLE_LIVE=true` + `mode=live`.
+4. **Team sign-off** — explicit human approval; flip `blocks.execution.mode` to `live` in
+   `agent/config/agent_config.json`.
+5. Real broker credentials in `.env` (`TINVEST_TOKEN` full-access, `TINVEST_ACCOUNT_ID`) — never git.
+
+Miss any one and `make_broker(Mode.LIVE)` raises `PermissionError`. `is_production=false` on artifacts
+until step 4.
+
 ## Shadow gate — which book each mode trades
 
 The risk_manager splits the `risk_book` by a shadow gate (invariants #9/#4): proven LIVE sleeves go to
@@ -186,8 +232,9 @@ execution/
     cli.py             serve (orchestrator seam) / dry-run / paper-season / kill / unkill
     brokers/           base ABC, DryRun, PaperBroker (sim), TInvestBroker (sandbox/live, gated)
   examples/            prices, illustrative season, serve request envelope
-  scripts/             demo_serve.py, demo_dry_run.py, demo_paper_season.py
-  tests/               reconcile, discipline, protections, season, serve, contract conformance, calendar
+  scripts/             demo_serve.py, demo_dry_run.py, demo_paper_season.py, wire_test_tinvest_sandbox.py
+  tests/               reconcile, discipline, protections, season, serve, contract conformance,
+                       calendar, instruments, tinvest unit (offline) + tinvest sandbox (opt-in)
   var/                 runtime audit/state (gitignored; override via EXECUTION_STATE_DIR/AUDIT_DIR)
 ```
 

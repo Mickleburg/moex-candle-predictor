@@ -53,6 +53,8 @@ def make_broker(config: ExecutionConfig, **broker_kwargs) -> BrokerAdapter:
                 "LIVE refused: backend reports unverified FIGIs. Verify them against a T-Invest "
                 "dump (backend.instruments.all_verified()) before trading real money.")
         broker_kwargs.setdefault("figi_by_ticker", _default_figi_map())
+        # Live limit prices are sourced from the broker's real-time quote (no paid data sub).
+        broker_kwargs.setdefault("price_from_quote", True)
         return TInvestBroker(sandbox=False, **broker_kwargs)
 
     raise ValueError(f"unknown mode: {config.mode}")
