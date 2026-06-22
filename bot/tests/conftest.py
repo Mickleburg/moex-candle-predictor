@@ -108,6 +108,7 @@ def shadow_log_file(tmp_path: Path) -> Path:
 def bot_config(seeded_db: Path, reports: dict[str, Path], tmp_path: Path) -> BotConfig:
     return BotConfig(
         token="test-token",
+        admin_chat_ids=frozenset({999}),
         allowed_chat_ids=frozenset({111}),
         state_db=seeded_db,
         shadow_log=tmp_path / "shadow_pnl.jsonl",
@@ -115,6 +116,7 @@ def bot_config(seeded_db: Path, reports: dict[str, Path], tmp_path: Path) -> Bot
         integrity_report=reports["integrity"],
         gate_report=reports["gate"],
         data_raw=tmp_path / "raw",
+        allowlist_path=tmp_path / "bot" / "allowlist.json",
         universe=["SBER", "LKOH"],
         capital_rub=10_000_000.0,
         timeframe="1D",

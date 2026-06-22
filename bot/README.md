@@ -29,12 +29,25 @@ crash.
 - `/integrity` — data gate HALT/OK + reasons
 - `/help`
 
+Admin-only management commands (visible in `/help` only to admins):
+
+- `/users` — show the allowlist: admins (👑, immutable), env seed, managed (note + who added)
+- `/allow <chat_id> [note]` — grant read access at runtime (no restart)
+- `/deny <chat_id>` — revoke a **managed** id (refuses admins / env-seed ids)
+
 live and shadow capital are always rendered as separate, labelled sections — never conflated.
 
-## Security (fail-closed)
+## Access control (two tiers, fail-closed)
 
-- **Chat-id whitelist.** `BOT_ALLOWED_CHAT_IDS` (comma-separated owner ids). Any update from a
-  non-whitelisted chat is ignored + logged. An **empty whitelist makes the bot refuse to start.**
+- **admin** — `BOT_ADMIN_CHAT_IDS` (env bootstrap, the root of trust). May run the management
+  commands and **can never be removed via the bot** (fail-safe against self-lockout).
+- **allowed** — may run read commands. Effective set = **admins ∪ `BOT_ALLOWED_CHAT_IDS` (env
+  seed) ∪ managed store**. The managed store is the bot's OWN file `data/bot/allowlist.json`
+  (gitignored, atomic writes) — *not* the agent DB, which the bot only ever opens `mode=ro`.
+  `/allow` / `/deny` edit it and take effect **immediately** (the set is read dynamically).
+- A non-whitelisted user who messages the bot gets a short reply with **their own chat id** (not
+  silence) so requesting access is self-service; admins also get a best-effort notification.
+- **Fail-closed:** with no admins AND no allowed ids the bot **refuses to start**.
 - **Token from the environment only.** `TELEGRAM_BOT_TOKEN`, never in git. See `.env.example`.
 
 ## Coordination with the agent notifier (one token)
@@ -47,7 +60,7 @@ conflict.** Never start a second poller on the same token.
 ## Run (local)
 
 ```powershell
-# .env at repo root (gitignored): TELEGRAM_BOT_TOKEN=...  BOT_ALLOWED_CHAT_IDS=<your id>
+# .env at repo root (gitignored): TELEGRAM_BOT_TOKEN=...  BOT_ADMIN_CHAT_IDS=<your id>
 & "ml\.venv-win\Scripts\python.exe" -m bot
 ```
 

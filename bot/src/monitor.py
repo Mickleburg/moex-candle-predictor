@@ -75,5 +75,5 @@ class Monitor:
     def integrity(self) -> str:
         return fmt.fmt_integrity(read_integrity(self.config.integrity_report))
 
-    def help(self) -> str:
-        return fmt.HELP_TEXT
+    def help(self, is_admin: bool = False) -> str:
+        return fmt.fmt_help(is_admin)

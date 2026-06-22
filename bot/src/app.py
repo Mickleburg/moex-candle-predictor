@@ -1,9 +1,9 @@
 """Telegram wiring — the ONLY module that imports python-telegram-bot.
 
-Everything else (config, datasource, monitor, formatters) is library-agnostic and unit-tested
-offline; this module just binds the Monitor's methods to commands and enforces the chat-id
-whitelist. ``python-telegram-bot`` is imported lazily inside the functions so importing the bot
-package (and running its tests) never requires the library to be installed.
+Everything else (config, datasource, monitor, admin, router, formatters) is library-agnostic and
+unit-tested offline; this module binds a single ``Router`` to PTB handlers and enforces nothing
+itself — the Router owns the authorization matrix. ``python-telegram-bot`` is imported lazily
+inside the functions so importing the bot package (and running its tests) never requires it.
 
 Polling model: this bot is the single ``getUpdates`` consumer for the token (Application.run_polling).
 The agent's notifier only ever calls ``sendMessage`` (push), so there is no getUpdates conflict.
@@ -15,74 +15,65 @@ from __future__ import annotations
 import logging
 
 from .config import BotConfig, load_bot_config
-from .datasource import make_state
-from .monitor import Monitor
+from .router import ALL_COMMANDS, Router
 
 log = logging.getLogger("bot")
 
-# command name -> Monitor method name. /prices additionally consumes context.args.
-_COMMANDS = {
-    "status": "status",
-    "positions": "positions",
-    "pnl": "pnl",
-    "prices": "prices",
-    "gate": "gate",
-    "shadowlog": "shadowlog",
-    "cycle": "cycle",
-    "integrity": "integrity",
-    "help": "help",
-    "start": "help",
-}
-
-
-def _first_int(args: list[str] | None) -> int | None:
-    """Parse the first CLI arg as a positive int (the N in /shadowlog N); None if absent/bad."""
-    if not args:
-        return None
-    try:
-        return int(args[0])
-    except (ValueError, TypeError):
-        return None
-
 
 def build_application(config: BotConfig):
-    """Construct the PTB Application with whitelisted command handlers. Requires a token."""
+    """Construct the PTB Application: one handler per command + a fallback for anything else."""
     from telegram import Update
-    from telegram.ext import Application, CommandHandler, ContextTypes
+    from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
     if not config.token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set — refusing to start the bot")
-    if not config.allowed_chat_ids:
-        # Fail loud: a bot with an empty whitelist answers nobody and is almost certainly a
-        # misconfiguration. Better to stop at startup than to look "up" but silently mute.
-        raise RuntimeError("BOT_ALLOWED_CHAT_IDS is empty — set the owner chat id(s) before start")
+    if not config.has_any_access():
+        # Fail-closed: with no admins AND no allowed ids the bot answers nobody. Stop at startup
+        # rather than look "up" while silently muted.
+        raise RuntimeError("no admins or allowed chat ids — set BOT_ADMIN_CHAT_IDS / "
+                           "BOT_ALLOWED_CHAT_IDS before start")
 
-    monitor = Monitor(config, make_state(config))
+    router = Router(config)
+    notified_unauth: set[int] = set()  # one admin notification per unknown id per process
 
-    def _make_handler(method_name: str):
+    def _make_handler(command: str | None):
         async def _handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             chat = update.effective_chat
             chat_id = chat.id if chat else None
-            if not config.authorized(chat_id):
-                log.warning("ignoring update from non-whitelisted chat_id=%s", chat_id)
-                return
+            # CommandHandlers pass their name; the fallback passes None -> empty -> "unknown".
+            cmd = command if command is not None else ""
             try:
-                if method_name == "prices":
-                    text = monitor.prices(context.args or None)
-                elif method_name == "shadowlog":
-                    text = monitor.shadowlog(_first_int(context.args))
-                else:
-                    text = getattr(monitor, method_name)()
+                text = router.dispatch(cmd, chat_id, list(context.args) if context.args else [])
             except Exception:  # noqa: BLE001 - a read/format error must not kill the poller
-                log.exception("command /%s failed", method_name)
+                log.exception("command /%s failed", cmd)
                 text = "⚠️ internal error reading agent state — see bot logs"
-            await update.effective_message.reply_text(text, parse_mode="HTML")
+
+            if chat_id is not None and not config.authorized(chat_id) \
+                    and chat_id not in notified_unauth:
+                notified_unauth.add(chat_id)
+                await _notify_admins(context, config, chat_id)
+
+            if update.effective_message:
+                await update.effective_message.reply_text(text, parse_mode="HTML")
         return _handler
 
     app = Application.builder().token(config.token).build()
-    for command, method_name in _COMMANDS.items():
-        app.add_handler(CommandHandler(command, _make_handler(method_name)))
+    for command in sorted(ALL_COMMANDS):
+        app.add_handler(CommandHandler(command, _make_handler(command)))
+    # fallback: unknown commands / plain text -> unauthorized notice or a /help hint (added last
+    # so registered command handlers win first within the default group).
+    app.add_handler(MessageHandler(filters.ALL, _make_handler(None)))
     return app
+
+
+async def _notify_admins(context, config: BotConfig, chat_id: int) -> None:
+    """Best-effort: tell admins someone requested access (self-service for 'what's my id')."""
+    msg = f"🔔 access request — chat_id {chat_id} tried to use the bot. Reply /allow {chat_id} to grant."
+    for admin_id in config.admin_chat_ids:
+        try:
+            await context.bot.send_message(admin_id, msg)
+        except Exception:  # noqa: BLE001 - notification is best-effort
+            log.exception("failed to notify admin %s", admin_id)
 
 
 def run(config: BotConfig | None = None) -> None:
@@ -92,6 +83,6 @@ def run(config: BotConfig | None = None) -> None:
     )
     config = config or load_bot_config()
     app = build_application(config)
-    log.info("bot starting — %d whitelisted chat(s), polling getUpdates (timeout=%ds)",
-             len(config.allowed_chat_ids), config.poll_timeout)
+    log.info("bot starting — %d admin(s), %d seed id(s), polling getUpdates (timeout=%ds)",
+             len(config.admin_chat_ids), len(config.allowed_chat_ids), config.poll_timeout)
     app.run_polling(timeout=config.poll_timeout, allowed_updates=["message"])
