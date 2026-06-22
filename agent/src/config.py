@@ -124,4 +124,17 @@ def load_config(path: Path | str | None = None) -> AgentConfig:
     if os.getenv("AGENT_ALERT_CHANNEL"):
         cfg.alerts.channel = os.environ["AGENT_ALERT_CHANNEL"]
 
+    # Per-block mode overrides (AGENT_BACKEND_MODE / AGENT_SLEEVE_MODE / AGENT_COMBINER_MODE /
+    # AGENT_EXECUTION_MODE = mock|live). The Docker image bakes the code + config, so these let a
+    # deploy flip blocks to live (real data/signal -> genuine forward-shadow accrual) from .env
+    # alone, without rebuilding. Unset -> the config-file value stands.
+    for blk in ("backend", "sleeve", "combiner", "execution"):
+        val = os.getenv(f"AGENT_{blk.upper()}_MODE")
+        if val:
+            cfg.blocks.setdefault(blk, {})["mode"] = val
+    # AGENT_LLM_REFRESH_CMD (whitespace-split argv) wires EOD step 2's dividend-feed refresh from
+    # .env, e.g. "python llm/scripts/refresh_dividend_feed.py".
+    if os.getenv("AGENT_LLM_REFRESH_CMD"):
+        cfg.blocks.setdefault("llm", {})["refresh_cmd"] = os.environ["AGENT_LLM_REFRESH_CMD"].split()
+
     return cfg
