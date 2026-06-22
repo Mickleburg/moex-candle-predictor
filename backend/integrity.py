@@ -155,7 +155,7 @@ def run_checks(ref: Optional[date] = None, data_dir: Path = store.DATA_RAW,
     insts = instruments if instruments is not None else INGEST_INSTRUMENTS
 
     checks: list[Check] = []
-    required_last: dict[str, date] = {}
+    required_last: dict[str, dict[str, date]] = {}  # timeframe -> {ticker -> last date}
 
     for ins in insts:
         df = store.load_ticker(ins.ticker, ins.timeframe, data_dir)
