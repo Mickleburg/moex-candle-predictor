@@ -1,10 +1,17 @@
 # One-command bring-up from a clean clone:
-#   cp .env.example .env   # fill in secrets
+#   cp .env.example .env   # fill in secrets (TELEGRAM_BOT_TOKEN + BOT_ADMIN_CHAT_IDS for the bot)
 #   docker compose -f infra/docker-compose.yml up -d --build
 #
-# `restart: unless-stopped` is the process supervisor (auto-restart on crash/reboot).
-# The ./data bind-mount persists the SQLite state store, cycle results, logs and parquet
-# candles across container rebuilds — so restarts recover state.
+# TWO services off ONE image (built once, tagged moex-agent:latest):
+#   * agent — the scheduler daemon (EOD/pre-open cycle + dead-man's-switch).
+#   * bot   — the Telegram monitoring poller (read-only).
+# One TELEGRAM_BOT_TOKEN, no conflict: the agent only sendMessage (push), the bot is the SINGLE
+# getUpdates long-poller. They are SEPARATE processes/containers (not one event-loop), so the
+# APScheduler trigger and the poller never block each other.
+#
+# `restart: unless-stopped` is the process supervisor (auto-restart on crash/reboot). The shared
+# ./data bind-mount persists the SQLite state store, cycle results, logs, parquet candles AND the
+# bot's managed allowlist — the bot opens the agent state DB mode=ro from the same volume.
 services:
   agent:
     build:
@@ -29,3 +36,28 @@ services:
       timeout: 30s
       retries: 3
       start_period: 30s
+
+  bot:
+    image: moex-agent:latest        # reuse the agent image (built by the `agent` service)
+    container_name: moex-bot
+    depends_on:
+      - agent                       # ensure the image is built + state dir exists first
+    env_file:
+      - ../.env
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ../data:/app/data
+    restart: unless-stopped
+    # The Telegram monitoring bot — the SINGLE getUpdates poller (read-only). Overrides the image
+    # entrypoint (which is the agent CLI) to run the bot instead. Needs TELEGRAM_BOT_TOKEN +
+    # BOT_ADMIN_CHAT_IDS in .env, else it fail-closes (refuses to start) by design.
+    entrypoint: ["python", "-m", "bot"]
+    command: []
+    healthcheck:
+      # liveness: the bot package + its agent-config wiring import cleanly.
+      test: ["CMD", "python", "-c", "import bot.src.app"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 20s

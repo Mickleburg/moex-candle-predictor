@@ -1,0 +1,29 @@
+# Telegram monitoring bot — second service alongside moex-agent (venv/systemd deploy).
+# The SINGLE getUpdates poller; the agent only sendMessage, so one token, no conflict.
+#
+# Install (after moex-agent.service):
+#   sudo cp infra/systemd/moex-bot.service /etc/systemd/system/
+#   # /etc/moex-agent.env (shared, chmod 600) must carry TELEGRAM_BOT_TOKEN + BOT_ADMIN_CHAT_IDS
+#   sudo systemctl daemon-reload && sudo systemctl enable --now moex-bot
+#
+# Reads the agent state DB mode=ro from the shared data/ dir; never trades. Fail-closed: with no
+# admins AND no allowed ids it refuses to start (check `journalctl -u moex-bot`).
+[Unit]
+Description=MOEX agent — Telegram monitoring bot (read-only poller)
+After=network-online.target moex-agent.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+WorkingDirectory=/opt/moex-candle-predictor
+EnvironmentFile=/etc/moex-agent.env
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/moex-candle-predictor/.venv/bin/python -m bot
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target
