@@ -10,15 +10,17 @@ from bot.src.app import build_application  # noqa: E402
 from bot.src.config import BotConfig  # noqa: E402
 
 
-def test_refuses_to_start_without_token():
-    cfg = BotConfig(token=None, allowed_chat_ids=frozenset({111}))
+def test_refuses_to_start_without_token(tmp_path):
+    cfg = BotConfig(token=None, allowed_chat_ids=frozenset({111}),
+                    allowlist_path=tmp_path / "allowlist.json")
     with pytest.raises(RuntimeError, match="TELEGRAM_BOT_TOKEN"):
         build_application(cfg)
 
 
-def test_refuses_to_start_with_empty_whitelist():
-    cfg = BotConfig(token="x", allowed_chat_ids=frozenset())
-    with pytest.raises(RuntimeError, match="BOT_ALLOWED_CHAT_IDS"):
+def test_refuses_to_start_with_no_access(tmp_path):
+    cfg = BotConfig(token="x", admin_chat_ids=frozenset(), allowed_chat_ids=frozenset(),
+                    allowlist_path=tmp_path / "allowlist.json")
+    with pytest.raises(RuntimeError, match="BOT_ADMIN_CHAT_IDS"):
         build_application(cfg)
 
 

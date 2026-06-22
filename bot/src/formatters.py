@@ -204,7 +204,50 @@ def fmt_shadowlog(records: list[dict]) -> str:
     return "\n".join(lines)
 
 
-HELP_TEXT = (
+def fmt_users(admins, seed, managed: dict[int, dict]) -> str:
+    """Render the allowlist: admins (👑 immutable), env seed, managed (note + who added)."""
+    admins = set(admins)
+    seed = set(seed)
+    lines = [_b("Allowlist"), _section("Admins (👑 immutable)")]
+    lines += [f"  👑 {a}" for a in sorted(admins)] or ["  (none)"]
+    lines.append(_section("Env seed (BOT_ALLOWED_CHAT_IDS)"))
+    seed_only = sorted(seed - admins)
+    lines += [f"  {s}" for s in seed_only] or ["  (none)"]
+    lines.append(_section("Managed (/allow)"))
+    mg = {cid: info for cid, info in managed.items() if cid not in admins and cid not in seed}
+    if mg:
+        for cid in sorted(mg):
+            info = mg[cid] or {}
+            extra = []
+            if info.get("note"):
+                extra.append(escape(str(info["note"])))
+            if info.get("added_by"):
+                extra.append(f"by {info['added_by']}")
+            suffix = f" ({', '.join(extra)})" if extra else ""
+            lines.append(f"  {cid}{suffix}")
+    else:
+        lines.append("  (none)")
+    return "\n".join(lines)
+
+
+def unauthorized_text(chat_id: Any) -> str:
+    cid = chat_id if chat_id is not None else "unknown"
+    return (
+        "⛔ You don't have access to this bot.\n"
+        f"Your chat id: <code>{escape(str(cid))}</code>\n"
+        "Send this id to an administrator to request access."
+    )
+
+
+def admin_only_text() -> str:
+    return "⛔ Admin-only command."
+
+
+def unknown_command_text() -> str:
+    return "Unknown command — try /help."
+
+
+_HELP_READ = (
     f"{_b('MOEX agent monitor')} (read-only)\n"
     "/status — mode, kill-switch, last cycle, live/shadow gross\n"
     "/positions — live + shadow book (lots, weight, sector)\n"
@@ -216,3 +259,13 @@ HELP_TEXT = (
     "/integrity — data gate OK/HALT + reasons\n"
     "/help — this message"
 )
+_HELP_ADMIN = (
+    f"\n{_b('Admin')}\n"
+    "/users — show the allowlist (admins / seed / managed)\n"
+    "/allow <chat_id> [note] — grant read access\n"
+    "/deny <chat_id> — revoke a managed id"
+)
+
+
+def fmt_help(is_admin: bool = False) -> str:
+    return _HELP_READ + (_HELP_ADMIN if is_admin else "")

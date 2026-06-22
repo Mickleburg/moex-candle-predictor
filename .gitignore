@@ -16,6 +16,10 @@ data/features/
 # agent runtime state — SQLite store, cycle results, shadow log, logs, backups (regenerable)
 data/agent/
 
+# bot runtime state — the monitoring bot's OWN managed allowlist (chat ids, not secrets, but
+# environment-specific; admins/seed live in env). Regenerable via /allow.
+data/bot/
+
 # local env / secrets
 .env
 
