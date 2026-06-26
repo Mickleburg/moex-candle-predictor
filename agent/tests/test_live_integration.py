@@ -85,6 +85,26 @@ def test_llm_refresh_runs_before_sleeve(tmp_path):
     assert marker.exists(), "EOD step 2 should have run the configured LLM feed refresh"
 
 
+def test_feed_refresh_surfaced_in_cycle(tmp_path):
+    # the cycle must RECORD the feed refresh (Part C observability) so an operator can confirm
+    # new ex-dates flowed in. Simulate the refresh CLI's stdout JSON summary.
+    summary = '{"ok": true, "degraded": false, "feed": {"changed": true, "upcoming": 7}, "stages": {}}'
+    cmd = [sys.executable, "-c", f"print({summary!r})"]
+    cfg = _config(tmp_path, llm={"refresh_cmd": cmd})
+    orch, _, _ = _orch(cfg)
+    out = orch.run_eod_cycle(trade_date=TD)
+    fr = out["result"]["risk_summary"]["feed_refresh"]
+    assert fr["configured"] and fr["ran"] and fr["rc"] == 0
+    assert fr["changed"] is True and fr["upcoming"] == 7
+
+
+def test_feed_refresh_absent_when_unconfigured(tmp_path):
+    cfg = _config(tmp_path)                      # no llm.refresh_cmd
+    orch, _, _ = _orch(cfg)
+    out = orch.run_eod_cycle(trade_date=TD)
+    assert out["result"]["risk_summary"]["feed_refresh"] == {"configured": False, "ran": False}
+
+
 def test_llm_refresh_failure_does_not_block_cycle(tmp_path):
     cmd = [sys.executable, "-c", "import sys; sys.exit(3)"]   # refresh fails
     cfg = _config(tmp_path, llm={"refresh_cmd": cmd})

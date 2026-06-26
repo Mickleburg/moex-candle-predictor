@@ -71,7 +71,7 @@ class Orchestrator:
         # step 2 — refresh the dividend knowledge base (upcoming ex-dates) BEFORE the sleeve so a
         # newly-disclosed record date is in the feed the sleeve reads. Best-effort: a feed-refresh
         # failure alerts but never blocks trading (the sleeve falls back to the existing CSV + ISS).
-        self._llm_refresh(td)
+        feed_refresh = self._llm_refresh(td)
 
         # step 3 — integrity gate (HALT => no trading)
         integrity = self.adapters.backend.integrity_gate(as_of)
@@ -158,6 +158,9 @@ class Orchestrator:
             "capital_rub": self.config.capital_rub,
             "block_modes": self.adapters.modes, "calendar": tcal.calendar_source(),
             "exec_note": exec_note,
+            # observability: did EOD step 2 refresh the dividend feed this cycle? (so an operator can
+            # confirm new ex-dates flow in — without it July records never reach the feed.)
+            "feed_refresh": feed_refresh,
             # observability: selected_orders carries LIVE intents only (0 for an unproven sleeve);
             # the paper-shadow activity is surfaced explicitly so the operator sees it, not emptiness.
             "n_live_orders": len(live_orders),
@@ -227,28 +230,52 @@ class Orchestrator:
             return "paper", "live requested but enable_live gate is off -> forced paper (paper-first)."
         return self.config.mode, ""
 
-    def _llm_refresh(self, td: str) -> None:
+    def _llm_refresh(self, td: str) -> dict[str, Any]:
         """EOD step 2: run the configured LLM dividend-feed refresh (blocks.llm.refresh_cmd).
 
         Best-effort: keeps the knowledge base (upcoming ex-dates) self-updating, but a scrape/
         network failure must NOT block the cycle — it alerts and the sleeve uses the last feed.
+        Returns a small summary so the cycle result records whether the feed refreshed this run
+        ({"configured","ran","ok","changed","upcoming","rc"}), making it observable in /status.
         """
+        import json as _json
+        import subprocess
+
         llm_cfg = self.config.blocks.get("llm", {})
         cmd = list(llm_cfg.get("refresh_cmd") or [])
         if not cmd:
-            return
+            return {"configured": False, "ran": False}
         # pass the no-lookahead boundary when the configured CLI supports it (the canonical
         # llm/scripts/refresh_dividend_feed.py does): the feed must use only disclosures <= td.
         if llm_cfg.get("pass_as_of"):
             cmd = [*cmd, "--as-of", td]
-        import subprocess
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900, cwd=str(REPO_ROOT))
-            if proc.returncode != 0:
-                self._alert("LLM feed refresh failed (non-blocking)",
-                            f"trade_date={td}\nrc={proc.returncode}\n{(proc.stderr or proc.stdout)[-400:]}")
         except Exception as exc:  # noqa: BLE001 - feed refresh must never crash the cycle
             self._alert("LLM feed refresh error (non-blocking)", f"trade_date={td}\n{type(exc).__name__}: {exc}")
+            return {"configured": True, "ran": False, "error": f"{type(exc).__name__}: {exc}"}
+
+        # the refresh CLI prints one clean JSON summary to stdout (human logs go to stderr)
+        summary: dict[str, Any] = {}
+        for line in reversed((proc.stdout or "").splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                cand = _json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(cand, dict):
+                summary = cand
+                break
+        feed = summary.get("feed", {}) if isinstance(summary.get("feed"), dict) else {}
+        out = {"configured": True, "ran": True, "rc": proc.returncode,
+               "ok": summary.get("ok"), "degraded": summary.get("degraded"),
+               "changed": feed.get("changed"), "upcoming": feed.get("upcoming")}
+        if proc.returncode != 0:
+            self._alert("LLM feed refresh failed (non-blocking)",
+                        f"trade_date={td}\nrc={proc.returncode}\n{(proc.stderr or proc.stdout)[-400:]}")
+        return out
 
     def _record_fills(self, reports: list[dict]) -> None:
         for rep in reports:
@@ -337,7 +364,8 @@ class Orchestrator:
                  f"live_gross={rs.get('directional_gross')}  shadow_gross={rs.get('shadow_gross')}",
                  f"regime: exposure_scalar={rs.get('exposure_scalar')} novel={rs.get('regime_novel')}",
                  f"hedge={rs.get('hedge_mode')}  binding={rs.get('binding_limits')}",
-                 f"kill_switch={rs.get('kill_switch')}  calendar={rs.get('calendar')}"]
+                 f"kill_switch={rs.get('kill_switch')}  calendar={rs.get('calendar')}",
+                 f"feed_refresh={rs.get('feed_refresh')}"]
         for g in rs.get("gating", []):
             lines.append(f"  gate[{g.get('sleeve')}]: {g.get('capital_state')} ({g.get('reason')})")
         for sleeve, vals in live_pnl.items():
