@@ -48,7 +48,12 @@ RE_RECO_TITLE = re.compile(
 
 
 def _load_pub(ticker: str) -> pd.DataFrame:
+    # A preferred line (e.g. SBERP) has no parquet of its own — it shares its ordinary issuer's
+    # disclosures (SBER), since one AGM sets one record date for both classes. Fall back to the
+    # issuer file by stripping the trailing 'P'.
     p = DDIR / f"{ticker}.parquet"
+    if not p.exists() and ticker.endswith("P"):
+        p = DDIR / f"{ticker[:-1]}.parquet"
     if not p.exists():
         return pd.DataFrame(columns=["event_name", "pub", "pseudo_guid"])
     d = pd.read_parquet(p, columns=["event_name", "pub_date", "pseudo_guid"])

@@ -73,6 +73,25 @@ def test_value_prefers_payout_over_annual_total():
     assert incl is True
 
 
+# ---- preferred-share value: the pref line reads the SAME body but extracts its own amount ----
+@pytest.mark.parametrize("text,expected", [
+    ("по обыкновенным акциям ПАО Сбербанк – 37,64 руб. на одну акцию, по привилегированным акциям "
+     "ПАО Сбербанк – 37,64 руб. на одну акцию.", 37.64),                                    # SBERP
+    ("по привилегированной акции ПАО «Сургутнефтегаз» – 0,85 рубля, по обыкновенной акции "
+     "ПАО «Сургутнефтегаз» – 0,85 рубля", 0.85),                                            # SNGSP
+])
+def test_preferred_value(text, expected):
+    val, _ = b.extract_value(text, "preferred")
+    assert val == pytest.approx(expected)
+
+
+def test_preferred_does_not_grab_ordinary_when_they_differ():
+    # synthetic year where pref != ord: each anchor must read its OWN amount
+    txt = ("по привилегированной акции – 8,50 рубля, по обыкновенной акции – 0,90 рубля")
+    assert b.extract_value(txt, "preferred")[0] == pytest.approx(8.50)
+    assert b.extract_value(txt, "ordinary")[0] == pytest.approx(0.90)
+
+
 # ---- declined dividends: detected, and (crucially) carry no dividend record date ----
 @pytest.mark.parametrize("text", [
     "дивиденды по акциям ПАО «Газпром» не объявлять и не выплачивать.",                 # GAZP
