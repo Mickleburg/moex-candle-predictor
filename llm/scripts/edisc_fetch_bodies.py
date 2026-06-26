@@ -41,7 +41,10 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 SEARCH_URL = "https://www.e-disclosure.ru/poisk-po-soobshheniyam"
 EVENT_URL = "https://www.e-disclosure.ru/portal/event.aspx?EventId="
 
-UNIVERSE = "SBER GAZP LKOH GMKN ROSN NVTK TATN MGNT MTSS SNGS CHMF ALRS VTBR MAGN NLMK PLZL".split()
+# e-disclosure issuer files to scan for dividend-chain bodies. Prefs (SBERP/SNGSP/TATNP) are NOT
+# listed — they share their ordinary issuer's disclosures; SIBN/PHOR/MOEX are new issuers (2026-06-21).
+UNIVERSE = ("SBER GAZP LKOH GMKN ROSN NVTK TATN MGNT MTSS SNGS CHMF ALRS VTBR MAGN NLMK PLZL "
+            "SIBN PHOR MOEX").split()
 
 # dividend-chain title classes whose bodies can carry the dividend amount / record date
 RE_BOARD = re.compile(r"решени[яй] совета директоров|решени.*наблюдательн", re.I)

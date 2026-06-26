@@ -34,7 +34,8 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 SEARCH_URL = "https://www.e-disclosure.ru/poisk-po-soobshheniyam"
 OUT_DIR = Path(__file__).resolve().parents[2] / "data" / "news" / "edisclosure"
 
-# ticker -> (companyID to keep, name substring to query). Pin by companyID, not text.
+# issuer_key -> (companyID to keep, name substring to query). Pin by companyID, not text. One parquet
+# per issuer; prefs (SBERP/SNGSP/TATNP) share their ordinary issuer's pull (same companyID).
 UNIVERSE: dict[str, tuple[int, str]] = {
     "SBER": (3043, "Сбербанк"),
     "GAZP": (934,  "Газпром"),            # 347=Газпром нефть is ticker SIBN, excluded by id
@@ -53,6 +54,10 @@ UNIVERSE: dict[str, tuple[int, str]] = {
     "MAGN": (9,    "Магнитогорский металлургический"),   # ПАО "ММК"
     "NLMK": (2509, "Новолипецкий металлургический"),     # ПАО "НЛМК"
     "PLZL": (7832, "Полюс"),              # ПАО «Полюс»
+    # H9 universe expansion 2026-06-21 — new issuers (companyIDs discovered 2026-06-21).
+    "SIBN": (347,  "Газпром нефть"),      # ПАО «Газпром нефть» (distinct from parent GAZP id 934)
+    "PHOR": (573,  "ФосАгро"),            # ПАО «ФосАгро»
+    "MOEX": (43,   "Московская Биржа"),   # ПАО Московская Биржа
 }
 
 START_DATE = dt.date(2020, 1, 1)          # candle history starts 2020-01-03

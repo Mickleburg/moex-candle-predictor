@@ -47,12 +47,19 @@ RECENT_FLOOR = TODAY - pd.Timedelta(days=30)   # keep record_date >= today-30d
 FETCH_FLOOR = "2026-02-01"
 ENTRY_LEAD_TD = 12                              # sleeve enters 12 trading days before record
 
-COMPANY_ID = {
-    "SBER": 3043, "GAZP": 934, "LKOH": 17, "GMKN": 564, "ROSN": 6505, "NVTK": 225,
-    "TATN": 118, "MGNT": 7671, "MTSS": 236, "SNGS": 312, "CHMF": 30, "ALRS": 199,
-    "VTBR": 1210, "MAGN": 9, "NLMK": 2509, "PLZL": 7832,
-}
-UNIVERSE = list(COMPANY_ID)
+# Tradeable LINES -> (issuer file key, share class in {ordinary, preferred}). A preferred line shares
+# its ordinary issuer's disclosures (one AGM sets ONE record date for both classes) but carries its
+# OWN per-share value, so it reads the same bodies and extracts the preferred amount. H9 expansion
+# (2026-06-21): 16 originals + prefs SBERP/SNGSP/TATNP + new issuers SIBN/PHOR/MOEX. RTKMP/BSPB are
+# provisional on backend's ADTV screen -> not added until confirmed.
+_ISSUERS = ("SBER GAZP LKOH GMKN ROSN NVTK TATN MGNT MTSS SNGS CHMF ALRS VTBR MAGN NLMK PLZL "
+            "SIBN PHOR MOEX").split()
+LINES: dict[str, tuple[str, str]] = {**{t: (t, "ordinary") for t in _ISSUERS},
+                                     "SBERP": ("SBER", "preferred"),
+                                     "SNGSP": ("SNGS", "preferred"),
+                                     "TATNP": ("TATN", "preferred")}
+UNIVERSE = list(LINES)   # all tradeable line tickers (issuers + prefs) — build() iterates these
+
 EVENT_URL = "https://www.e-disclosure.ru/portal/event.aspx?EventId="
 
 # ---- title classes (which disclosures can carry a dividend reco/approval) ----
@@ -74,6 +81,7 @@ RE_DECLINE = re.compile(
 RE_RK = re.compile(r"(\d+)\s*(?:\([^)]*\)\s*)?руб\w*\.?\s*(\d{1,2})\s*(?:\([^)]*\)\s*)?коп", re.I)
 RE_DEC = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:\([^)]*\)\s*)?руб", re.I)
 RE_ORD = re.compile(r"(?:на одну|по)\s+(?:размещ\w+\s+)?обыкновенн\w+\s+(?:именн\w+\s+)?акци\w*", re.I)
+RE_PREF = re.compile(r"(?:на одну|по)\s+(?:размещ\w+\s+)?привилегированн\w+\s+(?:именн\w+\s+)?акци\w*", re.I)
 RE_GEN = re.compile(r"на одну\s+(?:размещ\w+\s+)?акци\w*", re.I)   # single-class issuers ("на одну акцию")
 RE_PAYOUT = re.compile(r"произвести выплату|выплатить дивиденд", re.I)
 
@@ -102,41 +110,44 @@ def extract_record_date(core: str) -> str | None:
     return max(set(found), key=found.count)  # most frequent (one real date per dividend)
 
 
-def _amounts(s: str) -> list[tuple[int, float]]:
-    """All ruble amounts in `s` as (pos, value). Prefer the explicit 'X руб Y коп' form; only if
-    none are present fall back to bare 'X[,Y] руб' decimals."""
-    rk = [(m.start(), int(m.group(1)) + int(m.group(2)) / 100.0) for m in RE_RK.finditer(s)]
-    if rk:
-        return rk
-    out = []
-    for m in RE_DEC.finditer(s):
-        try:
-            out.append((m.start(), float(m.group(1).replace(" ", "").replace(",", "."))))
-        except ValueError:
-            pass
-    return out
-
-
 def _amount_near(core: str, a_start: int, a_end: int) -> float | None:
-    """The per-share amount belonging to a share anchor: it sits either right AFTER the anchor
-    ('...акцию в размере X руб') or right BEFORE it ('X руб ... на одну акцию')."""
-    after = core[a_end: a_end + 75]
-    if re.match(r"\s*в размере", after, re.I):
-        cands = _amounts(after)
-        if cands:
-            return cands[0][1]                       # nearest amount after the anchor
-    before = _amounts(core[max(0, a_start - 80): a_start])
-    if before:
-        return before[-1][1]                         # nearest amount before the anchor
-    both = _amounts(core[max(0, a_start - 80): a_end + 75])
-    return both[0][1] if both else None
+    """The per-share amount belonging to a share anchor: the ruble amount CLOSEST to the anchor span,
+    whether it sits just AFTER it ('...акцию в размере X руб' / '...акции – X рубля') or just BEFORE
+    it ('X руб ... на одну акцию'). Nearest-by-distance is what disambiguates ordinary vs preferred
+    when a body lists both on one line (e.g. 'по привилегированной акции – 8,50, по обыкновенной –
+    0,90'): each anchor binds to its own adjacent figure. Prefer the explicit 'X руб Y коп' form."""
+    lo = max(0, a_start - 80)
+    seg = core[lo: a_end + 75]
+
+    def nearest(matches):
+        best = None
+        for m in matches:
+            s, e = lo + m.start(), lo + m.end()
+            d = 0 if (s <= a_end and e >= a_start) else min(abs(s - a_end), abs(a_start - e))
+            if best is None or d < best[0]:
+                best = (d, m)
+        return best[1] if best else None
+
+    rk = nearest(list(RE_RK.finditer(seg)))
+    if rk is not None:
+        return int(rk.group(1)) + int(rk.group(2)) / 100.0
+    dec = nearest(list(RE_DEC.finditer(seg)))
+    if dec is not None:
+        try:
+            return float(dec.group(1).replace(" ", "").replace(",", "."))
+        except ValueError:
+            return None
+    return None
 
 
-def extract_value(core: str) -> tuple[float | None, bool]:
-    """Per-(ordinary)-share dividend. Returns (value, is_total_incl_interim). Prefers the amount
-    nearest a 'произвести выплату/выплатить дивиденд' instruction (the sum actually paid at record)."""
+def extract_value(core: str, share_class: str = "ordinary") -> tuple[float | None, bool]:
+    """Per-share dividend for the given share class. Returns (value, is_total_incl_interim). Prefers
+    the amount nearest a 'произвести выплату/выплатить дивиденд' instruction (the sum actually paid at
+    record). Ordinary lines also accept a generic 'на одну акцию' (single-class issuers); preferred
+    lines require an explicit 'привилегированную акцию' anchor so they never grab the ordinary value."""
+    anchors = [(RE_PREF, 0)] if share_class == "preferred" else [(RE_ORD, 0), (RE_GEN, 1)]
     cands: list[tuple[int, float, int]] = []  # (priority, value, pos)
-    for rx, prio in ((RE_ORD, 0), (RE_GEN, 1)):
+    for rx, prio in anchors:
         for m in rx.finditer(core):
             v = _amount_near(core, m.start(), m.end())
             if v is not None and 0 < v < 100000:
@@ -178,30 +189,41 @@ def td_gap(a: pd.Timestamp, b: pd.Timestamp) -> int:
     return int(np.busday_count(a.date(), b.date()))
 
 
-def parse_bodies() -> pd.DataFrame:
-    floor = pd.Timestamp(FETCH_FLOOR)
-    rows = []
-    for t in UNIVERSE:
-        p = DDIR / f"{t}.parquet"
-        if not p.exists():
-            continue
+def _issuer_chain(issuer: str, floor: pd.Timestamp,
+                  _cache: dict[str, list]) -> list[tuple[pd.Timestamp, str, str, str]]:
+    """Dividend-mentioning chain disclosures (pub, cls, guid, body) for an issuer, cached so a
+    pref line and its ordinary read the issuer's bodies only once."""
+    if issuer in _cache:
+        return _cache[issuer]
+    out: list[tuple[pd.Timestamp, str, str, str]] = []
+    p = DDIR / f"{issuer}.parquet"
+    if p.exists():
         d = pd.read_parquet(p, columns=["event_name", "pub_date", "pseudo_guid"])
         d["pub"] = pd.to_datetime(d["pub_date"], format="ISO8601").dt.tz_localize(None).dt.normalize()
         d = d[(d["pub"] >= floor) & d["event_name"].astype(str).str.contains(CHAIN)]
         for _, r in d.iterrows():
-            bp = body_path(t, r["pseudo_guid"])
+            bp = body_path(issuer, r["pseudo_guid"])
             if not bp.exists():
                 continue
             core = bp.read_text(encoding="utf-8")
             if "дивиденд" not in core.lower():
                 continue
+            out.append((r["pub"], classify(str(r["event_name"])), r["pseudo_guid"], core))
+    _cache[issuer] = out
+    return out
+
+
+def parse_bodies() -> pd.DataFrame:
+    floor = pd.Timestamp(FETCH_FLOOR)
+    cache: dict[str, list] = {}
+    rows = []
+    for line, (issuer, share_class) in LINES.items():
+        for pub, cls, guid, core in _issuer_chain(issuer, floor, cache):
             rec = extract_record_date(core)
-            val, incl = extract_value(core)
+            val, incl = extract_value(core, share_class)
             declined = bool(RE_DECLINE.search(core)) and rec is None
-            rows.append(dict(
-                ticker=t, pub=r["pub"], cls=classify(str(r["event_name"])),
-                record=rec, value=val, incl_interim=incl, declined=declined,
-                guid=r["pseudo_guid"]))
+            rows.append(dict(ticker=line, pub=pub, cls=cls, record=rec, value=val,
+                             incl_interim=incl, declined=declined, guid=guid))
     return pd.DataFrame(rows)
 
 
