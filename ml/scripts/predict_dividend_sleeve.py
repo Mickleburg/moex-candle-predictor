@@ -27,9 +27,11 @@ sys.path.insert(0, str(ML_DIR))
 
 from scripts.xsec_eval_harness import load_daily_panel  # noqa: E402
 from src.service.dividend_sleeve import build_sleeve_signal, load_dividend_calendar  # noqa: E402
+from src.service.dividend_universe import CURRENT_UNIVERSE  # noqa: E402
 
-UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
-            "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"]
+# SERVING universe is PINNED to current (data-backed, validated). Promote to EXPANDED_UNIVERSE here
+# only AFTER the expanded IS edge + placebo control pass and the gate is MET on pristine forward.
+UNIVERSE = CURRENT_UNIVERSE
 SCHEMA = REPO_ROOT / "contracts" / "sleeve_signal.schema.json"
 DEFAULT_OUT = REPO_ROOT / "data" / "reports" / "sleeve_signal_dividend.json"
 _LEGS = {"long", "short", "hedge", "flat"}

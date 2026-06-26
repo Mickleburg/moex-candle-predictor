@@ -32,9 +32,11 @@ sys.path.insert(0, str(ML_DIR))
 
 from scripts.h9_dividend_research import load_daily, runup_capture, FEE_RT, UNIVERSE  # noqa: E402
 from src.service.dividend_sleeve import load_dividend_calendar, ENTRY_OFFSET, EXIT_OFFSET  # noqa: E402
+from src.service.dividend_universe import (  # noqa: E402
+    resolve_universe, classify_forward, FORWARD_START, CORROBORATION_START, CORROBORATION_END,
+)
 
-FORWARD_START = pd.Timestamp("2025-01-01", tz="Europe/Moscow")
-FWD_GATE_MIN_EVENTS = 25     # forward events needed before the gate can be MET (IS had ~250)
+FWD_GATE_MIN_EVENTS = 25     # PRISTINE forward events needed before the gate can be MET (IS had ~250)
 OUT = REPO_ROOT / "data" / "reports" / "h9_shadow_pnl.txt"
 SHADOW_LOG = REPO_ROOT / "data" / "reports" / "dividend_shadow_log.csv"
 
@@ -91,7 +93,14 @@ def main() -> int:
         print(s)
         lines.append(s)
 
-    closes = {t: load_daily(t) for t in UNIVERSE}
+    import argparse
+    ap = argparse.ArgumentParser(description="H9 realized-P&L shadow gate (pristine forward + corroboration).")
+    ap.add_argument("--universe", default=None, choices=["current", "expanded"],
+                    help="universe to run (default: env H9_UNIVERSE or 'current')")
+    args = ap.parse_args()
+    universe = resolve_universe(args.universe) if args.universe else UNIVERSE
+
+    closes = {t: load_daily(t) for t in universe}
     closes = {t: s for t, s in closes.items() if s is not None}
     imoex = load_daily("IMOEX")
     cal = load_dividend_calendar()
@@ -107,7 +116,10 @@ def main() -> int:
     closed = ev[ev["status"] == "closed"]
     pending = ev[ev["status"] == "pending"]
     is_ev = closed[closed["date"] < FORWARD_START]
-    fw_ev = closed[closed["date"] >= FORWARD_START]
+    forward = closed[closed["date"] >= FORWARD_START].copy()
+    forward["bucket"] = forward["date"].apply(classify_forward)
+    pristine = forward[forward["bucket"] == "pristine"]      # DRIVES is_production
+    corrob = forward[forward["bucket"] == "corroboration"]   # robustness only, never moves the gate
 
     # cross-check: our closed-event mean must reproduce the research runup_capture (methodology identity)
     ref = runup_capture(closes, imoex, cal.rename(columns={}), -ENTRY_OFFSET, -EXIT_OFFSET)
@@ -118,20 +130,30 @@ def main() -> int:
     pr("\nBENCHMARK (in-sample <2025) — what the forward must match:")
     is_stats = summarize(is_ev, "IN-SAMPLE", pr)
 
-    pr("\nSHADOW TRACK (forward >=2025) — realized so far:")
-    fw_stats = summarize(fw_ev, "FORWARD", pr)
-    if len(fw_ev):
-        pr("  per-year (forward):")
-        for y, g in fw_ev.groupby("year"):
+    pr("\nPRISTINE forward (record OUTSIDE the burned-split backfill window — DRIVES is_production):")
+    fw_stats = summarize(pristine, "PRISTINE", pr)
+    if len(pristine):
+        pr("  per-year (pristine):")
+        for y, g in pristine.groupby("year"):
             net = g["runup"].mean() - FEE_RT
             pr(f"    {y}: n={len(g):>2}  net {net:+.4f}  %pos {(g['runup']>0).mean():.2f}")
-        pr("  forward closed events (ticker / record / yield / net runup):")
-        for _, r in fw_ev.sort_values("date").iterrows():
+        pr("  pristine closed events (ticker / record / yield / net runup):")
+        for _, r in pristine.sort_values("date").iterrows():
             pr(f"    {r['ticker']:5} {r['date'].date()}  yld {r['yield']:.2%}  "
                f"net {r['runup']-FEE_RT:+.4f}")
 
-    # placebo band (in-sample) to place the forward mean against
-    pr("\nPLACEBO band (random non-dividend dates, in-sample) — forward should sit in its right tail:")
+    # CORROBORATION = backfill of the burned split [2025-08..2026-06]; robustness ONLY, never the gate.
+    pr("\nCORROBORATION (backfill 2025-08..2026-06 of the burned split — does NOT move the gate):")
+    cor_stats = summarize(corrob, "CORROBORATION", pr)
+    if cor_stats["n"] and fw_stats["n"]:
+        agree = (cor_stats["net"] > 0) == (fw_stats["net"] > 0)
+        pr(f"  sign vs pristine: corroboration net {cor_stats['net']:+.4f} "
+           f"{'CONFIRMS' if agree else 'DIVERGES from (RED FLAG)'} pristine net {fw_stats['net']:+.4f}")
+    elif not cor_stats["n"]:
+        pr("  (no corroboration events yet — awaiting backend backfill of 2025-08..2026-06 records)")
+
+    # placebo band (in-sample) to place the PRISTINE forward mean against
+    pr("\nPLACEBO band (random non-dividend dates, in-sample) — pristine should sit in its right tail:")
     pr(_placebo_band(closes, imoex, cal, is_ev, fw_stats, -ENTRY_OFFSET, -EXIT_OFFSET))
 
     # pending pipeline (upcoming, not yet realized)
@@ -147,27 +169,29 @@ def main() -> int:
         pr(f"\nLive monitor shadow_log: {len(log)} runs, {len(held)} with holdings "
            f"(accrues real-time as July-2026 events trade).")
 
-    # --- GATE VERDICT --------------------------------------------------------------------------------
+    # --- GATE VERDICT (PRISTINE ONLY; corroboration never moves it) -----------------------------------
     n_fw = fw_stats["n"]
     edge_ok = fw_stats["net"] > 0 and fw_stats["pos"] > 0.5
     enough = n_fw >= FWD_GATE_MIN_EVENTS
     pr("\n" + "=" * 80)
-    pr(f"benchmark vs shadow: IS net {is_stats['net']:+.4f} (dose-resp {'OK' if is_stats['dose_ok'] else 'NO'}, "
-       f"n={is_stats['n']}) | FWD net {fw_stats['net']:+.4f} (dose-resp "
-       f"{'OK' if fw_stats['dose_ok'] else 'INVERTED'}, n={n_fw})")
+    pr(f"benchmark vs gate: IS net {is_stats['net']:+.4f} (dose-resp {'OK' if is_stats['dose_ok'] else 'NO'}, "
+       f"n={is_stats['n']}) | PRISTINE net {fw_stats['net']:+.4f} (dose-resp "
+       f"{'OK' if fw_stats['dose_ok'] else 'INVERTED'}, n={n_fw}) | corroboration n={cor_stats['n']} "
+       f"net {cor_stats['net']:+.4f}")
     if enough and edge_ok:
-        verdict = (f"GATE MET (pending sign-off): {n_fw} forward events, net {fw_stats['net']:+.4f}, "
+        verdict = (f"GATE MET (pending sign-off): {n_fw} PRISTINE forward events, net {fw_stats['net']:+.4f}, "
                    f"%pos {fw_stats['pos']:.2f} — forward realizes the edge. Recommend team sign-off "
                    f"to lift is_production=false.")
     elif edge_ok:
-        verdict = (f"ACCRUING (sign is RIGHT, sample THIN): {n_fw}/{FWD_GATE_MIN_EVENTS} forward events, "
+        verdict = (f"ACCRUING (sign is RIGHT, sample THIN): {n_fw}/{FWD_GATE_MIN_EVENTS} PRISTINE events, "
                    f"net {fw_stats['net']:+.4f}, %pos {fw_stats['pos']:.2f}. Keep running through seasons "
                    f"(July-2026 pipeline = {len(pending)} events). is_production stays false.")
     else:
-        verdict = (f"NOT MET: {n_fw} forward events, net {fw_stats['net']:+.4f}, %pos {fw_stats['pos']:.2f} "
+        verdict = (f"NOT MET: {n_fw} PRISTINE forward events, net {fw_stats['net']:+.4f}, %pos {fw_stats['pos']:.2f} "
                    f"— forward does NOT confirm the edge yet. is_production stays false; do not deploy live.")
     pr("VERDICT: " + verdict)
-    pr("  (is_production=false until this gate is MET on accrued forward events AND team sign-off.)")
+    pr("  (is_production=false until this gate is MET on accrued PRISTINE forward events AND team sign-off;"
+       " corroboration backfill is robustness only.)")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text("\n".join(lines), encoding="utf-8")

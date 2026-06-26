@@ -24,10 +24,10 @@ from src.service.dividend_sleeve import (  # noqa: E402
     load_dividend_calendar, active_window_map, inverse_vol_weights,
     ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW,
 )
+from src.service.dividend_universe import active_universe, FORWARD_START  # noqa: E402
 
-UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
-            "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"]
-FORWARD_START = pd.Timestamp("2025-01-01", tz="Europe/Moscow")
+# Single-source universe; env H9_UNIVERSE=expanded flips the whole research toolchain at once.
+UNIVERSE = active_universe()
 FEE_ONEWAY = 0.0005
 BARS_PER_YEAR = 247
 
