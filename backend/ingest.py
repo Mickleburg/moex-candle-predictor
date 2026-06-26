@@ -77,7 +77,16 @@ def network_fetch(ticker: str, timeframe: str, date_from: str, date_to: str,
     weekend/holiday) -- that is "nothing new", not an error.
     """
     dl = _import_downloader()
-    engine, market, board = dl.resolve_instrument(ticker, None, None, None)
+    try:
+        engine, market, board = dl.resolve_instrument(ticker, None, None, None)
+    except ValueError:
+        # Not in the scripts registry (e.g. an H9 expansion line) -> use the universe's
+        # explicit ISS routing override.
+        from .universe import by_key
+        ins = by_key(ticker, timeframe)
+        if ins is None or not ins.engine:
+            raise
+        engine, market, board = ins.engine, ins.market, ins.board
     last_exc: Optional[Exception] = None
     for attempt in range(1, retries + 1):
         try:

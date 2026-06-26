@@ -28,7 +28,16 @@ CORE_SHARES = (
 )
 # H7 pairs-breadth additions -- currently seeded at 1H only (1D pending a backfill).
 EXTRA_SHARES = ("VTBR", "MAGN", "NLMK", "PLZL")
-SHARES = CORE_SHARES + EXTRA_SHARES  # full 16-name universe
+SHARES = CORE_SHARES + EXTRA_SHARES  # full 16-name FIGI-mapped trading universe
+
+# H9 universe-expansion lines (ml/docs/research/h9_universe_expansion_2026-06-21.md), seeded at
+# 1H from 2020. PASSED the a-priori >=300 M RUB ADTV screen (criterion 1, run 2026-06-24):
+#   SBERP 457M, SNGSP 712M, PHOR 363M, MOEX 575M  -> included
+# FAILED the screen and EXCLUDED (not seeded): SIBN 241M, TATNP 211M, BSPB 153M, RTKMP 51M.
+# Provisional-for-trading: maintained + integrity-checked (required=False -> WARN, not HALT) until
+# the ML IS study confirms the run-up edge on these lines and promotes them. Not yet FIGI-mapped
+# (config/instruments.json stays the 16); unverified FIGI is acceptable for paper.
+EXPANSION_SHARES = ("SBERP", "SNGSP", "PHOR", "MOEX")
 
 # Indices available at 1H on ISS (intraday context).
 INDICES_1H = ("IMOEX", "RTSI", "MOEXFN", "MOEXOG", "RGBI")
@@ -52,6 +61,11 @@ class Instrument:
     kind: str            # "share" | "index" | "continuous_future"
     required: bool = False  # freshness failure -> HALT (vs warn)
     asset: str = ""      # for continuous_future: BR / NG (stitcher --asset)
+    # ISS routing override for names NOT in scripts/download_candles.py::INSTRUMENT_REGISTRY
+    # (e.g. the H9 expansion lines). Empty -> ingest falls back to the registry.
+    engine: str = ""
+    market: str = ""
+    board: str = ""
 
 
 def _build() -> list[Instrument]:
@@ -60,6 +74,10 @@ def _build() -> list[Instrument]:
         out.append(Instrument(t, "1H", "share", required=True))
         # 1D is required only for the core 12 (the EXTRA_SHARES have no 1D yet).
         out.append(Instrument(t, "1D", "share", required=(t in CORE_SHARES)))
+    for t in EXPANSION_SHARES:
+        # 1H only, non-required (provisional until ML promotes); explicit TQBR routing.
+        out.append(Instrument(t, "1H", "share", required=False,
+                              engine="stock", market="shares", board="TQBR"))
     for t in INDICES_1H:
         out.append(Instrument(t, "1H", "index", required=(t in _REQUIRED_INDEX_1H)))
     for t in INDICES_1D:
