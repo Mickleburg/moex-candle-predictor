@@ -34,11 +34,14 @@ REPO_ROOT = ML_DIR.parent
 sys.path.insert(0, str(ML_DIR))
 
 from src.data.load import to_moscow_time  # noqa: E402
+from src.service.dividend_universe import (  # noqa: E402
+    active_universe, resolve_universe, FORWARD_START,
+)
 
 DATA_RAW = REPO_ROOT / "data" / "raw"
-UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
-            "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"]
-FORWARD_START = pd.Timestamp("2025-01-01", tz="Europe/Moscow")
+# Single-source universe (src/service/dividend_universe.py). Module-level default keeps every importer
+# (gate, no-lookahead, sim, ...) working; env H9_UNIVERSE=expanded or main()'s --universe flips it.
+UNIVERSE = active_universe()
 WIN = 15  # trading-day window each side of the event anchor
 
 
@@ -144,8 +147,17 @@ def placebo_test(closes, imoex, div, entry: int = -10, exit_off: int = -2, n_tri
 
 
 def main() -> int:
-    closes = {t: load_daily(t) for t in UNIVERSE}
+    import argparse
+    ap = argparse.ArgumentParser(description="H9 dividend event study + run-up capture (Stage 1+2).")
+    ap.add_argument("--universe", default=None, choices=["current", "expanded"],
+                    help="universe to run (default: env H9_UNIVERSE or 'current')")
+    args = ap.parse_args()
+    universe = resolve_universe(args.universe) if args.universe else UNIVERSE
+    closes = {t: load_daily(t) for t in universe}
     closes = {t: s for t, s in closes.items() if s is not None}
+    missing = [t for t in universe if t not in closes]
+    print(f"universe: {len(universe)} requested, {len(closes)} with data"
+          + (f" (MISSING, awaiting backend: {missing})" if missing else ""))
     imoex = load_daily("IMOEX")
     div = pd.read_csv(DATA_RAW / "dividends.csv")
     div["date"] = pd.to_datetime(div["date"]).dt.tz_localize("Europe/Moscow")

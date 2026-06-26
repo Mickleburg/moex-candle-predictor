@@ -28,9 +28,10 @@ from src.service.dividend_sleeve import (  # noqa: E402
     inverse_vol_weights, load_dividend_calendar, trading_days_between,
     ENTRY_OFFSET, EXIT_OFFSET, VOL_WINDOW, MAX_WEIGHT,
 )
+from src.service.dividend_universe import CURRENT_UNIVERSE  # noqa: E402
 
-UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK", "TATN", "MGNT",
-            "MTSS", "SNGS", "CHMF", "ALRS", "VTBR", "MAGN", "NLMK", "PLZL"]
+# SERVING/MONITOR universe is PINNED to current (promoted only after expanded validation).
+UNIVERSE = CURRENT_UNIVERSE
 LOG = REPO_ROOT / "data" / "reports" / "dividend_shadow_log.csv"
 
 
