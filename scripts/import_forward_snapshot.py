@@ -31,7 +31,7 @@ import os
 import shutil
 import stat
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -157,7 +157,7 @@ def import_snapshot(snapshot: Path, *, force: bool) -> dict:
     if problems:
         raise VerifyError("verification failed:\n  - " + "\n  - ".join(problems))
 
-    as_of_date = (manifest.get("created_at") or "")[:10] or datetime.utcnow().strftime("%Y-%m-%d")
+    as_of_date = (manifest.get("created_at") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     feed_status, feed_lines = _verify_feed(snapshot, as_of_date)
     if feed_status == "FAIL":
         raise VerifyError("dividend-feed no-lookahead FAILED:\n  " + "\n  ".join(feed_lines))
