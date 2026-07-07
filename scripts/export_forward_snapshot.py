@@ -110,8 +110,12 @@ def export(out_dir: Path, config_path: str | None) -> dict:
 
     cfg = load_config(config_path)
     out_dir.mkdir(parents=True, exist_ok=True)
-    # self-ignore so a snapshot under data/ can never be committed by accident
-    (out_dir.parent / ".gitignore").write_text("*\n!.gitignore\n", encoding="utf-8")
+    # self-ignore so a snapshot under data/ is never committed — but NEVER clobber an existing
+    # .gitignore: a custom --out one level under data/ would otherwise overwrite data/.gitignore
+    # with "*" and ignore the whole tree.
+    parent_ignore = out_dir.parent / ".gitignore"
+    if not parent_ignore.exists():
+        parent_ignore.write_text("*\n!.gitignore\n", encoding="utf-8")
 
     captured: list[tuple[str, Path]] = []     # (relpath in snapshot, source-or-dest)
     missing: list[str] = []
@@ -150,6 +154,11 @@ def export(out_dir: Path, config_path: str | None) -> dict:
         rel = f"feed/edisclosure/{src.name}"
         if _copy(src, out_dir / rel):
             captured.append((rel, out_dir / rel))
+    if not any(rel.startswith("feed/edisclosure/") for rel, _ in captured):
+        # no raw disclosure titles bundled -> the import verifier can only SKIP the independent
+        # feed no-lookahead re-check. Record the gap explicitly so it is visible in the manifest
+        # (a silent skip must never read as "verified").
+        missing.append("feed/edisclosure/*.parquet (feed no-lookahead NOT independently re-verifiable)")
 
     files = [{"name": rel, "bytes": dest.stat().st_size, "sha256": _sha256(dest)}
              for rel, dest in captured]
