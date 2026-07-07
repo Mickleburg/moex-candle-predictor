@@ -76,6 +76,11 @@ class AllowlistStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, ensure_ascii=False, indent=2)
+                # flush + fsync BEFORE the rename so a power-loss right after /allow can't leave
+                # a renamed-but-empty file: os.replace is atomic, but only durable once the new
+                # bytes have actually hit disk. Otherwise the id could silently vanish.
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp, self.path)  # atomic on POSIX + Windows
         finally:
             if os.path.exists(tmp):
