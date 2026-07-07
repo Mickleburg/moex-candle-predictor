@@ -14,6 +14,7 @@ h9_shadow_pnl; the agent writes a shadow-log line each cycle for that consumer.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,14 @@ def attribute_book_pnl(positions: list[dict]) -> dict[str, dict[str, float]]:
 
 def append_shadow_log(path: Path | str, *, trade_date: str, as_of: str, risk_book: dict,
                       positions: list[dict], sleeve_pnl: dict[str, dict[str, float]]) -> None:
-    """Append one no-lookahead shadow-log line for the realized-P&L gate consumer (ML chat)."""
+    """Write one no-lookahead shadow-log line for the realized-P&L gate consumer (ML chat).
+
+    IDEMPOTENT by trade_date: if a line for this trade_date already exists it is REPLACED in
+    place (not duplicated). A cycle that fails on validate/alert has its 'failed' slot reclaimed
+    by begin_cycle and the EOD body re-runs, so a plain append would emit a second line for the
+    same day — which import_forward_snapshot._check_shadow_track rejects as a duplicate trade_date,
+    blocking the snapshot import. Matches the order-ledger's order_exists dedup discipline.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     record: dict[str, Any] = {
@@ -88,5 +96,27 @@ def append_shadow_log(path: Path | str, *, trade_date: str, as_of: str, risk_boo
                   "is_hedge": bool(p.get("is_hedge"))} for p in positions],
         "sleeve_pnl": sleeve_pnl,
     }
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False)
+
+    # Read existing lines, replace the one for this trade_date in place (preserving chronological
+    # position so as_of stays monotonic), else append. Rewrite atomically via a temp file + replace.
+    existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    out_lines: list[str] = []
+    replaced = False
+    for raw in existing:
+        if not raw.strip():
+            continue
+        try:
+            if json.loads(raw).get("trade_date") == trade_date:
+                out_lines.append(line)
+                replaced = True
+                continue
+        except ValueError:
+            pass  # keep malformed lines untouched rather than dropping evidence
+        out_lines.append(raw)
+    if not replaced:
+        out_lines.append(line)
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
