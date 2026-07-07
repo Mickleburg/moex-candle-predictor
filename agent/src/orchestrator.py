@@ -275,6 +275,13 @@ class Orchestrator:
         if proc.returncode != 0:
             self._alert("LLM feed refresh failed (non-blocking)",
                         f"trade_date={td}\nrc={proc.returncode}\n{(proc.stderr or proc.stdout)[-400:]}")
+        elif out.get("degraded") or out.get("ok") is False:
+            # rc==0 but the feed rebuilt from STALE cache (e.g. e-disclosure WAF-blocked): new
+            # ex-dates were NOT fetched. Silent during the accrual season = no signal accrues and
+            # nobody knows — so a degraded run must alert too, not just a non-zero exit.
+            self._alert("LLM feed refresh DEGRADED (non-blocking)",
+                        f"trade_date={td}\nfeed rebuilt from cache; new disclosures NOT fetched "
+                        f"(ok={out.get('ok')}, upcoming={out.get('upcoming')})")
         return out
 
     def _record_fills(self, reports: list[dict]) -> None:

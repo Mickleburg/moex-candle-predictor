@@ -125,8 +125,11 @@ def _verify_feed(snapshot: Path, as_of_date: str) -> tuple[str, list[str]]:
 
     import pandas as pd
     vdf.DDIR = edisc                      # point the verifier at the bundled raw titles
-    feed = pd.read_csv(feed_csv)
-    ok, lines, _ = vdf.verify(feed, pd.Timestamp(as_of_date))
+    try:
+        feed = pd.read_csv(feed_csv)
+        ok, lines, _ = vdf.verify(feed, pd.Timestamp(as_of_date))
+    except Exception as exc:  # noqa: BLE001 - a torn/unreadable bundle is a FAIL, not a crash
+        return "FAIL", [f"feed re-verify raised ({type(exc).__name__}: {exc}) — treat as not-verified"]
     return ("PASS" if ok else "FAIL"), lines
 
 

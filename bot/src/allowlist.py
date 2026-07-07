@@ -29,7 +29,9 @@ class AllowlistStore:
             return {}
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # corrupt bytes (invalid UTF-8) raise UnicodeDecodeError — a ValueError, NOT
+            # JSONDecodeError/OSError; treat ANY unreadable file as an empty allowlist (fail-safe).
             return {}
         out: dict[int, dict] = {}
         if isinstance(raw, dict):

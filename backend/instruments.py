@@ -68,7 +68,11 @@ def price_step_for(ticker: str, path: Path | str = _DEFAULT_PATH) -> float:
 def round_to_lot(ticker: str, quantity: float, path: Path | str = _DEFAULT_PATH) -> int:
     """Floor ``quantity`` shares to a whole number of lots (never over-orders)."""
     lot = lot_for(ticker, path)
-    n_lots = int(quantity // lot)
+    # floor the MAGNITUDE toward zero so a signed target never over-orders either leg — plain
+    # ``quantity // lot`` floors toward -inf, which OVER-orders a negative (short/hedge) target.
+    n_lots = int(abs(quantity) // lot)
+    if quantity < 0:
+        n_lots = -n_lots
     return n_lots * lot
 
 
@@ -83,8 +87,15 @@ def round_price(ticker: str, price: float, path: Path | str = _DEFAULT_PATH) -> 
 
 
 def all_verified(path: Path | str = _DEFAULT_PATH) -> bool:
-    """True only when every FIGI has been validated against a T-Invest dump (live gate)."""
-    return bool(_load(str(path)).get("all_figis_verified", False))
+    """True only when the universe is non-empty AND every FIGI is validated (live gate).
+
+    Recomputes from the per-name ``figi_verified`` truth instead of trusting the cached top-level
+    ``all_figis_verified`` flag: the two can drift (a hand-edit, a partial/expanded build, or an
+    empty instrument map where ``all([])`` is vacuously True) and this gates REAL money — so the
+    money gate must agree with ``unverified_figis()``, never diverge from it.
+    """
+    insts = load_instruments(path)
+    return bool(insts) and not unverified_figis(path)
 
 
 def unverified_figis(path: Path | str = _DEFAULT_PATH) -> list[str]:
