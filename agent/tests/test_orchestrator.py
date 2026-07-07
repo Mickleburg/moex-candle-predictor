@@ -83,6 +83,28 @@ def test_idempotent_rerun_is_noop(tmp_path):
                   for p in store.get_positions(None)) == book_after_first
 
 
+def test_failed_cycle_rerun_does_not_duplicate_shadow_log(tmp_path):
+    # A cycle that fails on validate/alert (AFTER the shadow-log line is written) leaves a 'failed'
+    # slot; begin_cycle reclaims it on the next run (no force) and the EOD body re-runs, calling
+    # append_shadow_log a 2nd time for the same trade_date. It must REPLACE the line, not append a
+    # duplicate -- else import_forward_snapshot._check_shadow_track rejects the duplicate trade_date
+    # and the snapshot won't import without a manual edit.
+    orch, store, _ = make_orch(tmp_path)
+    shadow_log = tmp_path / "shadow.jsonl"
+
+    orch.run_eod_cycle(trade_date=TD)                 # writes one shadow line for TD
+    store.finish_cycle(TD, "eod", "failed")           # simulate the failure after the line was written
+    out = orch.run_eod_cycle(trade_date=TD)           # reclaims the 'failed' slot -> body re-runs
+    assert out["status"] == "completed"
+
+    records = [json.loads(line) for line in shadow_log.read_text().splitlines() if line.strip()]
+    tds = [r["trade_date"] for r in records]
+    assert tds.count(TD) == 1, f"shadow log must not duplicate trade_date on rerun: {tds}"
+    # the invariant _check_shadow_track enforces: as_of is non-decreasing (no rewind)
+    as_ofs = [r["as_of"] for r in records]
+    assert as_ofs == sorted(as_ofs)
+
+
 def test_restart_recovers_state(tmp_path):
     orch1, store1, _ = make_orch(tmp_path)
     orch1.run_eod_cycle(trade_date=TD)
