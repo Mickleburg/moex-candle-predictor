@@ -56,7 +56,11 @@ def capture_events(closes: dict, imoex, cal: pd.DataFrame, entry: int, exit_off:
                          "runup": np.nan, "status": "pending"})
             continue
         pos = s.index.searchsorted(rec, side="right") - 1
-        if pos < abs(entry) + 2 or pos >= len(s) - 3:   # not enough history around the anchor
+        # window = bars [pos+entry .. pos+exit_off]; exit_off<0 sells BEFORE the record, so NO bars
+        # after the record are needed (was `pos >= len(s)-3` -> false-dropped the most-recent realized
+        # events, biting exactly at the ~07-24 gate-read). Require only both offsets in-range. Future-
+        # dated events are already handled as PENDING above, so here rec is always within the panel.
+        if pos + entry < 0 or not (0 <= pos + exit_off < len(s)):
             continue
         idx = s.index[pos + entry: pos + exit_off + 1]
         ar = (s.reindex(idx).pct_change() - imoex.reindex(idx).pct_change()).iloc[1:].sum()
