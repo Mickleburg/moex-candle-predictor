@@ -103,9 +103,34 @@ def active_window_map(price_index: pd.DatetimeIndex, calendar: pd.DataFrame,
     return amap
 
 
+def _cap_to_fixpoint(weights: dict[str, float], max_weight: float) -> dict[str, float]:
+    """Cap each weight at max_weight, redistributing the freed mass across the names still UNDER the
+    cap, iterated to a fixpoint (same idea as the risk_manager combiner's limit enforcement). A single
+    cap+renormalise pass BREAKS the cap on small books (2 equal names -> 0.5/0.5 renorm undoes the cap;
+    1 name -> 1.0). When the book is too small to satisfy the cap (n*max_weight < 1) every name pins at
+    max_weight and the gross is intentionally < 1: MAX_WEIGHT is a HARD per-name limit, so we hold less
+    rather than breach it. Mass is conserved (sum stays 1) whenever a feasible distribution exists."""
+    w = dict(weights)
+    for _ in range(len(w) + 1):
+        over = [t for t, x in w.items() if x > max_weight + 1e-12]
+        if not over:
+            break
+        excess = sum(w[t] - max_weight for t in over)
+        for t in over:
+            w[t] = max_weight
+        under = {t: x for t, x in w.items() if x < max_weight - 1e-12}
+        tot = sum(under.values())
+        if tot <= 0:
+            break                     # nothing left to absorb -> small book, all at cap, gross < 1
+        for t in under:
+            w[t] += excess * under[t] / tot
+    return w
+
+
 def inverse_vol_weights(panel: pd.DataFrame, tickers: list[str], as_of_pos: int,
                         vol_window: int = VOL_WINDOW, max_weight: float = MAX_WEIGHT) -> dict[str, float]:
-    """Past-only inverse-vol long weights over the active names, capped and renormalised to sum 1."""
+    """Past-only inverse-vol long weights over the active names, capped at max_weight per name. Sums to
+    1 when the book can satisfy the cap (n*max_weight >= 1); smaller books pin at the cap (gross < 1)."""
     if not tickers:
         return {}
     rets = panel.iloc[max(0, as_of_pos - vol_window): as_of_pos + 1].pct_change()
@@ -118,10 +143,8 @@ def inverse_vol_weights(panel: pd.DataFrame, tickers: list[str], as_of_pos: int,
         w = {t: 1.0 / len(tickers) for t in tickers}              # fallback: equal weight
     else:
         w = {t: inv[t] / s for t in tickers}
-    # apply cap, renormalise (one pass is enough for our small books)
-    w = {t: min(x, max_weight) for t, x in w.items()}
-    s = sum(w.values())
-    return {t: x / s for t, x in w.items()} if s > 0 else w
+    # Hard per-name cap via fixpoint water-filling (single-pass renorm would breach it on small books).
+    return _cap_to_fixpoint(w, max_weight)
 
 
 def target_positions(panel: pd.DataFrame, calendar: pd.DataFrame, as_of: pd.Timestamp,

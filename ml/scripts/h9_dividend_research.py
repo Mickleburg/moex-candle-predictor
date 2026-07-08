@@ -66,8 +66,13 @@ def runup_capture(closes, imoex, div, entry: int, exit_off: int) -> pd.DataFrame
         if t not in closes:
             continue
         s = closes[t]
+        if row["date"] > s.index[-1]:          # future-dated (beyond panel) -> not realized, skip
+            continue
         pos = s.index.searchsorted(row["date"], side="right") - 1
-        if pos < abs(entry) + 2 or pos >= len(s) - 3:
+        # window = bars [pos+entry .. pos+exit_off]; exit_off<0 sells BEFORE the record, so NO bars
+        # after the record are needed. Require only both offsets in-range. (Was `pos >= len(s)-3`,
+        # needing 3 FUTURE bars -> false-dropped the most-recent realized events, undercounting n.)
+        if pos + entry < 0 or not (0 <= pos + exit_off < len(s)):
             continue
         idx = s.index[pos + entry: pos + exit_off + 1]
         ar = (s.reindex(idx).pct_change() - imoex.reindex(idx).pct_change()).iloc[1:].sum()
