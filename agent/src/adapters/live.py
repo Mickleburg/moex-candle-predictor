@@ -175,7 +175,10 @@ class LiveExecution:
             cfg.audit_dir = _resolve(self._audit_dir)
         engine = ExecutionEngine(cfg)
 
-        snapshot = {"positions": [{"ticker": p["ticker"], "lots": int(p["lots"]), "avg_price": 0,
+        # carry the TRACK per position so execution reconciles the live and shadow books separately
+        # (coids embed the track; positions_from_snapshot reads it) — never netting the two.
+        snapshot = {"positions": [{"ticker": p["ticker"], "lots": int(p["lots"]),
+                                   "track": p.get("track", "live"), "avg_price": 0,
                                    "market_price": 0, "market_value": 0, "unrealized_pnl": 0}
                                   for p in positions]} if positions else None
         # on_critical='warn': the agent owns the kill-switch/halt; execution findings are surfaced,
@@ -206,34 +209,61 @@ class LiveExecution:
                                positions=out.get("positions", []), rejected=out.get("rejected", []))
 
 
+def _track_from_coid(client_order_id: str) -> str:
+    """Track from an execution client_order_id (exec-DATE-TRACK-TICKER-SIDE-QTY); else 'live'."""
+    parts = str(client_order_id).split("-")
+    return parts[2] if len(parts) >= 6 and parts[0] == "exec" else "live"
+
+
+def _track_meta(risk_book: dict) -> dict[tuple[str, str], dict]:
+    """{(track, ticker): {is_hedge, sleeve_contributions}} from the risk_book, so a resulting
+    position can be enriched on its OWN track. A real name wins over a hedge leg on the same ticker."""
+    meta: dict[tuple[str, str], dict] = {}
+    for track, names_key, hedge_key in (("live", "net_positions", "hedge"),
+                                        ("shadow", "shadow_positions", "shadow_hedge")):
+        for p in risk_book.get(names_key, []):
+            meta[(track, p["ticker"])] = {"is_hedge": False,
+                                          "sleeve_contributions": p.get("sleeve_contributions", {})}
+        hedge = risk_book.get(hedge_key) or {}
+        if hedge.get("mode") not in (None, "none"):
+            for leg in hedge.get("legs", []):
+                meta.setdefault((track, leg["instrument"]), {"is_hedge": True, "sleeve_contributions": {}})
+    return meta
+
+
 def _post_fill_book(current: list[dict], submitted: list[dict], reports: list[dict],
                     risk_book: dict, prices: dict[str, float]) -> list[dict]:
-    """Resulting book = current holdings + applied fills, re-attaching sleeve attribution + the
-    hedge flag from the risk_book (net + shadow, since paper folds the shadow book in)."""
-    lots: dict[str, int] = {p["ticker"]: int(p["lots"]) for p in current}
+    """Resulting book = current holdings + applied fills, kept PER TRACK (live/shadow never netted,
+    matching execution's track-aware reconcile). Each fill's track comes from its client_order_id;
+    returned rows carry a `track` tag so the orchestrator routes each to the right capital_state.
+    Only FILLED reports move the book (a resting live PLACED order has not executed yet)."""
+    lots: dict[tuple[str, str], int] = {}
+    for p in current:
+        key = (p.get("track", "live"), p["ticker"])
+        lots[key] = lots.get(key, 0) + int(p["lots"])
     filled = {r["client_order_id"] for r in reports
-              if r.get("status") in ("FILLED", "PLACED") and r.get("filled_quantity_lots", 0)}
+              if r.get("status") == "FILLED" and r.get("filled_quantity_lots", 0)}
     fill_qty = {r["client_order_id"]: int(r.get("filled_quantity_lots", 0)) for r in reports}
     for o in submitted:
         coid = o["client_order_id"]
         if coid not in filled:
             continue
+        track = _track_from_coid(coid)
         signed = fill_qty[coid] if o["side"] == "BUY" else -fill_qty[coid]
-        lots[o["ticker"]] = lots.get(o["ticker"], 0) + signed
+        lots[(track, o["ticker"])] = lots.get((track, o["ticker"]), 0) + signed
 
-    hedge = {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
-    hedge |= {leg["instrument"] for leg in risk_book.get("shadow_hedge", {}).get("legs", [])}
-    sc = {p["ticker"]: p.get("sleeve_contributions", {})
-          for p in (risk_book.get("net_positions", []) + risk_book.get("shadow_positions", []))}
+    meta = _track_meta(risk_book)
     out: list[dict] = []
-    for ticker, l in lots.items():
+    for (track, ticker), l in lots.items():
         if not l:
             continue
         price = prices.get(ticker)
+        m = meta.get((track, ticker), {})
         out.append({"ticker": ticker, "lots": int(l),
                     "avg_price": round(price, 4) if price else 0.0,
                     "last_price": round(price, 4) if price else None,
-                    "is_hedge": ticker in hedge, "sleeve_contributions": sc.get(ticker, {})})
+                    "is_hedge": m.get("is_hedge", False),
+                    "sleeve_contributions": m.get("sleeve_contributions", {}), "track": track})
     return out
 
 

@@ -71,6 +71,42 @@ def test_forward_pnl_gate_demotes_production_sleeve(tmp_path):
     assert store.get_positions("live") == []
 
 
+def test_window_exit_shadow_name_stays_shadow(tmp_path):
+    # A shadow (H9) name whose pre-ex window closes drops out of shadow_positions; its flatten order
+    # must be booked on the SHADOW track (3c), never defaulted to live — a pure-shadow book must not
+    # show phantom live orders. Execution flattens per-track and tags the order's track; the agent
+    # routes by that tag.
+    orch, store, _ = make_orch(tmp_path)               # default sleeve: SBER, LKOH, TATN (shadow)
+    orch.run_eod_cycle(trade_date="2026-06-17")
+    assert {"SBER", "LKOH", "TATN"} <= {p["ticker"] for p in store.get_positions("shadow")}
+
+    orch.adapters.sleeve = mock.MockSleeve(longs={"LKOH": 0.34, "TATN": 0.32})   # SBER window closed
+    out = orch.run_eod_cycle(trade_date="2026-06-18")
+    rs = out["result"]["risk_summary"]
+    assert rs["n_live_orders"] == 0                     # the SBER flatten is a SHADOW order
+    assert out["result"]["selected_orders"] == []
+    assert "SBER" in {o["ticker"] for o in rs["shadow_orders"]}
+    assert store.get_positions("live") == []
+    assert "SBER" not in {p["ticker"] for p in store.get_positions("shadow")}    # flattened
+
+
+def test_shadow_book_survives_in_live_mode(tmp_path):
+    # In live eff_mode execution trades the NET (live) book only; the shadow accrual layer must keep
+    # running as a SEPARATE paper reconcile, not be zeroed each cycle (3a). H9 is shadow, so with no
+    # signed-off sleeve the live book is empty and only the shadow book fills — and PERSISTS.
+    orch, store, _ = make_orch(tmp_path, mode="live", enable_live=True)
+    out = orch.run_eod_cycle(trade_date=TD)
+    assert out["status"] == "completed" and out["result"]["mode"] == "live"
+    assert {"SBER", "LKOH", "TATN"} <= {p["ticker"] for p in store.get_positions("shadow")}
+    assert store.get_positions("live") == []           # unproven sleeve -> zero live capital
+    rs = out["result"]["risk_summary"]
+    assert rs["n_live_orders"] == 0 and rs["n_shadow_orders"] > 0
+    # re-running the same day is steady-state on the shadow track — no re-establish (per-track dedup)
+    out2 = orch.run_eod_cycle(trade_date=TD, force=True)
+    assert out2["result"]["risk_summary"]["n_shadow_orders"] == 0
+    assert {"SBER", "LKOH", "TATN"} <= {p["ticker"] for p in store.get_positions("shadow")}  # still held
+
+
 def test_idempotent_rerun_is_noop(tmp_path):
     orch, store, _ = make_orch(tmp_path)
     first = orch.run_eod_cycle(trade_date=TD)

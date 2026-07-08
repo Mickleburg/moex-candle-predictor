@@ -100,36 +100,56 @@ class Orchestrator:
         # prices for sizing + marks
         prices = self.adapters.backend.latest_prices(self.config.universe, as_of)
 
-        # step 6 — execution (paper-first: live only with the hard gate). In paper/dry-run execution
-        # also paper-trades the SHADOW book; in live it trades net_positions only. Pass the matching
-        # current book so reconciliation sees steady state (full paper book vs live-only).
+        # step 6 — execution, reconciled PER CAPITAL TRACK (live and shadow are never netted by
+        # ticker, 3e). Execution tags every order (track in the client_order_id) and every returned
+        # position with its track, so the agent routes results by that tag — a shadow name's flatten
+        # stays on the shadow track (3c). Paper/dry-run reconciles BOTH tracks in one call; LIVE
+        # trades the net (real) book AND runs a SEPARATE paper reconcile of the shadow book so the
+        # forward-shadow accrual layer keeps running once a sleeve goes live (it must not be zeroed
+        # each cycle, 3a). Current holdings are handed over tagged track = their capital_state.
         eff_mode, mode_note = self._effective_exec_mode()
-        current = (self.store.get_positions("live") if eff_mode == "live"
-                   else self.store.get_positions(None))
+        live_positions = shadow_positions = None
         if kill:
-            exec_orders, exec_reports, exec_positions, rejected = [], [], None, []
+            all_reports, rejected = [], []
             live_orders, shadow_orders = [], []
             exec_note = "kill-switch engaged — execution skipped, monitoring only"
         else:
-            er = self.adapters.execution.reconcile_and_execute(
-                risk_book=risk_book, positions=current, prices=prices,
-                capital=self.config.capital_rub, mode=eff_mode, trade_date=td, phase=phase)
-            exec_orders, exec_reports, exec_positions, rejected = er.orders, er.reports, er.positions, er.rejected
-            live_orders, shadow_orders = self._split_by_gate(exec_orders, risk_book)
-            exec_note = (f"executed {len(exec_orders)} delta-order(s) (live={len(live_orders)} "
+            if eff_mode == "live":
+                results = [
+                    self.adapters.execution.reconcile_and_execute(
+                        risk_book=risk_book, positions=self._current("live"), prices=prices,
+                        capital=self.config.capital_rub, mode="live", trade_date=td, phase=phase),
+                    self.adapters.execution.reconcile_and_execute(
+                        risk_book=self._shadow_only_book(risk_book), positions=self._current("shadow"),
+                        prices=prices, capital=self.config.capital_rub, mode="paper",
+                        trade_date=td, phase=phase),
+                ]
+            else:
+                results = [self.adapters.execution.reconcile_and_execute(
+                    risk_book=risk_book, positions=self._current(None), prices=prices,
+                    capital=self.config.capital_rub, mode=eff_mode, trade_date=td, phase=phase)]
+            all_orders = [o for r in results for o in r.orders]
+            all_reports = [rep for r in results for rep in r.reports]
+            rejected = [x for r in results for x in r.rejected]
+            live_orders, shadow_orders = self._route_orders(all_orders)
+            if any(r.positions is not None for r in results):
+                positions_out = [p for r in results if r.positions is not None for p in r.positions]
+                live_positions, shadow_positions = self._route_positions(positions_out)
+            exec_note = (f"executed {len(all_orders)} delta-order(s) (live={len(live_orders)} "
                          f"shadow={len(shadow_orders)}) in {eff_mode} mode. {mode_note}").strip()
 
         # step 7 — persist book + per-sleeve P&L attribution, split LIVE vs SHADOW capital.
-        # A filled position/order is LIVE capital iff it came from net_positions/hedge (passed the
-        # gate); SHADOW iff from shadow_positions/shadow_hedge. Shadow paper-fills accrue forward-P&L
-        # for the gate WITHOUT being counted as live edge.
-        self._record_fills(exec_reports)
-        self._record_orders(td, phase, live_orders, exec_reports, capital_state="live")
-        self._record_orders(td, phase, shadow_orders, exec_reports, capital_state="shadow")
-        if not kill and eff_mode in ("paper", "live") and exec_positions is not None:
-            live_pos, shadow_pos = self._split_by_gate(exec_positions, risk_book)
-            self._replace_book(live_pos, capital_state="live")
-            self._replace_book(shadow_pos, capital_state="shadow")
+        # A filled position/order is LIVE capital iff it came from the live track (net_positions/
+        # hedge); SHADOW iff from the shadow track. Shadow paper-fills accrue forward-P&L for the
+        # gate WITHOUT being counted as live edge.
+        self._record_fills(all_reports)
+        self._record_orders(td, phase, live_orders, all_reports, capital_state="live")
+        self._record_orders(td, phase, shadow_orders, all_reports, capital_state="shadow")
+        if not kill and eff_mode in ("paper", "live"):
+            if live_positions is not None:
+                self._replace_book(live_positions, capital_state="live")
+            if shadow_positions is not None:
+                self._replace_book(shadow_positions, capital_state="shadow")
 
         live_book = self.store.get_positions("live")
         shadow_book = self.store.get_positions("shadow")
@@ -311,20 +331,40 @@ class Orchestrator:
                                        capital_state=capital_state)
 
     @staticmethod
-    def _split_by_gate(rows: list[dict], risk_book: dict) -> tuple[list[dict], list[dict]]:
-        """Split rows keyed by 'ticker' (positions OR orders) into (live, shadow) by the gate:
-        net_positions/hedge -> live, shadow_positions/shadow_hedge -> shadow. A row in neither (a
-        stale residual) defaults to live. (One-sleeve book: live/shadow instruments are disjoint.)"""
-        live_inst = {p["ticker"] for p in risk_book.get("net_positions", [])}
-        live_inst |= {leg["instrument"] for leg in risk_book.get("hedge", {}).get("legs", [])}
-        shadow_inst = {p["ticker"] for p in risk_book.get("shadow_positions", [])}
-        shadow_inst |= {leg["instrument"] for leg in risk_book.get("shadow_hedge", {}).get("legs", [])}
+    def _shadow_only_book(risk_book: dict) -> dict:
+        """A shadow-only view of the risk_book: net_positions + live hedge emptied so a PAPER
+        reconcile trades ONLY the shadow book. Used in live mode to keep the shadow accrual layer
+        running as a separate paper run (3a). All other fields (as_of, discipline inputs) survive."""
+        book = dict(risk_book)
+        book["net_positions"] = []
+        book["hedge"] = {"mode": risk_book.get("hedge", {}).get("mode", "none"), "legs": []}
+        return book
+
+    def _current(self, capital_state: str | None) -> list[dict]:
+        """Store book handed to execution as its current holdings, each row tagged `track` = its
+        capital_state so execution reconciles the live and shadow books INDEPENDENTLY, never netting
+        a shadow short against a live long on the same ticker (3e). capital_state=None -> both tracks."""
+        return [{**p, "track": p["capital_state"]} for p in self.store.get_positions(capital_state)]
+
+    @staticmethod
+    def _track_of_coid(client_order_id: str) -> str:
+        """Track from an execution client_order_id (exec-DATE-TRACK-TICKER-SIDE-QTY); else 'live'."""
+        parts = str(client_order_id).split("-")
+        return parts[2] if len(parts) >= 6 and parts[0] == "exec" else "live"
+
+    def _route_orders(self, orders: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Route order_requests to (live, shadow) by the track embedded in the client_order_id."""
         live, shadow = [], []
-        for r in rows:
-            if r["ticker"] in shadow_inst and r["ticker"] not in live_inst:
-                shadow.append(r)
-            else:
-                live.append(r)
+        for o in orders:
+            (shadow if self._track_of_coid(o["client_order_id"]) == "shadow" else live).append(o)
+        return live, shadow
+
+    @staticmethod
+    def _route_positions(positions: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Route resulting positions to (live, shadow) by their `track` tag (default live)."""
+        live, shadow = [], []
+        for p in positions:
+            (shadow if p.get("track") == "shadow" else live).append(p)
         return live, shadow
 
     def _cancel_all(self, open_orders: list[dict]) -> None:

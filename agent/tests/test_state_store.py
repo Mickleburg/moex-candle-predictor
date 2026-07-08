@@ -69,6 +69,34 @@ def test_pnl_attribution_upsert(tmp_path):
     assert rows["s3_event"]["unrealized"] == 7.0   # upsert, not double-count
 
 
+def test_pnl_by_sleeve_returns_latest_snapshot_not_sum(tmp_path):
+    # unrealized_pnl is a book mark-to-market SNAPSHOT recorded each day; the current figure is the
+    # LATEST day's snapshot, NOT the sum across every day the book was held (which inflates it, 3b).
+    s = _store(tmp_path)
+    s.record_pnl_attribution("2026-06-17", "s3_event", realized=0.0, unrealized=-100.0, gross=1000.0)
+    s.record_pnl_attribution("2026-06-18", "s3_event", realized=0.0, unrealized=-30.0, gross=900.0)
+    rows = {r["sleeve"]: r for r in s.pnl_by_sleeve()}
+    assert rows["s3_event"]["unrealized"] == -30.0        # latest day, not -130.0 sum
+    assert rows["s3_event"]["gross"] == 900.0
+    # the invariant #9 demotion gate reads the same latest snapshot, not an inflated cumulative
+    assert s.forward_pnl_by_sleeve("live")["s3_event"]["forward_pnl"] == -30.0
+
+
+def test_record_execution_idempotent(tmp_path):
+    # a reclaimed cycle re-emits the SAME execution_report; recording it twice must not duplicate
+    # the fill (3d) — the client_order_id is the idempotency key, latest report wins.
+    s = _store(tmp_path)
+    rep = {"client_order_id": "exec-20260618-shadow-SBER-BUY-5", "ticker": "SBER",
+           "status": "FILLED", "filled_quantity_lots": 5, "avg_fill_price": 300.0, "message": "fill"}
+    s.record_execution(rep)
+    s.record_execution(rep)
+    rows = s._conn.execute("SELECT client_order_id, message FROM executions").fetchall()
+    assert len(rows) == 1
+    s.record_execution({**rep, "message": "re-fill"})     # a later report updates in place
+    rows = s._conn.execute("SELECT message FROM executions").fetchall()
+    assert len(rows) == 1 and rows[0]["message"] == "re-fill"
+
+
 def test_kill_switch_persists(tmp_path):
     s = _store(tmp_path)
     assert s.kill_switch_engaged() is False

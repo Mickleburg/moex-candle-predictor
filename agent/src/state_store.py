@@ -150,6 +150,14 @@ class StateStore:
         ocols = [r[1] for r in self._conn.execute("PRAGMA table_info(orders)").fetchall()]
         if ocols and "capital_state" not in ocols:
             self._conn.execute("ALTER TABLE orders ADD COLUMN capital_state TEXT NOT NULL DEFAULT 'live'")
+        # executions: make client_order_id the idempotency key (a reclaimed cycle re-emits fills).
+        # Not in _SCHEMA because a legacy table may already hold duplicate coids -> collapse to the
+        # most recent (max id) per coid, THEN add the unique index the ON CONFLICT upsert relies on.
+        if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' "
+                                  "AND name='ux_executions_coid'").fetchone():
+            self._conn.execute("DELETE FROM executions WHERE id NOT IN "
+                               "(SELECT MAX(id) FROM executions GROUP BY client_order_id)")
+            self._conn.execute("CREATE UNIQUE INDEX ux_executions_coid ON executions(client_order_id)")
 
     def close(self) -> None:
         with self._lock:
@@ -296,10 +304,16 @@ class StateStore:
 
     # --- executions --------------------------------------------------------------------
     def record_execution(self, report: dict) -> None:
+        """Record a fill, IDEMPOTENT by client_order_id: a reclaimed cycle re-emits the same
+        execution_report, so an INSERT-only log would duplicate fills (which then double-count in
+        any per-order audit). Upsert on the client_order_id unique index — the latest report wins."""
         with self._tx() as c:
             c.execute(
                 "INSERT INTO executions (client_order_id, ticker, status, filled_quantity_lots, "
-                "avg_fill_price, message, ts) VALUES (?,?,?,?,?,?,?)",
+                "avg_fill_price, message, ts) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(client_order_id) DO UPDATE SET status=excluded.status, "
+                "filled_quantity_lots=excluded.filled_quantity_lots, "
+                "avg_fill_price=excluded.avg_fill_price, message=excluded.message, ts=excluded.ts",
                 (report["client_order_id"], report["ticker"], report["status"],
                  int(report.get("filled_quantity_lots", 0)), report.get("avg_fill_price"),
                  report.get("message", ""), _now()),
@@ -320,17 +334,26 @@ class StateStore:
             )
 
     def pnl_by_sleeve(self, capital_state: str | None = None) -> list[dict]:
-        """Cumulative P&L per (sleeve, capital_state); pass capital_state to filter one track."""
+        """LATEST P&L snapshot per (sleeve, capital_state) — the row at each sleeve's most recent
+        trade_date. NOT a SUM over trade_dates: unrealized_pnl is the book's mark-to-market snapshot
+        recorded every cycle the position is held, so summing it across days inflates the figure
+        (and the #9 demotion gate that reads it via forward_pnl_by_sleeve). Pass capital_state to
+        filter one track."""
+        if capital_state is None:
+            latest = ("SELECT sleeve, capital_state, MAX(trade_date) AS md FROM pnl_attribution "
+                      "GROUP BY sleeve, capital_state")
+            params: tuple = ()
+        else:
+            latest = ("SELECT sleeve, capital_state, MAX(trade_date) AS md FROM pnl_attribution "
+                      "WHERE capital_state=? GROUP BY sleeve, capital_state")
+            params = (capital_state,)
+        sql = ("SELECT p.sleeve AS sleeve, p.capital_state AS capital_state, "
+               "p.realized_pnl AS realized, p.unrealized_pnl AS unrealized, p.gross AS gross "
+               f"FROM pnl_attribution p JOIN ({latest}) m "
+               "ON p.sleeve=m.sleeve AND p.capital_state=m.capital_state AND p.trade_date=m.md "
+               "ORDER BY p.sleeve, p.capital_state")
         with self._lock:
-            if capital_state is None:
-                return [dict(r) for r in self._conn.execute(
-                    "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
-                    "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution "
-                    "GROUP BY sleeve, capital_state ORDER BY sleeve, capital_state").fetchall()]
-            return [dict(r) for r in self._conn.execute(
-                "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
-                "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution WHERE capital_state=? "
-                "GROUP BY sleeve ORDER BY sleeve", (capital_state,)).fetchall()]
+            return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def forward_pnl_by_sleeve(self, capital_state: str = "live") -> dict[str, dict]:
         """Per-sleeve forward P&L for the combiner's shadow gate seam: {sleeve: {"forward_pnl": x}}.

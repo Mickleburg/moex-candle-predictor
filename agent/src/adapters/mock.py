@@ -228,74 +228,84 @@ class MockCombiner:
 
 
 class PaperBrokerExecution:
-    """Stands in for the execution block: a deterministic paper broker.
+    """Stands in for the execution block: a deterministic, TRACK-AWARE paper broker.
 
-    Reconciles the target risk_book against the current book, emits LIMIT delta-orders with
-    stable client_order_ids (dedup), and fills them at the reference price. Lot rounding uses
-    lot size 1 for the mock. The −12/−2 entry/exit DISCIPLINE is already baked into which
-    names the sleeve emits, so daily target-book reconciliation here enters new names and
-    closes names that left their window. dry-run prints orders without changing the book.
+    Mirrors execution.src.reconcile's contract: the live (net_positions + hedge) and shadow
+    (shadow_positions + shadow_hedge) books are reconciled SEPARATELY against their own current
+    holdings — never netted, so a shadow short can't collapse a live long on the same ticker (2b/3e).
+    Orders carry the track in the client_order_id (exec-DATE-TRACK-TICKER-SIDE-QTY) and returned
+    positions carry a `track` tag, the same contract the real engine emits, so the orchestrator
+    routes results by track. live trades the live track ONLY; dry-run/paper also paper-trade shadow.
+    Lot size 1; dry-run computes orders without moving the book. Current holdings are read per track
+    from each position's `track` tag (default live).
     """
+
+    TRACKS = ("live", "shadow")
 
     def reconcile_and_execute(self, *, risk_book: dict, positions: list[dict],
                               prices: dict[str, float], capital: float, mode: str,
                               trade_date: str, phase: str) -> ExecutionResult:
-        if mode == "live":
-            raise RuntimeError("PaperBrokerExecution cannot run in live mode (mock broker)")
+        include_shadow = mode != "live"            # live trades net only; paper/dry-run fold shadow
+        tracks = self.TRACKS if include_shadow else ("live",)
+        tag = str(trade_date).replace("-", "")
 
-        # Effective book mirrors execution.reconcile: live trades net_positions only; dry-run/paper
-        # ALSO paper-trade the shadow book so the forward-shadow track accrues. (mode != live here.)
-        targets: dict[str, dict] = {}
-        rejected: list[dict] = []
-        for p in risk_book.get("net_positions", []):
-            self._add_target(targets, rejected, p["ticker"], float(p["weight"]), prices, capital,
-                             is_hedge=False, sleeve_contributions=p.get("sleeve_contributions", {}))
-        for leg in risk_book.get("hedge", {}).get("legs", []):
-            self._add_target(targets, rejected, leg["instrument"], float(leg["weight"]), prices,
-                             capital, is_hedge=True, sleeve_contributions={})
-        for p in risk_book.get("shadow_positions", []):
-            self._add_target(targets, rejected, p["ticker"], float(p["weight"]), prices, capital,
-                             is_hedge=False, sleeve_contributions=p.get("sleeve_contributions", {}))
-        for leg in risk_book.get("shadow_hedge", {}).get("legs", []):
-            self._add_target(targets, rejected, leg["instrument"], float(leg["weight"]), prices,
-                             capital, is_hedge=True, sleeve_contributions={})
+        current: dict[str, dict[str, int]] = {"live": {}, "shadow": {}}
+        for p in positions:
+            current.setdefault(p.get("track", "live"), {})[p["ticker"]] = int(p["lots"])
 
-        current = {p["ticker"]: int(p["lots"]) for p in positions}
-        orders, reports = [], []
-        new_positions: dict[str, dict] = {}
+        orders, reports, new_positions, rejected = [], [], [], []
+        for track in tracks:
+            targets: dict[str, dict] = {}
+            for inst, weight, is_hedge, sc in self._track_rows(risk_book, track):
+                self._add_target(targets, rejected, inst, weight, prices, capital,
+                                 is_hedge=is_hedge, sleeve_contributions=sc)
+            cur = current.get(track, {})
+            for ticker in sorted(set(targets) | set(cur)):
+                target_lots = targets.get(ticker, {}).get("lots", 0)
+                cur_lots = cur.get(ticker, 0)
+                delta = target_lots - cur_lots
+                price = prices.get(ticker)
+                meta = targets.get(ticker, {})
+                if delta != 0 and price is not None:
+                    side = "BUY" if delta > 0 else "SELL"
+                    coid = f"exec-{tag}-{track}-{ticker}-{side}-{abs(delta)}"
+                    orders.append({"ticker": ticker, "side": side, "quantity_lots": abs(delta),
+                                   "order_type": "LIMIT", "limit_price": round(price, 4),
+                                   "client_order_id": coid})
+                    status = "DRY_RUN" if mode == "dry-run" else "FILLED"
+                    reports.append({"client_order_id": coid, "ticker": ticker, "status": status,
+                                    "exchange_order_id": None if mode == "dry-run" else f"mock-{coid}",
+                                    "filled_quantity_lots": 0 if mode == "dry-run" else abs(delta),
+                                    "avg_fill_price": None if mode == "dry-run" else round(price, 4),
+                                    "message": f"paper {status.lower()} {side} {abs(delta)} {ticker} [{track}]"})
 
-        for ticker in sorted(set(targets) | set(current)):
-            target_lots = targets.get(ticker, {}).get("lots", 0)
-            cur_lots = current.get(ticker, 0)
-            delta = target_lots - cur_lots
-            price = prices.get(ticker)
-            meta = targets.get(ticker, {})
-            if delta != 0 and price is not None:
-                side = "BUY" if delta > 0 else "SELL"
-                coid = f"{trade_date}-{phase}-{ticker}-{'B' if delta > 0 else 'S'}"
-                order = {"ticker": ticker, "side": side, "quantity_lots": abs(delta),
-                         "order_type": "LIMIT", "limit_price": round(price, 4), "client_order_id": coid}
-                orders.append(order)
-                status = "DRY_RUN" if mode == "dry-run" else "FILLED"
-                reports.append({"client_order_id": coid, "ticker": ticker, "status": status,
-                                "exchange_order_id": None if mode == "dry-run" else f"mock-{coid}",
-                                "filled_quantity_lots": 0 if mode == "dry-run" else abs(delta),
-                                "avg_fill_price": None if mode == "dry-run" else round(price, 4),
-                                "message": f"paper {status.lower()} {side} {abs(delta)} {ticker}"})
-
-            # resulting book: dry-run keeps current; paper moves to target
-            final_lots = cur_lots if mode == "dry-run" else target_lots
-            if final_lots != 0:
-                new_positions[ticker] = {
-                    "ticker": ticker, "lots": final_lots,
-                    "avg_price": round(price, 4) if price is not None else 0.0,
-                    "last_price": round(price, 4) if price is not None else None,
-                    "is_hedge": meta.get("is_hedge", False),
-                    "sleeve_contributions": meta.get("sleeve_contributions", {}),
-                }
+                # resulting book: dry-run keeps current; paper moves to target
+                final_lots = cur_lots if mode == "dry-run" else target_lots
+                if final_lots != 0:
+                    new_positions.append({
+                        "ticker": ticker, "lots": final_lots,
+                        "avg_price": round(price, 4) if price is not None else 0.0,
+                        "last_price": round(price, 4) if price is not None else None,
+                        "is_hedge": meta.get("is_hedge", False),
+                        "sleeve_contributions": meta.get("sleeve_contributions", {}),
+                        "track": track,
+                    })
 
         return ExecutionResult(orders=orders, reports=reports,
-                               positions=list(new_positions.values()), rejected=rejected)
+                               positions=new_positions, rejected=rejected)
+
+    @staticmethod
+    def _track_rows(risk_book: dict, track: str) -> list[tuple[str, float, bool, dict]]:
+        """(instrument, weight, is_hedge, sleeve_contributions) rows for ONE track's book."""
+        if track == "live":
+            names, hedge = risk_book.get("net_positions", []), risk_book.get("hedge") or {}
+        else:
+            names, hedge = risk_book.get("shadow_positions", []), risk_book.get("shadow_hedge") or {}
+        rows = [(p["ticker"], float(p["weight"]), False, p.get("sleeve_contributions", {}))
+                for p in names]
+        if hedge.get("mode") not in (None, "none"):
+            rows += [(leg["instrument"], float(leg["weight"]), True, {}) for leg in hedge.get("legs", [])]
+        return rows
 
     @staticmethod
     def _add_target(targets: dict, rejected: list, ticker: str, weight: float,
@@ -303,8 +313,15 @@ class PaperBrokerExecution:
                     sleeve_contributions: dict) -> None:
         price = prices.get(ticker)
         if price is None or price <= 0:
-            rejected.append({"ticker": ticker, "reason": "no price for sizing"})
+            if ticker not in {r["ticker"] for r in rejected}:
+                rejected.append({"ticker": ticker, "reason": "no price for sizing"})
             return
-        lots = int(round((weight * capital) / price))   # lot size 1 in the mock
-        targets[ticker] = {"lots": lots, "is_hedge": is_hedge,
-                           "sleeve_contributions": sleeve_contributions}
+        prev = targets.get(ticker)                       # merge name + hedge on same ticker (2a)
+        total_w = weight + (prev["weight"] if prev else 0.0)
+        targets[ticker] = {
+            "weight": total_w,
+            "lots": int(round((total_w * capital) / price)),   # lot size 1 in the mock
+            "is_hedge": prev["is_hedge"] if prev else is_hedge,
+            "sleeve_contributions": {**(prev["sleeve_contributions"] if prev else {}),
+                                     **(sleeve_contributions or {})},
+        }
