@@ -92,5 +92,5 @@ def test_missing_price_surfaces_in_rejected(tmp_config):
                    "net_positions": [{"ticker": "SBER", "weight": 0.3, "side": "LONG"}],
                    "hedge": {"mode": "none", "legs": []}},
         positions=[], prices={})            # no price for SBER
-    assert {"ticker": "SBER", "reason": "missing_or_nonpositive_price"} in out["rejected"]
+    assert {"ticker": "SBER", "track": "live", "reason": "missing_or_nonpositive_price"} in out["rejected"]
     assert out["orders"] == []

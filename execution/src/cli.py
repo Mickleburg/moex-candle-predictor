@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 from .config import ExecutionConfig, Mode
-from .engine import ExecutionEngine, positions_from_snapshot
+from .engine import ExecutionEngine
 from .instruments import load_lot_sizes
 from .trading_calendar import active_calendar_source
 
@@ -81,12 +81,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_dry_run(args: argparse.Namespace) -> int:
     risk_book = _load(args.risk_book)
     prices = _load(args.prices)
-    current = positions_from_snapshot(_load(args.positions)) if args.positions else {}
+    current_positions = _load(args.positions) if args.positions else None
     config = ExecutionConfig(mode=Mode.DRY_RUN, capital=args.capital, lot_sizes=load_lot_sizes())
     engine = ExecutionEngine(config)
-    res = engine.run_cycle(risk_book, prices, current_positions={"positions": [
-        {"ticker": t, "lots": l, "avg_price": 0, "market_price": 0,
-         "market_value": 0, "unrealized_pnl": 0} for t, l in current.items()]} if current else None)
+    res = engine.run_cycle(risk_book, prices, current_positions=current_positions)
 
     print(f"=== execution dry-run — {res.summary_line()} ===")
     for req in res.submitted:

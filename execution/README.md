@@ -88,15 +88,19 @@ The risk_manager splits the `risk_book` by a shadow gate (invariants #9/#4): pro
 `shadow_hedge`) with **zero live capital**. Execution honours that split **by mode**:
 
 ```
-dry-run / paper -> effective book = net_positions ∪ shadow_positions  (+ hedge ∪ shadow_hedge)
-                   -> paper-trades the shadow book so the forward-shadow track accrues through the
-                      real execution path (the point of the paper track)
-live            -> net_positions + live hedge ONLY
+dry-run / paper -> reconcile the LIVE track (net_positions + hedge) AND the SHADOW track
+                   (shadow_positions + shadow_hedge) — SEPARATELY, never netted. Both are
+                   paper-traded so the forward-shadow track accrues through the real execution path.
+live            -> the LIVE track ONLY
                    -> an all-shadow book (e.g. H9 while is_production=false) places ZERO real orders
 ```
 
-So while H9 is `is_production=false` its whole book is shadow: paper/dry-run reconcile and paper-fill
-it; live places nothing. Names appearing in both the live and shadow books net by ticker.
+The two tracks are reconciled **independently** and orders are **tagged by track** (the track is in
+the `client_order_id`, and resulting positions carry a `track` field). A ticker held on both tracks
+yields **two** orders — a shadow short must never collapse a live long on the same name, or the shadow
+P&L accrual is contaminated. Within a single track, a name that is also a hedge leg is merged into one
+target before diffing (no double-subtraction). So while H9 is `is_production=false` its whole book is
+shadow: paper/dry-run reconcile + paper-fill it; live places nothing.
 
 ## Orchestrator integration — the `serve` seam (agent step 6)
 

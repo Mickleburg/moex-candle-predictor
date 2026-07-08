@@ -19,7 +19,7 @@ from .audit import AuditLog
 from .brokers import BrokerAdapter, make_broker
 from .config import ExecutionConfig, Mode
 from .discipline import DisciplineChecker
-from .reconcile import book_targets, reconcile
+from .reconcile import TRACKS, reconcile, track_targets
 from .trading_calendar import TradingCalendar, _as_date, default_trading_calendar
 
 
@@ -44,11 +44,18 @@ class CycleResult:
                 f"{len(self.skipped)} unpriced; is_production={self.is_production}")
 
 
-def positions_from_snapshot(snapshot: dict | None) -> dict[str, int]:
-    """Signed lot map from a `portfolio_snapshot` dict."""
+def positions_from_snapshot(snapshot: dict | None) -> dict[str, dict[str, int]]:
+    """Per-track signed lot map {track: {ticker: lots}} from a `portfolio_snapshot` dict.
+
+    Positions carry an optional `track` ("live"/"shadow"); missing -> "live". Keeping tracks separate
+    is what lets reconciliation diff the live and shadow books independently.
+    """
+    by_track: dict[str, dict[str, int]] = {"live": {}, "shadow": {}}
     if not snapshot:
-        return {}
-    return {p["ticker"]: int(p["lots"]) for p in snapshot.get("positions", [])}
+        return by_track
+    for p in snapshot.get("positions", []):
+        by_track.setdefault(p.get("track", "live"), {})[p["ticker"]] = int(p["lots"])
+    return by_track
 
 
 def _update_position(lots: int, avg: float, fill_signed: int, price: float) -> tuple[int, float]:
@@ -68,62 +75,77 @@ def _resulting_book(positions: list[dict], prices: dict[str, float], risk_book: 
                     result: "CycleResult", include_shadow: bool = False) -> list[dict]:
     """Book AFTER fills: current positions + FILLED reports, enriched from the EFFECTIVE risk_book.
 
-    Shape matches what the orchestrator's `_replace_book` expects
-    ({ticker, lots, avg_price, last_price, is_hedge, sleeve_contributions}). Metadata is taken from the
-    same effective book reconciliation traded (shadow-inclusive for paper/dry-run), so the enrichment
-    matches the orders. PLACED (resting live limit) / DRY_RUN reports do not move the book — only
+    Positions are keyed by (track, ticker) so the live and shadow books stay SEPARATE — the same
+    ticker can be held on both tracks without netting. Shape matches what the orchestrator's
+    `_replace_book` expects ({ticker, lots, avg_price, last_price, is_hedge, sleeve_contributions})
+    plus a `track` tag. PLACED (resting live limit) / DRY_RUN reports do not move the book — only
     FILLED (paper) does.
     """
-    meta: dict[str, dict] = {}
-    for tgt in book_targets(risk_book, include_shadow):
-        meta[tgt.instrument] = {"is_hedge": tgt.is_hedge, "sector": tgt.sector,
-                               "sleeve_contributions": tgt.sleeve_contributions or {}}
+    tracks = TRACKS if include_shadow else ("live",)
+    meta: dict[tuple[str, str], dict] = {}
+    for track in tracks:
+        for tgt in track_targets(risk_book, track):
+            meta[(track, tgt.instrument)] = {"is_hedge": tgt.is_hedge, "sector": tgt.sector,
+                                             "sleeve_contributions": tgt.sleeve_contributions or {}}
 
-    book: dict[str, dict] = {}
+    book: dict[tuple[str, str], dict] = {}
     for p in positions:
-        book[p["ticker"]] = {"lots": int(p.get("lots", 0)),
-                             "avg_price": float(p.get("avg_price", 0.0) or 0.0)}
+        key = (p.get("track", "live"), p["ticker"])
+        book[key] = {"lots": int(p.get("lots", 0)), "avg_price": float(p.get("avg_price", 0.0) or 0.0)}
 
     for rep, order in zip(result.reports, result.submitted):
         if rep["status"] != "FILLED":
             continue
-        t = rep["ticker"]
+        key = (_track_from_coid(order["client_order_id"]), rep["ticker"])
         filled = int(rep["filled_quantity_lots"])
         price = float(rep["avg_fill_price"] if rep["avg_fill_price"] is not None else order["limit_price"])
         signed = filled if order["side"] == "BUY" else -filled
-        cur = book.get(t, {"lots": 0, "avg_price": 0.0})
+        cur = book.get(key, {"lots": 0, "avg_price": 0.0})
         new_lots, new_avg = _update_position(cur["lots"], cur["avg_price"], signed, price)
-        book[t] = {"lots": new_lots, "avg_price": new_avg}
+        book[key] = {"lots": new_lots, "avg_price": new_avg}
 
     out: list[dict] = []
-    for t, b in book.items():
+    for (track, t), b in book.items():
         if b["lots"] == 0:
             continue
-        m = meta.get(t, {})
+        m = meta.get((track, t), {})
         lp = prices.get(t)
         out.append({"ticker": t, "lots": int(b["lots"]), "avg_price": round(float(b["avg_price"]), 6),
                     "last_price": float(lp) if lp is not None else None,
                     "is_hedge": bool(m.get("is_hedge", False)),
-                    "sleeve_contributions": m.get("sleeve_contributions", {})})
-    return sorted(out, key=lambda x: x["ticker"])
+                    "sleeve_contributions": m.get("sleeve_contributions", {}),
+                    "track": track})
+    return sorted(out, key=lambda x: (x["track"], x["ticker"]))
+
+
+def _split_coid(client_order_id: str) -> tuple[str, str]:
+    """(track, ticker) from a client_order_id (exec-DATE-TRACK-TICKER-SIDE-QTY)."""
+    parts = client_order_id.split("-")
+    if len(parts) >= 6:
+        return parts[2], parts[3]
+    return "live", (parts[2] if len(parts) >= 5 else client_order_id)
+
+
+def _track_from_coid(client_order_id: str) -> str:
+    return _split_coid(client_order_id)[0]
 
 
 def _ticker_from_coid(client_order_id: str) -> str:
-    """Recover the ticker from a deterministic client_order_id (exec-DATE-TICKER-SIDE-QTY)."""
-    parts = client_order_id.split("-")
-    return parts[2] if len(parts) >= 5 else client_order_id
+    return _split_coid(client_order_id)[1]
 
 
 def _collect_rejected(result: "CycleResult") -> list[dict]:
-    """[{ticker, reason}] for everything not turned into a live order this cycle."""
+    """[{ticker, track, reason}] for everything not turned into a live order this cycle."""
     rejected: list[dict] = []
     for sk in result.skipped:
-        rejected.append({"ticker": sk.get("instrument"), "reason": sk.get("reason")})
+        rejected.append({"ticker": sk.get("instrument"), "track": sk.get("track", "live"),
+                         "reason": sk.get("reason")})
     for coid in result.duplicates:
-        rejected.append({"ticker": _ticker_from_coid(coid), "reason": "duplicate_intent"})
+        track, ticker = _split_coid(coid)
+        rejected.append({"ticker": ticker, "track": track, "reason": "duplicate_intent"})
     for f in result.findings:
         if f.get("severity") == "critical":
-            rejected.append({"ticker": f.get("instrument"), "reason": f.get("message")})
+            rejected.append({"ticker": f.get("instrument"), "track": "live", "reason": f.get("message")})
     return rejected
 
 
@@ -250,8 +272,8 @@ class ExecutionEngine:
         `order_request`s, reports are `execution_report`s, positions is the book AFTER fills, rejected
         is ``[{ticker, reason}]``. This is what the `serve` CLI wraps with stdin/stdout JSON.
         """
-        current = {"positions": [{"ticker": p["ticker"], "lots": int(p.get("lots", 0))}
-                                 for p in positions]}
+        current = {"positions": [{"ticker": p["ticker"], "lots": int(p.get("lots", 0)),
+                                  "track": p.get("track", "live")} for p in positions]}
         res = self.run_cycle(risk_book, prices, current_positions=current,
                              anchors=anchors, on_critical=on_critical)
         include_shadow = self.config.mode is not Mode.LIVE
