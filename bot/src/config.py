@@ -41,6 +41,7 @@ class BotConfig:
     admin_chat_ids: frozenset[int] = frozenset()       # bootstrap admins (immutable via the bot)
     allowed_chat_ids: frozenset[int] = frozenset()     # env SEED of read-only ids
     poll_timeout: int = 30
+    proxy_url: str | None = None                       # TELEGRAM_PROXY_URL — RU hosts block Telegram
 
     # paths/universe mirrored from the agent config (read-only consumption)
     state_db: Path = REPO_ROOT / "data" / "agent" / "state.sqlite"
@@ -135,6 +136,7 @@ def load_bot_config(config_path: Path | str | None = None, *, load_dotenv: bool 
         admin_chat_ids=_parse_chat_ids(os.getenv("BOT_ADMIN_CHAT_IDS"), var_name="BOT_ADMIN_CHAT_IDS"),
         allowed_chat_ids=_parse_chat_ids(os.getenv("BOT_ALLOWED_CHAT_IDS")),
         poll_timeout=int(os.getenv("BOT_POLL_TIMEOUT", "30")),
+        proxy_url=os.getenv("TELEGRAM_PROXY_URL") or None,
         allowlist_path=DEFAULT_ALLOWLIST,
         state_db=agent.state_db,
         shadow_log=agent.shadow_log,

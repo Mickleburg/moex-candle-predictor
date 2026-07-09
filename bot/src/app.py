@@ -57,7 +57,12 @@ def build_application(config: BotConfig):
                 await update.effective_message.reply_text(text, parse_mode="HTML")
         return _handler
 
-    app = Application.builder().token(config.token).build()
+    builder = Application.builder().token(config.token)
+    if config.proxy_url:
+        # RU VDS can't reach api.telegram.org directly (RKN). Route BOTH the bot's HTTP client and
+        # the getUpdates poller through the proxy (httpx handles an http:// proxy natively, no dep).
+        builder = builder.proxy(config.proxy_url).get_updates_proxy(config.proxy_url)
+    app = builder.build()
     for command in sorted(ALL_COMMANDS):
         app.add_handler(CommandHandler(command, _make_handler(command)))
     # fallback: unknown commands / plain text -> unauthorized notice or a /help hint (added last
