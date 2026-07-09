@@ -236,31 +236,48 @@ def _post_fill_book(current: list[dict], submitted: list[dict], reports: list[di
     """Resulting book = current holdings + applied fills, kept PER TRACK (live/shadow never netted,
     matching execution's track-aware reconcile). Each fill's track comes from its client_order_id;
     returned rows carry a `track` tag so the orchestrator routes each to the right capital_state.
-    Only FILLED reports move the book (a resting live PLACED order has not executed yet)."""
-    lots: dict[tuple[str, str], int] = {}
+    Only FILLED reports move the book (a resting live PLACED order has not executed yet).
+
+    `avg_price` is the WEIGHTED ENTRY COST BASIS, carried across cycles (not overwritten with the
+    current mark) — reusing execution's `_update_position` so this matches the engine's own
+    `_resulting_book`. Overwriting it with `last_price` would zero out unrealized P&L every cycle
+    and silently disable the invariant #9 forward-P&L demotion gate."""
+    from execution.src.engine import _update_position  # type: ignore
+
+    book: dict[tuple[str, str], dict] = {}
     for p in current:
         key = (p.get("track", "live"), p["ticker"])
-        lots[key] = lots.get(key, 0) + int(p["lots"])
-    filled = {r["client_order_id"] for r in reports
-              if r.get("status") == "FILLED" and r.get("filled_quantity_lots", 0)}
-    fill_qty = {r["client_order_id"]: int(r.get("filled_quantity_lots", 0)) for r in reports}
+        b = book.get(key)
+        if b is None:
+            book[key] = {"lots": int(p["lots"]), "avg_price": float(p.get("avg_price", 0.0) or 0.0)}
+        else:
+            b["lots"] += int(p["lots"])
+
+    rep_by_coid = {r["client_order_id"]: r for r in reports
+                   if r.get("status") == "FILLED" and r.get("filled_quantity_lots", 0)}
     for o in submitted:
-        coid = o["client_order_id"]
-        if coid not in filled:
+        rep = rep_by_coid.get(o["client_order_id"])
+        if rep is None:
             continue
-        track = _track_from_coid(coid)
-        signed = fill_qty[coid] if o["side"] == "BUY" else -fill_qty[coid]
-        lots[(track, o["ticker"])] = lots.get((track, o["ticker"]), 0) + signed
+        track = _track_from_coid(o["client_order_id"])
+        key = (track, o["ticker"])
+        filled = int(rep.get("filled_quantity_lots", 0))
+        signed = filled if o["side"] == "BUY" else -filled
+        fp = rep.get("avg_fill_price")
+        fill_price = float(fp if fp is not None else o.get("limit_price", 0.0) or 0.0)
+        cur = book.get(key, {"lots": 0, "avg_price": 0.0})
+        new_lots, new_avg = _update_position(cur["lots"], cur["avg_price"], signed, fill_price)
+        book[key] = {"lots": new_lots, "avg_price": new_avg}
 
     meta = _track_meta(risk_book)
     out: list[dict] = []
-    for (track, ticker), l in lots.items():
-        if not l:
+    for (track, ticker), b in book.items():
+        if not b["lots"]:
             continue
         price = prices.get(ticker)
         m = meta.get((track, ticker), {})
-        out.append({"ticker": ticker, "lots": int(l),
-                    "avg_price": round(price, 4) if price else 0.0,
+        out.append({"ticker": ticker, "lots": int(b["lots"]),
+                    "avg_price": round(float(b["avg_price"]), 6),
                     "last_price": round(price, 4) if price else None,
                     "is_hedge": m.get("is_hedge", False),
                     "sleeve_contributions": m.get("sleeve_contributions", {}), "track": track})

@@ -197,10 +197,10 @@ def fmt_shadowlog(records: list[dict]) -> str:
         lines.append(f"\n{_b(escape(str(td)))}  sleeves: {escape(sleeve_str)}")
         sleeve_pnl = rec.get("sleeve_pnl") or {}
         if not sleeve_pnl:
-            lines.append("  shadow P&L: (flat — no holdings)")
+            lines.append("  shadow P&amp;L: (flat — no holdings)")
         for sleeve, vals in sleeve_pnl.items():
             unreal = (vals or {}).get("unrealized", 0.0)
-            lines.append(f"  {escape(str(sleeve))}: shadow P&L {money(unreal)}")
+            lines.append(f"  {escape(str(sleeve))}: shadow P&amp;L {money(unreal)}")
     return "\n".join(lines)
 
 
@@ -251,9 +251,9 @@ _HELP_READ = (
     f"{_b('MOEX agent monitor')} (read-only)\n"
     "/status — mode, kill-switch, last cycle, live/shadow gross\n"
     "/positions — live + shadow book (lots, weight, sector)\n"
-    "/pnl — P&L by sleeve (live vs shadow)\n"
+    "/pnl — P&amp;L by sleeve (live vs shadow)\n"
     "/prices [TICKERS] — last close (default: universe)\n"
-    "/gate — shadow gate: is_production, MET/NOT MET, forward P&L\n"
+    "/gate — shadow gate: is_production, MET/NOT MET, forward P&amp;L\n"
     "/shadowlog [N] — last N forward-shadow cycles (default 5)\n"
     "/cycle — last EOD result: orders, binding limits, alerts\n"
     "/integrity — data gate OK/HALT + reasons\n"
@@ -262,8 +262,8 @@ _HELP_READ = (
 _HELP_ADMIN = (
     f"\n{_b('Admin')}\n"
     "/users — show the allowlist (admins / seed / managed)\n"
-    "/allow <chat_id> [note] — grant read access\n"
-    "/deny <chat_id> — revoke a managed id"
+    "/allow &lt;chat_id&gt; [note] — grant read access\n"
+    "/deny &lt;chat_id&gt; — revoke a managed id"
 )
 
 
