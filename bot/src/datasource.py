@@ -126,17 +126,25 @@ class ReadOnlyState:
 
     # --- per-sleeve P&L (live vs shadow kept separate) ---------------------------------
     def pnl_by_sleeve(self, capital_state: str | None = None) -> list[dict]:
-        """Cumulative realized+unrealized P&L per (sleeve, capital_state)."""
+        """LATEST P&L snapshot per (sleeve, capital_state) — the row at each sleeve's most recent
+        trade_date. NOT a SUM over trade_dates: unrealized_pnl is the book's mark-to-market
+        snapshot recorded every cycle a position is held, so summing it across days inflates the
+        figure. Mirrors agent state_store.pnl_by_sleeve (the write owner, already fixed this way).
+        """
         if capital_state is None:
-            return self._query(
-                "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
-                "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution "
-                "GROUP BY sleeve, capital_state ORDER BY sleeve, capital_state"
-            )
+            latest = ("SELECT sleeve, capital_state, MAX(trade_date) AS md FROM pnl_attribution "
+                      "GROUP BY sleeve, capital_state")
+            params: tuple = ()
+        else:
+            latest = ("SELECT sleeve, capital_state, MAX(trade_date) AS md FROM pnl_attribution "
+                      "WHERE capital_state=? GROUP BY sleeve, capital_state")
+            params = (capital_state,)
         return self._query(
-            "SELECT sleeve, capital_state, SUM(realized_pnl) AS realized, "
-            "SUM(unrealized_pnl) AS unrealized FROM pnl_attribution WHERE capital_state=? "
-            "GROUP BY sleeve ORDER BY sleeve", (capital_state,)
+            "SELECT p.sleeve AS sleeve, p.capital_state AS capital_state, "
+            "p.realized_pnl AS realized, p.unrealized_pnl AS unrealized, p.gross AS gross "
+            f"FROM pnl_attribution p JOIN ({latest}) m "
+            "ON p.sleeve=m.sleeve AND p.capital_state=m.capital_state AND p.trade_date=m.md "
+            "ORDER BY p.sleeve, p.capital_state", params
         )
 
     def open_orders(self) -> list[dict]:

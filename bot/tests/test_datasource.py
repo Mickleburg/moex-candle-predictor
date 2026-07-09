@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent.src.state_store import StateStore
+
 from bot.src.datasource import (
     ReadOnlyState,
     read_gate,
@@ -48,6 +50,29 @@ def test_pnl_and_flags_and_cycle(seeded_db: Path):
     cyc = s.latest_cycle("eod")
     assert cyc["status"] == "completed"
     assert cyc["result"]["selected_orders"][0]["ticker"] == "SBER"
+
+
+def test_pnl_by_sleeve_returns_latest_snapshot_not_sum(tmp_path: Path):
+    """Multi-day history: unrealized is a mark-to-market snapshot, so the reader must return the
+    LAST trade_date's row, not SUM across days (which would inflate it)."""
+    db = tmp_path / "state.sqlite"
+    store = StateStore(db)
+    # two snapshots of the same (sleeve, capital_state) on different days
+    store.record_pnl_attribution("2026-06-18", "s3_event", realized=100.0,
+                                 unrealized=900.0, gross=10000.0, capital_state="live")
+    store.record_pnl_attribution("2026-06-19", "s3_event", realized=300.0,
+                                 unrealized=250.0, gross=12000.0, capital_state="live")
+    store.close()
+
+    rows = ReadOnlyState(db).pnl_by_sleeve("live")
+    assert len(rows) == 1
+    row = rows[0]
+    # latest day's snapshot, NOT the sum (which would be realized 400 / unrealized 1150)
+    assert row["realized"] == 300.0
+    assert row["unrealized"] == 250.0
+    # and it matches the write owner's own reader (mirror invariant)
+    owner = StateStore(db).pnl_by_sleeve("live")[0]
+    assert (owner["realized"], owner["unrealized"]) == (row["realized"], row["unrealized"])
 
 
 def test_missing_db_degrades_gracefully(tmp_path: Path):
