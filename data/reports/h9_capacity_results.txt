@@ -1,0 +1,27 @@
+H9 sleeve capacity (assumptions: sqrt impact K=38, execute over 3 sessions, cap weight 0.34)
+
+name     ADV (RUB/day)  slip tier  max daily order   max position   book AUM cap
+SBER     5,997,706,568         3b       37,381,828    112,145,483    329,839,656
+GAZP     4,930,652,153         3b       30,731,211     92,193,634    271,157,748
+LKOH     3,261,328,094         3b       20,326,837     60,980,511    179,354,445
+GMKN     2,018,036,050         4b       22,360,510     67,081,531    197,298,620
+ROSN     1,408,086,574         4b       15,602,067     46,806,202    137,665,300
+NVTK     2,242,251,165         5b       38,820,138    116,460,414    342,530,629
+TATN       890,461,298         5b       15,416,574     46,249,721    136,028,592
+MGNT       612,329,936         6b       15,265,843     45,797,530    134,698,617
+CHMF       604,770,628         6b       15,077,384     45,232,152    133,035,742
+MTSS       496,346,237         7b       16,842,774     50,528,322    148,612,712
+SNGS       453,888,892         7b       15,402,047     46,206,141    135,900,414
+ALRS       406,732,486         8b       18,026,925     54,080,774    159,061,099
+NLMK       606,290,583         8b       26,871,605     80,614,814    237,102,395
+MAGN       698,294,153         9b       39,170,240    117,510,720    345,619,764
+PLZL     1,762,359,605         6b       43,936,943    131,810,829    387,678,909
+VTBR     3,878,878,990         8b      171,917,074    515,751,223  1,516,915,362
+
+Binding (least capacity) name: CHMF -> book AUM ~ 133 M RUB
+Median per-name book-AUM capacity: ~188 M RUB
+Conservative sleeve capacity (least-liquid active name at cap weight): ~133-188 M RUB while P0 slippage holds.
+
+Read: below this AUM, realistic slippage (P0) stays valid and the edge holds. Above it,
+impact climbs toward breakeven (~34 bps/side); cap exposure to the least-liquid active names,
+widen execution, or drop the thinnest names. Ballpark — calibrate K with live fills. is_production=false.

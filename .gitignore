@@ -9,6 +9,20 @@ data/reports/*.csv
 data/reports/*.json
 data/reports/*.jsonl
 
+# ML V2-era derived feature / decision grids — regenerable via ml/src/features/decision_grid.py
+# (closed cross-sectional line; NOT used by the H9 runtime pipeline)
+data/features/
+
+# agent runtime state — SQLite store, cycle results, shadow log, logs, backups (regenerable)
+data/agent/
+
+# bot runtime state — the monitoring bot's OWN managed allowlist (chat ids, not secrets, but
+# environment-specific; admins/seed live in env). Regenerable via /allow.
+data/bot/
+
+# local env / secrets
+.env
+
 CLAUDE.md
 ml/SKILL.md
 
@@ -17,3 +31,10 @@ data/backend.exe
 data/news/edisclosure/*.parquet
 data/news/*.csv
 data/news/.llm_weekly_cache.json
+# e-disclosure message bodies — network cache fetched by llm/scripts/edisc_fetch_bodies.py
+# (regenerable; the runtime consumes the distilled dividend_calendar_upcoming.csv +
+# dividend_announcements.csv below, NOT these raw bodies). First VDS refresh re-fetches them.
+data/news/edisclosure_bodies/
+# but DO track the curated dividend-announcement certification table (small, not regenerable
+# without network; the ML block joins it for the H9 run-up no-lookahead test)
+!data/news/dividend_announcements.csv

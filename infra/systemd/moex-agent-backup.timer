@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily MOEX agent state-store backup
+
+[Timer]
+# 20:00 MSK daily, after the EOD cycle has persisted. Persistent catches missed runs.
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

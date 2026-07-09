@@ -2,7 +2,6 @@
 
 from .baseline import LogisticRegressionBaseline, MajorityClassifier, MarkovClassifier
 from .lgbm_model import LGBMClassifier
-from .rnn_model import RNNClassifier
 
 
 def train_pipeline(*args, **kwargs):
@@ -25,8 +24,6 @@ __all__ = [
     "LogisticRegressionBaseline",
     # Main MVP model
     "LGBMClassifier",
-    # RNN stub (future implementation)
-    "RNNClassifier",
     # Training pipeline
     "train_pipeline",
     "main",

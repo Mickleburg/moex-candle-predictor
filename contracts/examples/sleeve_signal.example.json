@@ -1,0 +1,15 @@
+{
+  "sleeve": "s3_event",
+  "strategy": "dividend_runup",
+  "as_of": "2025-06-02 00:00:00+03:00",
+  "market_neutral": true,
+  "positions": [
+    { "ticker": "LKOH", "weight": 0.36, "leg": "long" },
+    { "ticker": "SBER", "weight": 0.34, "leg": "long" },
+    { "ticker": "TATN", "weight": 0.30, "leg": "long" },
+    { "ticker": "IMOEX", "weight": -1.0, "leg": "hedge" }
+  ],
+  "gross": 2.0,
+  "model_version": "h9_dividend_runup_v1",
+  "is_production": false
+}

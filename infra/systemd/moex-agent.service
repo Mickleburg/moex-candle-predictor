@@ -1,0 +1,29 @@
+# venv-based supervision alternative to Docker (one or the other, not both).
+#
+# Install:
+#   sudo cp infra/systemd/moex-agent.service /etc/systemd/system/
+#   sudo cp .env.example /etc/moex-agent.env   # then fill in secrets, chmod 600
+#   sudo systemctl daemon-reload && sudo systemctl enable --now moex-agent
+#
+# Edit User / WorkingDirectory / venv path to match the VDS. The daemon runs the in-process
+# APScheduler (EOD + pre-open + dead-man's-switch), TZ Europe/Moscow.
+[Unit]
+Description=MOEX autonomous trading agent (scheduler daemon)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+WorkingDirectory=/opt/moex-candle-predictor
+EnvironmentFile=/etc/moex-agent.env
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/moex-candle-predictor/.venv/bin/python -m agent.src.cli scheduler
+Restart=always
+RestartSec=10
+# Survive transient failures but stop flapping if something is badly broken.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target
