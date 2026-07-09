@@ -245,13 +245,18 @@ class PaperBrokerExecution:
     def reconcile_and_execute(self, *, risk_book: dict, positions: list[dict],
                               prices: dict[str, float], capital: float, mode: str,
                               trade_date: str, phase: str) -> ExecutionResult:
+        from execution.src.engine import _update_position  # type: ignore
+
         include_shadow = mode != "live"            # live trades net only; paper/dry-run fold shadow
         tracks = self.TRACKS if include_shadow else ("live",)
         tag = str(trade_date).replace("-", "")
 
         current: dict[str, dict[str, int]] = {"live": {}, "shadow": {}}
+        current_avg: dict[tuple[str, str], float] = {}
         for p in positions:
-            current.setdefault(p.get("track", "live"), {})[p["ticker"]] = int(p["lots"])
+            track = p.get("track", "live")
+            current.setdefault(track, {})[p["ticker"]] = int(p["lots"])
+            current_avg[(track, p["ticker"])] = float(p.get("avg_price", 0.0) or 0.0)
 
         orders, reports, new_positions, rejected = [], [], [], []
         for track in tracks:
@@ -263,6 +268,7 @@ class PaperBrokerExecution:
             for ticker in sorted(set(targets) | set(cur)):
                 target_lots = targets.get(ticker, {}).get("lots", 0)
                 cur_lots = cur.get(ticker, 0)
+                cur_avg = current_avg.get((track, ticker), 0.0)
                 delta = target_lots - cur_lots
                 price = prices.get(ticker)
                 meta = targets.get(ticker, {})
@@ -279,12 +285,18 @@ class PaperBrokerExecution:
                                     "avg_fill_price": None if mode == "dry-run" else round(price, 4),
                                     "message": f"paper {status.lower()} {side} {abs(delta)} {ticker} [{track}]"})
 
-                # resulting book: dry-run keeps current; paper moves to target
+                # resulting book: dry-run keeps current; paper moves to target. avg_price is the
+                # carried entry cost basis (weighted on fills), NOT the current mark — otherwise
+                # unrealized P&L reads 0 every cycle and the invariant #9 forward-P&L gate is dead.
                 final_lots = cur_lots if mode == "dry-run" else target_lots
+                if mode != "dry-run" and delta != 0 and price is not None:
+                    _, final_avg = _update_position(cur_lots, cur_avg, delta, price)
+                else:
+                    final_avg = cur_avg
                 if final_lots != 0:
                     new_positions.append({
                         "ticker": ticker, "lots": final_lots,
-                        "avg_price": round(price, 4) if price is not None else 0.0,
+                        "avg_price": round(final_avg, 6),
                         "last_price": round(price, 4) if price is not None else None,
                         "is_hedge": meta.get("is_hedge", False),
                         "sleeve_contributions": meta.get("sleeve_contributions", {}),
