@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-06-26T07:29:21.273795+00:00",
+  "run_date": "2026-06-26",
+  "source_endpoint": "moex-iss /iss/securities/{SECID}/dividends.json (registryclosedate=record)",
+  "tickers_fetched": [
+    "SBER",
+    "GAZP",
+    "LKOH",
+    "GMKN",
+    "ROSN",
+    "NVTK",
+    "TATN",
+    "MGNT",
+    "MTSS",
+    "SNGS",
+    "CHMF",
+    "ALRS",
+    "VTBR",
+    "MAGN",
+    "NLMK",
+    "PLZL",
+    "SBERP",
+    "SNGSP",
+    "PHOR",
+    "MOEX"
+  ],
+  "total_events": 365,
+  "rows_added_this_run": 76,
+  "rows_by_source": {
+    "iss_history": 289,
+    "iss_backfill_2026-06-26": 76
+  },
+  "full_range": [
+    "2013-08-09",
+    "2025-07-20"
+  ],
+  "added_range": [
+    "2013-09-06",
+    "2025-07-18"
+  ],
+  "value_discrepancies_reported_not_applied": [],
+  "corroboration_window": {
+    "note": "events dated >= 2025-08-01 OVERLAP the burned 2025-09..2026-06 split; they are CORROBORATION, not forward signal -- ML/lead must segment before any forward use; do not mix into the forward feed unmarked.",
+    "since": "2025-08-01",
+    "rows_added_in_window": 0,
+    "tickers_in_window": []
+  }
+}

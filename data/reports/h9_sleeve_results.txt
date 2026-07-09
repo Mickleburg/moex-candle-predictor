@@ -1,0 +1,18 @@
+H9 dividend run-up SLEEVE — portfolio backtest (2020-01-03..2026-06-01, fee 5bps)
+  entry -12/exit -2, inv-vol sized, beta=1 IMOEX hedge
+  days invested 36%; avg active names when invested 2.1
+
+  market-HEDGED          | full cum +0.516 Sh +0.58 DD -0.164 | IS Sh +0.84 | FWD cum -0.089 Sh -0.85
+  unhedged (long-only)   | full cum +0.906 Sh +0.68 DD -0.275 | IS Sh +0.87 | FWD cum -0.054 Sh -0.41
+
+  per-year (market-hedged) Sharpe / cum:
+    2020: Sh +2.31  cum +0.396
+    2021: Sh -0.62  cum -0.086
+    2022: Sh +0.33  cum +0.037
+    2023: Sh +1.56  cum +0.175
+    2024: Sh +0.62  cum +0.070
+    2025: Sh -1.02  cum -0.089
+    2026: Sh +0.00  cum +0.000
+
+Read: hedged book should beat unhedged on Sharpe/DD (hedge removes market beta from the
+hold). Forward is thin (few 2025 events) — accrue via shadow. is_production=false.

@@ -53,6 +53,11 @@ INSTRUMENT_REGISTRY: dict[str, tuple[str, str, str | None]] = {
     "SNGS": ("stock", "shares", "TQBR"),   # oil (Surgutneftegas)
     "CHMF": ("stock", "shares", "TQBR"),   # steel (Severstal)
     "ALRS": ("stock", "shares", "TQBR"),   # diamonds (Alrosa)
+    # H7 pairs-breadth additions (within-sector partners, full 2020-2026 history)
+    "VTBR": ("stock", "shares", "TQBR"),   # banks (VTB) -> pair with SBER (note: 1:5000 reverse split 2024)
+    "MAGN": ("stock", "shares", "TQBR"),   # steel (MMK) -> steel trio CHMF/MAGN/NLMK
+    "NLMK": ("stock", "shares", "TQBR"),   # steel (NLMK) -> steel trio CHMF/MAGN/NLMK
+    "PLZL": ("stock", "shares", "TQBR"),   # gold (Polyus) -> mining cluster GMKN/PLZL/ALRS
     # Broad-market + sector indices (no board)
     "IMOEX": ("stock", "index", None),   # MOEX Russia Index (RUB)
     "RTSI": ("stock", "index", None),    # RTS Index (USD) -> RTSI-IMOEX ~= USD/RUB driver

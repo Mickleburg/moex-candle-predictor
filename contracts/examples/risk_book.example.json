@@ -1,0 +1,90 @@
+{
+  "as_of": "2025-06-02 00:00:00+03:00",
+  "timeframe": "1D",
+  "sleeves": [
+    {
+      "sleeve": "s3_event",
+      "strategy": "dividend_runup",
+      "gross": 2.0
+    }
+  ],
+  "gating": [
+    {
+      "sleeve": "s3_event",
+      "strategy": "dividend_runup",
+      "capital_state": "shadow",
+      "is_production": false,
+      "gate": "NOT_MET",
+      "reason": "is_production=false"
+    }
+  ],
+  "net_positions": [],
+  "hedge": {
+    "mode": "sector",
+    "legs": []
+  },
+  "shadow_positions": [
+    {
+      "ticker": "SBER",
+      "weight": 0.34,
+      "side": "LONG",
+      "sector": "MOEXFN",
+      "sleeve_contributions": {
+        "s3_event": 0.34
+      }
+    },
+    {
+      "ticker": "LKOH",
+      "weight": 0.3,
+      "side": "LONG",
+      "sector": "MOEXOG",
+      "sleeve_contributions": {
+        "s3_event": 0.36
+      }
+    },
+    {
+      "ticker": "TATN",
+      "weight": 0.3,
+      "side": "LONG",
+      "sector": "MOEXOG",
+      "sleeve_contributions": {
+        "s3_event": 0.3
+      }
+    }
+  ],
+  "shadow_hedge": {
+    "mode": "sector",
+    "legs": [
+      {
+        "instrument": "MOEXFN",
+        "weight": -0.34
+      },
+      {
+        "instrument": "MOEXOG",
+        "weight": -0.6
+      }
+    ]
+  },
+  "risk_scalars": {
+    "target_book_vol_annual": 0.12,
+    "book_vol_estimate_annual": 0.0,
+    "vol_scalar": 1.0,
+    "exposure_scalar": 1.0,
+    "regime_novel": false,
+    "directional_gross": 0,
+    "total_gross": 0,
+    "shadow_gross": 0.94,
+    "shadow_total_gross": 1.88
+  },
+  "limits": {
+    "max_name_weight": 0.34,
+    "max_sector_gross": 0.6,
+    "max_gross": 1.0,
+    "name_caps_ok": true,
+    "sector_caps_ok": true,
+    "gross_cap_ok": true,
+    "binding": []
+  },
+  "model_version": "risk_combiner_v0",
+  "is_production": false
+}
