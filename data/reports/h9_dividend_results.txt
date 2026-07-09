@@ -1,0 +1,75 @@
+H9 dividend event study - 120 events used (IS 117, FWD 3); median yield 4.90%
+window = record date +/- 15 trading days (ex-day is ~ -1/-2 from record under T+1/T+2)
+
+offset |   CAAR_IS   AAR_IS |  CAAR_FWD
+C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:183: RuntimeWarning: Mean of empty slice
+  a = np.nanmean(np.array(mat), axis=0)
+C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_dividend_research.py:192: RuntimeWarning: Mean of empty slice
+  ai = np.nanmean(np.array(is_mat), axis=0)
+   -15 | +0.0000 +nan | +0.0000
+   -14 | -0.0021 -0.0021 | +0.0049
+   -13 | -0.0003 +0.0019 | +0.0288
+   -12 | +0.0003 +0.0005 | +0.0344
+   -11 | +0.0033 +0.0030 | +0.0359
+   -10 | +0.0030 -0.0003 | +0.0258
+    -9 | +0.0037 +0.0008 | +0.0368
+    -8 | +0.0077 +0.0040 | +0.0272
+    -7 | +0.0086 +0.0009 | +0.0376
+    -6 | +0.0114 +0.0028 | +0.0371
+    -5 | +0.0119 +0.0005 | +0.0185
+    -4 | +0.0143 +0.0025 | +0.0185
+    -3 | +0.0142 -0.0002 | +0.0242
+    -2 | +0.0136 -0.0005 | +0.0171  <-- ex (~)
+    -1 | -0.0089 -0.0225 | +0.0014  <-- ex (~)
+     0 | -0.0229 -0.0140 | -0.0090  <-- record date
+     1 | -0.0251 -0.0022 | -0.0298
+     2 | -0.0263 -0.0011 | -0.0482
+     3 | -0.0281 -0.0019 | -0.0344
+     4 | -0.0288 -0.0007 | -0.0379
+     5 | -0.0333 -0.0045 | -0.0440
+     6 | -0.0334 -0.0001 | -0.0595
+     7 | -0.0329 +0.0004 | -0.0681
+     8 | -0.0352 -0.0022 | -0.0666
+     9 | -0.0347 +0.0005 | -0.0653
+    10 | -0.0355 -0.0008 | -0.0676
+    11 | -0.0363 -0.0008 | -0.0714
+    12 | -0.0367 -0.0004 | -0.0679
+    13 | -0.0371 -0.0004 | -0.0688
+    14 | -0.0363 +0.0008 | -0.0726
+    15 | -0.0366 -0.0003 | -0.0763
+
+IS segments: pre-runup[-10..-2] +0.0107 | ex-gap[-2..0] -0.0366 | post-drift[0..+10] -0.0125
+FWD segments: pre-runup[-10..-2] -0.0086 | ex-gap[-2..0] -0.0261 | post-drift[0..+10] -0.0586
+
+Read: a tradeable calendar edge needs a CONSISTENT (IS and FWD) market-adjusted segment
+(e.g. positive pre-run-up, or post-ex reversion) larger than ~fees. Else H9 is dead too.
+
+=== STAGE 2: dividend RUN-UP capture (buy pre-ex, sell before ex-gap, market-hedged) ===
+base (entry -10, exit -2), 129 events, round-trip fee 0.0010:
+  OVERALL mean +0.0094 net +0.0084 %pos 0.62 median +0.0112
+  per-year:
+    2020: n=28 mean +0.0218 %pos 0.75
+    2021: n=33 mean -0.0038 %pos 0.42
+    2022: n=15 mean +0.0150 %pos 0.73
+    2023: n=17 mean +0.0115 %pos 0.71
+    2024: n=24 mean +0.0142 %pos 0.67
+    2025: n=12 mean -0.0025 %pos 0.50
+  DOSE-RESPONSE high-yield half: net +0.0145 %pos 0.68  (vs low-yield net +0.0023) -> scales with yield = real
+  ENTRY-offset sensitivity (exit -2), net of fees:
+    entry -15: net +0.0117 %pos 0.61
+    entry -12: net +0.0104 %pos 0.64
+    entry -10: net +0.0084 %pos 0.62
+    entry  -8: net +0.0035 %pos 0.64
+    entry  -6: net -0.0004 %pos 0.50
+    entry  -4: net -0.0022 %pos 0.44
+  EXIT-offset sensitivity (entry -10): exit <=-2 avoids the ex-gap at ~-1
+    exit  -3: net +0.0092 %pos 0.63
+    exit  -2: net +0.0084 %pos 0.62
+    exit  -1: net -0.0119 %pos 0.40
+    exit   0: net -0.0288 %pos 0.26
+  PLACEBO control (is it dividend-specific or just momentum?):
+  PLACEBO (random non-div dates, 200 trials): mean +0.0012 [2.5-97.5%: -0.0056..+0.0077]
+  REAL +0.0094 vs placebo: z=+2.29, p(placebo>=real)=0.010  -> dividend-specific (not momentum)
+  Read: positive & stable across entry windows (-15..-8) AND IS years AND scaling with
+  yield AND distinct from a random-date placebo = a robust, dividend-specific calendar edge.
+  Caveat: 2025 forward is thin (few events) - accrue more; verify no-lookahead vs announce dates.

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskBook",
+  "description": "V3: the risk_manager COMBINER output — the netted target book after vol-targeting (H4), the regime gate (H5), and limits (per-name / per-sector / gross / correlation cap), plus the book-level hedge (sector-preferred for the H9 dividend run-up). Consumes one or more sleeve inputs (sleeve_signal position-form and/or aggregated_signal ranking-form), nets them by ticker, and emits the final directional book + hedge legs for execution. A SHADOW GATE (invariants #9/#4) splits sleeves: only a sleeve that passed its own gate (is_production AND a MET forward-P&L gate) gets LIVE capital in `net_positions`; an unproven sleeve (e.g. H9 while is_production=false) goes to `shadow_positions` with ZERO live capital, so execution places no real orders for it. INFORMATION/intent for execution (which sizes weights to lots); NOT yet a placed order. is_production=false until a forward gate + sign-off.",
+  "type": "object",
+  "required": ["as_of", "timeframe", "sleeves", "net_positions", "hedge", "risk_scalars", "limits", "model_version", "is_production"],
+  "properties": {
+    "as_of": { "type": "string", "description": "Decision timestamp (past-only)." },
+    "timeframe": { "type": "string" },
+    "sleeves": {
+      "type": "array",
+      "description": "Provenance of the sleeve inputs that fed this book (for P&L attribution by sleeve).",
+      "items": {
+        "type": "object",
+        "required": ["sleeve", "gross"],
+        "properties": {
+          "sleeve": { "type": "string", "enum": ["s1_pairs", "s2_macro", "s3_event", "s4_core"] },
+          "strategy": { "type": "string" },
+          "gross": { "type": "number", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "gating": {
+      "type": "array",
+      "description": "Per-sleeve LIVE/SHADOW decision (invariants #9/#4). A sleeve is live only if it passed its own gate; otherwise shadow (0 live capital, tracked for attribution).",
+      "items": {
+        "type": "object",
+        "required": ["sleeve", "capital_state", "is_production", "gate"],
+        "properties": {
+          "sleeve": { "type": "string", "enum": ["s1_pairs", "s2_macro", "s3_event", "s4_core"] },
+          "strategy": { "type": "string" },
+          "capital_state": { "type": "string", "enum": ["live", "shadow"], "description": "'live' = real capital in net_positions; 'shadow' = paper-only in shadow_positions." },
+          "is_production": { "type": "boolean" },
+          "gate": { "type": "string", "enum": ["MET", "NOT_MET", "DISABLED"], "description": "Forward shadow-gate status used for the live/shadow decision." },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "net_positions": {
+      "type": "array",
+      "description": "Final netted directional positions of LIVE sleeves on universe names (post risk-layer) — the only book with real capital; execution sizes these. Hedge legs live in `hedge`.",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "weight", "side"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "weight": { "type": "number", "description": "Signed final book fraction after netting + risk scalars + limits." },
+          "side": { "type": "string", "enum": ["LONG", "SHORT", "FLAT"] },
+          "sector": { "type": "string", "description": "MOEX sector index the name maps to (hedge/limit grouping)." },
+          "sleeve_contributions": {
+            "type": "object",
+            "description": "Pre-risk-layer signed weight each sleeve contributed to this ticker (attribution).",
+            "additionalProperties": { "type": "number" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "hedge": {
+      "type": "object",
+      "required": ["mode", "legs"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["sector", "market", "none"], "description": "Book-level hedge construction. 'sector' is preferred for the H9 run-up (P0: sector-hedge Sharpe +0.92 / DD -0.105 vs market beta=1 +0.54 / -0.173)." },
+        "legs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["instrument", "weight"],
+            "properties": {
+              "instrument": { "type": "string", "description": "Sector index (MOEXOG/...) for sector mode, IMOEX for market mode." },
+              "weight": { "type": "number", "description": "Signed hedge weight (negative = short the index against long names)." }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "shadow_positions": {
+      "type": "array",
+      "description": "Intended positions of SHADOW (gated-out) sleeves after the same risk-layer — ZERO live capital. Paper-tracked for forward-P&L attribution; execution ignores these. Same item shape as net_positions.",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "weight", "side"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "weight": { "type": "number" },
+          "side": { "type": "string", "enum": ["LONG", "SHORT", "FLAT"] },
+          "sector": { "type": "string" },
+          "sleeve_contributions": { "type": "object", "additionalProperties": { "type": "number" } }
+        },
+        "additionalProperties": true
+      }
+    },
+    "shadow_hedge": {
+      "type": "object",
+      "description": "Hedge for the shadow book (informational; execution ignores it).",
+      "properties": {
+        "mode": { "type": "string", "enum": ["sector", "market", "none"] },
+        "legs": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+      },
+      "additionalProperties": true
+    },
+    "risk_scalars": {
+      "type": "object",
+      "required": ["vol_scalar", "exposure_scalar", "directional_gross", "total_gross"],
+      "properties": {
+        "target_book_vol_annual": { "type": "number", "minimum": 0, "description": "Vol-targeting objective (annualized) the book was scaled toward (H4)." },
+        "book_vol_estimate_annual": { "type": "number", "minimum": 0, "description": "Pre-scale annualized book vol estimate from per-ticker H4 forecasts (sector-hedged residual, low-correlation assumption)." },
+        "vol_scalar": { "type": "number", "minimum": 0, "description": "Vol-targeting multiplier applied to the LIVE directional book." },
+        "exposure_scalar": { "type": "number", "minimum": 0, "maximum": 1, "description": "Regime gate multiplier from risk_analytics H5 (1 = normal, ->0 in a novel/shock regime)." },
+        "regime_novel": { "type": "boolean", "description": "True if H5 flagged the current regime as novel (gross cut)." },
+        "directional_gross": { "type": "number", "minimum": 0, "description": "Sum of |weight| over net_positions (LIVE names only, post risk-layer). 0 if every sleeve is shadow-gated." },
+        "total_gross": { "type": "number", "minimum": 0, "description": "directional_gross + sum of |live hedge weight|." },
+        "shadow_gross": { "type": "number", "minimum": 0, "description": "Sum of |weight| over shadow_positions (paper-only, 0 live capital)." },
+        "shadow_total_gross": { "type": "number", "minimum": 0, "description": "shadow_gross + sum of |shadow hedge weight|." }
+      },
+      "additionalProperties": true
+    },
+    "limits": {
+      "type": "object",
+      "required": ["max_name_weight", "max_sector_gross", "max_gross", "name_caps_ok", "sector_caps_ok", "gross_cap_ok"],
+      "properties": {
+        "max_name_weight": { "type": "number", "minimum": 0 },
+        "max_sector_gross": { "type": "number", "minimum": 0, "description": "Per-sector gross cap; doubles as the correlation-cluster cap (correlated names cluster by sector)." },
+        "max_gross": { "type": "number", "minimum": 0, "description": "Cap on directional gross (names only)." },
+        "name_caps_ok": { "type": "boolean", "description": "True if every |name weight| <= max_name_weight after the risk layer." },
+        "sector_caps_ok": { "type": "boolean", "description": "True if every per-sector gross <= max_sector_gross." },
+        "gross_cap_ok": { "type": "boolean", "description": "True if directional_gross <= max_gross." },
+        "binding": { "type": "array", "items": { "type": "string" }, "description": "Human-readable list of limits that bound (clipped/scaled) this book." }
+      },
+      "additionalProperties": true
+    },
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}
