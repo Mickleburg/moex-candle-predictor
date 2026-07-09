@@ -123,6 +123,22 @@ def _with_more(table: str, hidden: int) -> str:
 
 
 # --- reports -------------------------------------------------------------------------------
+def _blocks_line(block_modes: dict | None, fallback: str) -> str:
+    """Honest, scannable effective-mode line. Data path = backend·sleeve·combiner (collapsed to
+    'live (...)' when all three are live); execution shown separately. Falls back to a single
+    value when no per-block modes are available."""
+    if not block_modes:
+        return f"blocks: {escape(str(fallback))}"
+    data_path = [(b, block_modes.get(b, fallback)) for b in ("backend", "sleeve", "combiner")]
+    exec_mode = block_modes.get("execution", fallback)
+    modes = {m for _, m in data_path}
+    if len(modes) == 1:  # all three data-path blocks agree -> collapse (live OR mock)
+        core = f"{escape(str(next(iter(modes))))} (backend·sleeve·combiner)"
+    else:                # mixed -> spell each out so the odd one is visible
+        core = " · ".join(f"{b} {escape(str(m))}" for b, m in data_path)
+    return f"blocks: {core} · exec {escape(str(exec_mode))}"
+
+
 def fmt_status(d: dict) -> str:
     ks = (f"{BAD_GLYPH} kill-switch: ENGAGED" if d["kill_switch"]
           else f"{OK_GLYPH} kill-switch: off")
@@ -137,8 +153,8 @@ def fmt_status(d: dict) -> str:
     return "\n".join([
         _title("Agent status"),
         ks,
-        f"mode {escape(str(d['mode']))} · block {escape(str(d['block_mode']))} · "
-        f"live {'on' if d['live_enabled'] else 'off'}",
+        f"mode {escape(str(d['mode']))} · live {'on' if d['live_enabled'] else 'off'}",
+        _blocks_line(d.get("block_modes"), d.get("block_mode", "?")),
         f"last cycle: {escape(last)}",
         "",
         table,

@@ -23,6 +23,27 @@ def test_status(bot_config: BotConfig):
     assert "live" in text and "shadow" in text
 
 
+def test_status_shows_effective_block_modes_not_bare_mock(tmp_path: Path):
+    # deploy shape: top-level block_mode=mock, but per-block LIVE overrides -> the shadow track is
+    # REAL. /status must reflect the effective live path, not the misleading bare "block mock".
+    cfg = BotConfig(state_db=tmp_path / "absent.sqlite", universe=["SBER"], block_mode="mock",
+                    block_modes={"backend": "live", "sleeve": "live", "combiner": "live",
+                                 "execution": "mock"})
+    text = Monitor(cfg, make_state(cfg)).status()
+    assert "blocks: live (backend·sleeve·combiner) · exec mock" in text
+    assert "block mock" not in text          # the misleading bare label is gone
+    assert "mode paper · live off" in text   # run-mode + live-gate untouched
+
+
+def test_status_all_mock_falls_back_to_mock(tmp_path: Path):
+    # no per-block overrides -> every block resolves to the block_mode fallback (mock)
+    from bot.src.config import resolve_block_modes
+    cfg = BotConfig(state_db=tmp_path / "absent.sqlite", universe=["SBER"], block_mode="mock",
+                    block_modes=resolve_block_modes({}, "mock"))
+    text = Monitor(cfg, make_state(cfg)).status()
+    assert "blocks: mock (backend·sleeve·combiner) · exec mock" in text
+
+
 def test_positions_split_live_shadow_with_sector(bot_config: BotConfig):
     text = _monitor(bot_config).positions()
     assert "LIVE" in text and "SHADOW" in text
