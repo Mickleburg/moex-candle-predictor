@@ -77,3 +77,6 @@ class Monitor:
 
     def help(self, is_admin: bool = False) -> str:
         return fmt.fmt_help(is_admin)
+
+    def start(self) -> str:
+        return fmt.fmt_start()

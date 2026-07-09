@@ -19,6 +19,47 @@ from .router import ALL_COMMANDS, Router
 
 log = logging.getLogger("bot")
 
+# Autocomplete menu (Telegram "/" popup). Plain (name, description) tuples so the data stays
+# library-agnostic; converted to telegram.BotCommand only inside apply_command_menu. READ shows
+# to everyone (default scope); READ+ADMIN is scoped to each admin chat so /users /allow /deny
+# only surface for admins. Names mirror the real commands — never rename (BotFather + tests).
+READ_MENU = [
+    ("status", "Mode, kill-switch, last cycle, gross"),
+    ("positions", "Live + shadow book"),
+    ("pnl", "P&L by sleeve (live vs shadow)"),
+    ("prices", "Last close [TICKERS]"),
+    ("cycle", "Last EOD result"),
+    ("integrity", "Data freshness gate"),
+    ("gate", "H9 shadow gate"),
+    ("shadowlog", "Forward-shadow track [N]"),
+    ("start", "About this bot"),
+    ("help", "Command list"),
+]
+ADMIN_MENU = [
+    ("users", "Show the allowlist"),
+    ("allow", "Grant read access: <id> [note]"),
+    ("deny", "Revoke a managed id: <id>"),
+]
+
+
+async def apply_command_menu(bot, config: BotConfig) -> None:
+    """Publish the "/" autocomplete menu (best-effort). Read commands go to the default scope;
+    admin commands are scoped per admin chat. Any failure (network/proxy) is logged and swallowed
+    so a menu hiccup never stops the bot from starting — same fail-safe stance as the notifier."""
+    from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+
+    read = [BotCommand(n, d) for n, d in READ_MENU]
+    admin = [BotCommand(n, d) for n, d in (*READ_MENU, *ADMIN_MENU)]
+    try:
+        await bot.set_my_commands(read, scope=BotCommandScopeDefault())
+    except Exception:  # noqa: BLE001 - menu is cosmetic; never block startup
+        log.exception("set_my_commands (default scope) failed — non-fatal")
+    for admin_id in sorted(config.admin_chat_ids):
+        try:
+            await bot.set_my_commands(admin, scope=BotCommandScopeChat(admin_id))
+        except Exception:  # noqa: BLE001
+            log.exception("set_my_commands (admin %s) failed — non-fatal", admin_id)
+
 
 def build_application(config: BotConfig):
     """Construct the PTB Application: one handler per command + a fallback for anything else."""
@@ -34,6 +75,9 @@ def build_application(config: BotConfig):
                            "BOT_ALLOWED_CHAT_IDS before start")
 
     router = Router(config)
+
+    async def _post_init(application) -> None:
+        await apply_command_menu(application.bot, config)
     notified_unauth: set[int] = set()  # one admin notification per unknown id per process
 
     def _make_handler(command: str | None):
@@ -57,7 +101,7 @@ def build_application(config: BotConfig):
                 await update.effective_message.reply_text(text, parse_mode="HTML")
         return _handler
 
-    builder = Application.builder().token(config.token)
+    builder = Application.builder().token(config.token).post_init(_post_init)
     if config.proxy_url:
         # RU VDS can't reach api.telegram.org directly (RKN). Route BOTH the bot's HTTP client and
         # the getUpdates poller through the proxy (httpx handles an http:// proxy natively, no dep).
