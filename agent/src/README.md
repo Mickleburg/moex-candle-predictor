@@ -1,5 +1,4 @@
-# Agent Source Placeholder
+# Agent Source
 
-Здесь позже появится orchestrator полного агентного цикла.
-
-В demo-ветке implementation intentionally absent.
+The V3 orchestrator implementation. See [`../README.md`](../README.md) for the daily cycle,
+the module map, and usage. Entry point: `python -m agent.src.cli`.

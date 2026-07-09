@@ -1,0 +1,35 @@
+{
+  "_comment": "Example reconciliation request envelope the agent orchestrator feeds execution on stdin (agent/src/adapters/live.py::LiveExecution). The embedded risk_book mirrors the canonical shadow-gated shape: H9 is_production=false -> the sleeve sits in shadow_positions/shadow_hedge with ZERO live capital. In paper/dry-run, execution paper-trades the shadow book (net_positions ∪ shadow_positions); in live it would place 0 orders (net_positions is empty). `positions` is the current book (empty here -> every leg is an entry). mode=paper -> internal simulator fills at the limit.",
+  "mode": "paper",
+  "trade_date": "2025-06-02",
+  "phase": "eod",
+  "capital": 100000000,
+  "positions": [],
+  "prices": {
+    "SBER": 312.4, "LKOH": 7050.0, "TATN": 695.5, "MOEXFN": 11800.0, "MOEXOG": 8450.0
+  },
+  "risk_book": {
+    "as_of": "2025-06-02 00:00:00+03:00",
+    "timeframe": "1D",
+    "sleeves": [{ "sleeve": "s3_event", "strategy": "dividend_runup", "gross": 2.0 }],
+    "gating": [
+      { "sleeve": "s3_event", "strategy": "dividend_runup", "capital_state": "shadow",
+        "is_production": false, "gate": "NOT_MET", "reason": "is_production=false" }
+    ],
+    "net_positions": [],
+    "hedge": { "mode": "sector", "legs": [] },
+    "shadow_positions": [
+      { "ticker": "SBER", "weight": 0.34, "side": "LONG", "sector": "MOEXFN", "sleeve_contributions": { "s3_event": 0.34 } },
+      { "ticker": "LKOH", "weight": 0.30, "side": "LONG", "sector": "MOEXOG", "sleeve_contributions": { "s3_event": 0.36 } },
+      { "ticker": "TATN", "weight": 0.30, "side": "LONG", "sector": "MOEXOG", "sleeve_contributions": { "s3_event": 0.30 } }
+    ],
+    "shadow_hedge": {
+      "mode": "sector",
+      "legs": [
+        { "instrument": "MOEXFN", "weight": -0.34 },
+        { "instrument": "MOEXOG", "weight": -0.60 }
+      ]
+    },
+    "is_production": false
+  }
+}

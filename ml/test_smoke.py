@@ -1266,6 +1266,45 @@ def test_ticker_model_router():
         return False
 
 
+def test_dividend_sleeve_max_weight_small_book():
+    """1a: inverse-vol cap is a HARD per-name limit even on 1-2 name books. A single cap+renorm pass
+    breached it (1 name -> 1.0; 2 equal -> 0.5/0.5); fixpoint water-filling holds MAX_WEIGHT and leaves
+    a too-small book intentionally under-invested (gross < 1). Feasible books (n*cap>=1) sum to 1."""
+
+    print("\nTesting dividend-sleeve MAX_WEIGHT on small books...")
+    try:
+        import numpy as np
+        import pandas as pd
+
+        from src.service.dividend_sleeve import MAX_WEIGHT, inverse_vol_weights
+
+        rng = np.random.default_rng(0)
+        idx = pd.date_range("2025-01-01", periods=40, freq="D", tz="Europe/Moscow")
+        cols = ["A", "B", "C", "D"]
+        prices = pd.DataFrame(100 + np.cumsum(rng.normal(0.0, 1.0, size=(40, 4)), axis=0),
+                              index=idx, columns=cols)
+        pos = len(prices) - 1
+
+        for names in (["A"], ["A", "B"]):
+            w = inverse_vol_weights(prices, names, pos)
+            assert w, f"empty weights for {names}"
+            assert all(x <= MAX_WEIGHT + 1e-9 for x in w.values()), f"MAX_WEIGHT breached on {names}: {w}"
+            assert 0.0 < sum(w.values()) <= len(names) * MAX_WEIGHT + 1e-9, \
+                f"gross should not exceed n*cap on small book {names}: {w}"
+        # 1-name book pins exactly at the cap (old single-pass renorm returned 1.0)
+        assert abs(inverse_vol_weights(prices, ["A"], pos)["A"] - MAX_WEIGHT) < 1e-9
+
+        # feasible book (n*cap >= 1): cap still respected AND fully invested (sum ~ 1)
+        w4 = inverse_vol_weights(prices, cols, pos)
+        assert all(x <= MAX_WEIGHT + 1e-9 for x in w4.values()), f"MAX_WEIGHT breached: {w4}"
+        assert abs(sum(w4.values()) - 1.0) < 1e-6, f"feasible book should sum to 1: {sum(w4.values())}"
+        print("  PASS MAX_WEIGHT held on 1/2-name books; feasible book sums to 1")
+        return True
+    except Exception as exc:
+        print(f"  FAIL Dividend-sleeve MAX_WEIGHT test failed: {exc}")
+        raise
+
+
 def main():
     """Run all smoke tests."""
 
@@ -1293,6 +1332,7 @@ def main():
         ("Timezone Canonicalization", test_timezone_canonicalization()),
         ("Orthogonal TZ Alignment", test_orthogonal_tz_alignment()),
         ("Ticker Model Router", test_ticker_model_router()),
+        ("Dividend Sleeve MAX_WEIGHT", test_dividend_sleeve_max_weight_small_book()),
     ]
 
     print("\n" + "=" * 50)

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SleeveSignal",
+  "description": "V3: a single strategy SLEEVE's contribution to the multi-strategy book — TARGET POSITIONS (not a cross-sectional ranking). One sleeve = one economic edge (S1 pairs / S2 macro-tilt / S3 event / S4 core). This is the POSITION-form sleeve input to the risk_manager combiner, alongside the ranking-form `aggregated_signal` (S1/S2). Emitted by e.g. ml/src/service/dividend_sleeve.py::build_sleeve_signal (H9 dividend run-up). INFORMATION for risk_manager (which nets sleeves, applies vol-targeting H4 + regime gate H5 + limits + hedge), NOT a trade command.",
+  "type": "object",
+  "required": ["sleeve", "as_of", "positions", "model_version", "is_production"],
+  "properties": {
+    "sleeve": {
+      "type": "string",
+      "enum": ["s1_pairs", "s2_macro", "s3_event", "s4_core"],
+      "description": "Which strategy sleeve produced this. P&L attribution and the correlation cap key on this."
+    },
+    "strategy": { "type": "string", "description": "Concrete strategy id within the sleeve (e.g. dividend_runup)." },
+    "as_of": { "type": "string", "description": "Decision timestamp (past-only). String, not strictly date-time: serving code may emit a space-separated tz-aware timestamp." },
+    "market_neutral": { "type": "boolean", "description": "True if the sleeve intends the book to carry no net market beta (hedge applied by risk_manager)." },
+    "positions": {
+      "type": "array",
+      "description": "Target positions. May be empty (sleeve abstains today). Weights are book fractions, signed by leg.",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "weight", "leg"],
+        "properties": {
+          "ticker": { "type": "string", "description": "Instrument; index tickers (e.g. IMOEX, MOEXOG) are allowed on hedge legs." },
+          "weight": { "type": "number", "description": "Signed book fraction. Long > 0, short < 0; hedge legs carry the sleeve's SUGGESTED hedge (risk_manager may replace it)." },
+          "leg": { "type": "string", "enum": ["long", "short", "hedge", "flat"], "description": "Role of this position. 'hedge' is a suggested index hedge the risk_manager may re-derive (e.g. sector instead of market)." }
+        },
+        "additionalProperties": true
+      }
+    },
+    "gross": { "type": "number", "minimum": 0, "description": "Sleeve self-reported gross exposure (sum of |weight| over all legs)." },
+    "model_version": { "type": "string" },
+    "is_production": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

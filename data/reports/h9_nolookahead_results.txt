@@ -1,0 +1,31 @@
+C:\Users\dshalimov\Projects\moex-candle-predictor\ml\scripts\h9_nolookahead_check.py:56: RuntimeWarning: Mean of empty slice
+  aar = np.nanmean(mat, axis=0); aar[0] = 0.0
+H9 no-lookahead diagnostic - 120 events
+
+AAR per offset in the entry window (look for a JUMP = an announcement inside the window):
+  -15: +0.0000 
+  -14: -0.0020 #
+  -13: +0.0024 ##
+  -12: +0.0007 
+  -11: +0.0030 ##
+  -10: -0.0005 
+   -9: +0.0010 #
+   -8: +0.0036 ###
+   -7: +0.0011 #
+   -6: +0.0027 ##
+   -5: +0.0000 
+   -4: +0.0024 ##
+   -3: -0.0000 
+   -2: -0.0007 
+   -1: -0.0224 ######################  <-- EX-GAP
+    0: -0.0139 #############  <-- EX-GAP
+    1: -0.0027 ##
+    2: -0.0016 #
+
+  max |AAR| within entry window [-15,-3] = 0.0036
+  ex-gap |AAR| at offset -1          = 0.0224  (6.2x the largest in-window day)
+  total run-up [-14..-2]             = +0.0137; biggest single in-window day +0.0036 (26% of run-up)
+
+  VERDICT: SMOOTH drift, no announcement spike inside window -> consistent with the
+  dividend being public BEFORE entry (no-lookahead). Definitive check still needs board-
+  recommendation dates from e-disclosure (LLM chat) -> per-event: announce_date < entry_date.

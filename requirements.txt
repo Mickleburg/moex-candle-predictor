@@ -1,0 +1,28 @@
+# Top-level VDS runtime for the autonomous agent (Ubuntu LTS / Python 3.12).
+# Pinned for reproducible deploys. The agent orchestrator CORE is stdlib-only; these deps are
+# for the scheduler daemon + the LIVE block paths (ml H9 sleeve, risk_manager risk_analytics,
+# backend ingest/integrity). risk_manager itself is pure-Python. The V1 LSTM serving path is
+# NOT used by the H9 agent, so torch is intentionally omitted.
+#
+# Mirrors ml/requirements.txt (pinned here). Regenerate with: pip install -r requirements.txt
+
+# --- scheduler + contract validation (agent) ---
+APScheduler==3.11.0
+jsonschema==4.23.0
+
+# --- data / H9 live path (ml + backend read these; risk_manager is dependency-free) ---
+pandas==2.2.3
+numpy==2.1.3
+pyarrow==18.1.0
+scikit-learn==1.5.2
+scipy==1.14.1
+PyYAML==6.0.2
+python-dateutil==2.9.0.post0
+tzdata==2024.2
+requests==2.32.3
+
+# --- monitoring bot (bot/ block) ---
+# Read-only Telegram poller for portfolio/agent state. Async, pure-Python wheel (works on
+# 3.12 VDS and the 3.14 dev venv). The agent's own push-notifier stays stdlib (urllib) — this
+# dep is only for the interactive getUpdates poller. Single poller per token (see bot/README.md).
+python-telegram-bot==22.8

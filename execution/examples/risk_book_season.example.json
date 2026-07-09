@@ -1,0 +1,42 @@
+{
+  "_comment": "Illustrative single-name H9 run-up season for TATN, record/ex anchor 2026-07-20. The name is held only on trading days with exit_offset(2) < td <= entry_offset(12); it is FLAT before the window and FLAT again from td<=2 (the -2 exit before the ex-gap). Replaying this through the paper simulator should produce: one BUY entry, no churn while held, one SELL-all exit. Prices are flat for clarity. Hedge MOEXOG mirrors the long notional. These risk_books carry only the fields execution reads (as_of, net_positions, hedge).",
+  "anchors": { "TATN": "2026-07-20" },
+  "days": [
+    {
+      "risk_book": { "as_of": "2026-07-01 00:00:00+03:00", "net_positions": [], "hedge": { "mode": "none", "legs": [] } },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    },
+    {
+      "risk_book": {
+        "as_of": "2026-07-02 00:00:00+03:00",
+        "net_positions": [ { "ticker": "TATN", "weight": 0.30, "side": "LONG", "sector": "MOEXOG" } ],
+        "hedge": { "mode": "sector", "legs": [ { "instrument": "MOEXOG", "weight": -0.30 } ] }
+      },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    },
+    {
+      "risk_book": {
+        "as_of": "2026-07-09 00:00:00+03:00",
+        "net_positions": [ { "ticker": "TATN", "weight": 0.30, "side": "LONG", "sector": "MOEXOG" } ],
+        "hedge": { "mode": "sector", "legs": [ { "instrument": "MOEXOG", "weight": -0.30 } ] }
+      },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    },
+    {
+      "risk_book": {
+        "as_of": "2026-07-15 00:00:00+03:00",
+        "net_positions": [ { "ticker": "TATN", "weight": 0.30, "side": "LONG", "sector": "MOEXOG" } ],
+        "hedge": { "mode": "sector", "legs": [ { "instrument": "MOEXOG", "weight": -0.30 } ] }
+      },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    },
+    {
+      "risk_book": { "as_of": "2026-07-16 00:00:00+03:00", "net_positions": [], "hedge": { "mode": "none", "legs": [] } },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    },
+    {
+      "risk_book": { "as_of": "2026-07-17 00:00:00+03:00", "net_positions": [], "hedge": { "mode": "none", "legs": [] } },
+      "prices": { "TATN": 700.0, "MOEXOG": 8450.0 }
+    }
+  ]
+}
