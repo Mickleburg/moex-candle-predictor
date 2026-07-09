@@ -4,7 +4,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bot.src.config import BotConfig, _maybe_load_dotenv, _parse_chat_ids
+from bot.src.config import (
+    BotConfig,
+    _maybe_load_dotenv,
+    _parse_chat_ids,
+    resolve_block_modes,
+)
+
+
+def test_resolve_block_modes_mirrors_agent_formula():
+    # per-block override wins; unset blocks fall back to the top-level block_mode
+    blocks = {"backend": {"mode": "live"}, "sleeve": {"mode": "live"},
+              "combiner": {"mode": "live"}}  # execution intentionally absent
+    resolved = resolve_block_modes(blocks, "mock")
+    assert resolved == {"backend": "live", "sleeve": "live", "combiner": "live",
+                        "execution": "mock"}
+
+
+def test_resolve_block_modes_all_fallback_when_no_overrides():
+    assert resolve_block_modes({}, "mock") == {
+        "backend": "mock", "sleeve": "mock", "combiner": "mock", "execution": "mock"}
 
 
 def test_parse_chat_ids_handles_separators_and_garbage():

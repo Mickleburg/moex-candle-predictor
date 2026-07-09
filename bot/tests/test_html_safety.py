@@ -89,10 +89,17 @@ def test_start_is_valid_telegram_html():
 
 
 def test_status_is_valid_telegram_html():
-    d = {"mode": "paper", "block_mode": "mock", "live_enabled": False, "kill_switch": False,
+    d = {"mode": "paper", "block_mode": "mock",
+         "block_modes": {"backend": "live", "sleeve": "live", "combiner": "live",
+                         "execution": "mock"},
+         "live_enabled": False, "kill_switch": False,
          "last_cycle": {"trade_date": "2026-06-19", "phase": "eod", "status": "completed"},
          "live_gross": {"directional": 31500.0, "hedge": 404000.0},
          "shadow_gross": {"directional": 68000.0, "hedge": 0.0}}
+    assert_telegram_html(fmt.fmt_status(d))
+    # a hostile/unknown mode value must survive escaping in the mixed (spelled-out) branch
+    d["block_modes"] = {"backend": "live", "sleeve": "mock", "combiner": "x<y>&z",
+                        "execution": "mock"}
     assert_telegram_html(fmt.fmt_status(d))
 
 
