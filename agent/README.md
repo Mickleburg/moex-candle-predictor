@@ -40,6 +40,30 @@ kill-switch → trading stops, monitoring continues.
 Every cycle is **idempotent** per `(trade_date, phase)` and **recoverable after restart** — all
 state lives in the SQLite store.
 
+## Dead-man's-switch
+
+Interval job (`deadman_check_minutes`, default 30) that asks: *did the most recent DUE EOD complete?*
+The reference date is the last trading day whose EOD time + 15 min has passed — so before ~19:20 MSK it
+still refers to **yesterday**. Decision logic is the pure `deadman_verdict()` in `scheduler.py`
+(unit-tested offline); `deadman_tick()` does the read → verdict → send → persist.
+
+| Cycle status | Behaviour |
+|--------------|-----------|
+| `completed` / `halted` / `killed` | healthy — no alert, **and the dedup flag is cleared** so a future failure alerts at once |
+| `running`, younger than `deadman_running_grace_minutes` (default 90) | in flight on a slow box — **silent** (a real EOD takes longer than the 15-min reference margin) |
+| `running`, older than the grace | died mid-cycle — alert (a distinct *stuck* message) |
+| `failed` / missing | alert |
+
+**Deduplicated:** the same incident (same `reference_date:status`) re-alerts **at most once per
+`deadman_repeat_hours`** (default 6). A *new* incident — different date or different status — alerts
+immediately. A genuinely dead agent therefore keeps reminding; it just stops spamming every 30 min.
+The alert is persisted as "sent" **only when delivery succeeds**, so a proxy/network failure never
+arms the quiet window and swallows an alert nobody received. Flag lives in the `kv` table
+(`deadman_last_alert`).
+
+> Tuning: `deadman_running_grace_minutes` must exceed the real EOD duration on your box, or a healthy
+> slow cycle is reported as stuck. Measure it from the `EOD cycle start` → `EOD cycle done` log pair.
+
 ## Module map
 
 ```

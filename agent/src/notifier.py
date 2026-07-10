@@ -34,10 +34,17 @@ class StdoutNotifier:
 class TelegramNotifier:
     """Sends alerts to a Telegram chat via the Bot API (stdlib urllib)."""
 
-    def __init__(self, bot_token: str, chat_id: str, timeout: float = 10.0):
+    def __init__(self, bot_token: str, chat_id: str, timeout: float = 10.0,
+                 proxy_url: str | None = None):
         self._token = bot_token
         self._chat_id = chat_id
         self._timeout = timeout
+        # Route ONLY Telegram through the proxy via a scoped opener — the agent also hits MOEX ISS
+        # directly in this same process, so a process-wide HTTPS_PROXY would misroute ISS. An
+        # http:// proxy tunnels the https request via CONNECT.
+        self._opener = (urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+            if proxy_url else urllib.request.build_opener())
 
     def send(self, subject: str, body: str) -> bool:
         url = f"https://api.telegram.org/bot{self._token}/sendMessage"
@@ -47,7 +54,7 @@ class TelegramNotifier:
         ).encode()
         try:
             req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
+            with self._opener.open(req, timeout=self._timeout) as resp:  # noqa: S310
                 payload = json.loads(resp.read().decode())
                 return bool(payload.get("ok"))
         except Exception as exc:  # noqa: BLE001 - alerts must never crash the cycle
@@ -62,7 +69,7 @@ def build_notifier(config: AgentConfig) -> Notifier:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
         if token and chat_id:
-            return TelegramNotifier(token, chat_id)
+            return TelegramNotifier(token, chat_id, proxy_url=os.getenv("TELEGRAM_PROXY_URL") or None)
         print("[notifier] alerts.channel=telegram but TELEGRAM_BOT_TOKEN/CHAT_ID unset; "
               "falling back to stdout", file=sys.stderr)
     return StdoutNotifier()

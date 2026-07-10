@@ -30,6 +30,8 @@ class ScheduleConfig:
     preopen: str = "09:30"      # before the open
     deadman_check_minutes: int = 30     # how often the dead-man's-switch checks
     deadman_max_stale_hours: float = 26.0   # alert if no successful cycle within this window
+    deadman_repeat_hours: float = 6.0       # re-alert on the SAME incident at most once per N hours
+    deadman_running_grace_minutes: int = 90  # a 'running' cycle younger than this is working, not stuck
 
 
 @dataclass
@@ -107,6 +109,8 @@ def load_config(path: Path | str | None = None) -> AgentConfig:
             preopen=str(sched.get("preopen", "09:30")),
             deadman_check_minutes=int(sched.get("deadman_check_minutes", 30)),
             deadman_max_stale_hours=float(sched.get("deadman_max_stale_hours", 26.0)),
+            deadman_repeat_hours=float(sched.get("deadman_repeat_hours", 6.0)),
+            deadman_running_grace_minutes=int(sched.get("deadman_running_grace_minutes", 90)),
         ),
         alerts=AlertConfig(channel=str(alerts.get("channel", "stdout"))),
         blocks=dict(raw.get("blocks", {})),

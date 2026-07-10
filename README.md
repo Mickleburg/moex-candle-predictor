@@ -7,18 +7,23 @@
 > **Источник правды:** [`docs/ARCHITECTURE_V3.md`](docs/ARCHITECTURE_V3.md) ·
 > [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md) (КАНОН-леджер закрытого/активного) ·
 > [`docs/VDS_AUTONOMOUS_PLAN.md`](docs/VDS_AUTONOMOUS_PLAN.md) (автономный деплой) ·
-> [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). Рабочая ветка: `change-strategy`.
+> [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). Рабочая ветка: `demo`.
 
-## Статус (2026-06-20)
+## Статус (2026-07-10)
 
 **Найден первый робастный эдж — H9 «дивидендный пред-ex run-up» (слив S3).** Купить ~12 торговых дней
 до record-date, выйти ~2 ТД до (перед ex-гэпом), сектор-хедж, inverse-vol сайзинг. Доказан по 4 осям
 (per-year, окно входа, dose-response, placebo), no-lookahead сертифицирован, P0 пройден (издержки 4-10×
 запас, робастность 24/24, ёмкость ~130-190 млн ₽). Сервинг: `ml/src/service/dividend_sleeve.py`.
 
-**Автономный стек собран и проверен end-to-end** (206 тестов, оркестратор гоняет полный цикл в paper):
-данные → слив → комбинатор → риск-слой → execution → оркестратор+планировщик. `is_production=false` —
-снимается после forward-shadow гейта + sign-off.
+**Стек задеплоен на VDS и копит forward-shadow трек (paper).** Оркестратор гоняет EOD-цикл каждый
+торговый день на реальных блоках (ingest → слив → комбинатор → риск → execution-paper); Telegram-бот
+мониторит по запросу (на RU-VDS Telegram идёт через прокси). `is_production=false`, 0 живого капитала —
+слив держится в shadow-книге, копим сезон. Прогон блоков — 272 теста зелёные.
+
+**Forward-гейт H9 — NOT MET.** Форвард не просто тонкий — он отрицательный (n=12, net −0.0093) с
+инвертированной dose-response. Июльская волна даёт лишь 7 событий → n→19 < 25, т.е. формальный MET в
+июле невозможен: чтение после ~2026-07-21 — **проверка знака**. Формальный MET — не раньше осени 2026.
 
 **Закрыто ⛔ (не переоткрывать):** направление 1H одной бумаги (V1); кросс-секционное ранжирование —
 цена (H1), новости-заголовки (H2), макро-тилт (H6); попарная реверсия (H7). Робастная market-neutral
@@ -54,6 +59,7 @@ forward-гейт MET. Иначе — shadow-книга (0 живого капи�
 | `risk_manager/` | комбинатор сливов + риск-слой + **shadow-гейт** + сектор-хедж | ✅ |
 | `execution/` | брокер-адаптер (T-Invest), дисциплина −12/−2, kill-switch, аудит | ✅ paper (live загейчен) |
 | `agent/` | оркестратор суточного цикла + состояние + планировщик + алерты | ✅ |
+| `bot/` | Telegram-мониторинг (read-only): статус/позиции/P&L/гейт, allowlist-доступ; на RU-VDS через прокси | ✅ задеплоен |
 | `infra/` | Docker/compose + systemd + бэкапы для VDS | ✅ |
 | `contracts/` · `config/` | общие JSON-схемы · конфигурация | — |
 
@@ -68,8 +74,11 @@ Pre-open (~09:30): ночные гэпы/халты, подтверждение 
 ## Метод валидации
 
 Только **deployment-симуляция** на свежем forward, с комиссией (обычный walk-forward обманул в V1).
-Тест-сплит 2025-2026 сожжён. Forward-shadow гейт измеряет реализованный run-up на свежих ex-датах
-(`ml/scripts/h9_shadow_pnl.py`) — сейчас **NOT MET** (forward тонкий/минус) → копим сезон. Робастность важнее пика.
+Тест-сплит 2025-2026 сожжён. Forward-shadow гейт (`ml/scripts/h9_shadow_pnl.py`) измеряет реализованный
+run-up на свежих ex-датах: **MET ⇔ n ≥ 25 PRISTINE forward-событий И net > 0 И %pos > 0.5** (PRISTINE =
+record-дата вне сожжённого окна; corroboration-бэкфилл гейт не двигает). Сейчас **NOT MET**: n=12,
+net −0.0093, %pos 0.50, dose-response инвертирован, форвард ниже плацебо-полосы. Копим сезон, на тонком
+forward не тюним. Робастность важнее пика.
 
 ## Safety / инварианты
 
@@ -82,7 +91,7 @@ Pre-open (~09:30): ночные гэпы/халты, подтверждение 
 
 ```powershell
 $PY = "ml\.venv-win\Scripts\python.exe"
-& $PY -m pytest ml/test_smoke.py agent/tests execution/tests backend/tests risk_manager/tests   # тесты блоков
+& $PY -m pytest ml/test_smoke.py agent/tests execution/tests backend/tests risk_manager/tests bot/tests   # тесты блоков (272)
 & $PY scripts/validate_contracts.py                                                              # контракты
 & $PY -m agent.src.cli run-eod --force                                                           # один суточный цикл (mock-дефолт, безопасно)
 ```
