@@ -30,6 +30,7 @@ class Monitor:
         return fmt.fmt_status({
             "mode": self.config.mode,
             "block_mode": self.config.block_mode,
+            "block_modes": self.config.block_modes,
             "live_enabled": self.config.live_enabled,
             "kill_switch": s.kill_switch_engaged(),
             "last_cycle": s.last_cycle(),
@@ -77,3 +78,6 @@ class Monitor:
 
     def help(self, is_admin: bool = False) -> str:
         return fmt.fmt_help(is_admin)
+
+    def start(self) -> str:
+        return fmt.fmt_start()

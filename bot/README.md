@@ -49,6 +49,10 @@ live and shadow capital are always rendered as separate, labelled sections — n
   silence) so requesting access is self-service; admins also get a best-effort notification.
 - **Fail-closed:** with no admins AND no allowed ids the bot **refuses to start**.
 - **Token from the environment only.** `TELEGRAM_BOT_TOKEN`, never in git. See `.env.example`.
+- **RU-blocked host?** Where `api.telegram.org` is unreachable (e.g. a Russian VDS behind RKN), set
+  `TELEGRAM_PROXY_URL=http://<proxy-ip>:<port>` to an out-of-region HTTP proxy locked to the host's
+  IP. Both the poller and `getUpdates` route through it (`Application.builder().proxy()`); the agent
+  notifier proxies Telegram only (ISS stays direct). Leave blank if Telegram is directly reachable.
 
 ## Coordination with the agent notifier (one token)
 
@@ -65,8 +69,10 @@ conflict.** Never start a second poller on the same token.
 ```
 
 `python -m bot` loads `.env` (local convenience; on the VDS the process manager loads the env),
-reuses the agent config for paths/universe, then long-polls. VDS deploy (systemd/docker) is a
-**separate, later** step coordinated with infra.
+reuses the agent config for paths/universe, then long-polls. On startup it registers the command
+menu via `set_my_commands` (read commands for everyone; admin commands scoped to admin chats) —
+best-effort, so a proxy/network hiccup logs and continues rather than blocking start. VDS deploy
+(Docker Compose / systemd) is live — see `infra/README.md`.
 
 ## Control actions — intentionally OUT of v1
 

@@ -34,6 +34,19 @@ DEFAULT_GATE_REPORT = REPO_ROOT / "data" / "reports" / "h9_shadow_pnl.txt"
 # The bot's OWN managed allowlist (gitignored). NOT the agent DB — that is opened read-only.
 DEFAULT_ALLOWLIST = REPO_ROOT / "data" / "bot" / "allowlist.json"
 
+# Blocks whose effective run-mode /status reports. backend·sleeve·combiner are the data path
+# (mock => the whole track is synthetic); execution is shown separately (live there = real orders).
+EFFECTIVE_BLOCKS = ("backend", "sleeve", "combiner", "execution")
+
+
+def resolve_block_modes(blocks: dict, default_mode: str) -> dict[str, str]:
+    """Effective mode per block, resolved EXACTLY as the agent does (agent/src/config.py):
+    ``blocks.get(blk, {}).get("mode", block_mode)``. A per-block override (AGENT_<BLK>_MODE, already
+    overlaid onto the agent config the bot reuses) wins; otherwise the top-level block_mode is the
+    fallback. This is why /status must not show the bare top-level block_mode: a mock default with
+    live per-block overrides means the shadow track is REAL, not synthetic."""
+    return {blk: (blocks.get(blk) or {}).get("mode", default_mode) for blk in EFFECTIVE_BLOCKS}
+
 
 @dataclass
 class BotConfig:
@@ -41,6 +54,7 @@ class BotConfig:
     admin_chat_ids: frozenset[int] = frozenset()       # bootstrap admins (immutable via the bot)
     allowed_chat_ids: frozenset[int] = frozenset()     # env SEED of read-only ids
     poll_timeout: int = 30
+    proxy_url: str | None = None                       # TELEGRAM_PROXY_URL — RU hosts block Telegram
 
     # paths/universe mirrored from the agent config (read-only consumption)
     state_db: Path = REPO_ROOT / "data" / "agent" / "state.sqlite"
@@ -55,7 +69,10 @@ class BotConfig:
     capital_rub: float = 10_000_000.0
     timeframe: str = "1D"
     mode: str = "paper"
-    block_mode: str = "mock"
+    block_mode: str = "mock"                            # top-level default (kept for compatibility)
+    # effective per-block modes {backend,sleeve,combiner,execution -> mock|live}; the honest view
+    # /status shows instead of the bare block_mode. Empty when built directly (falls back to block_mode).
+    block_modes: dict[str, str] = field(default_factory=dict)
     live_enabled: bool = False
 
     # the bot-owned managed allowlist store (built from allowlist_path if not injected)
@@ -135,6 +152,7 @@ def load_bot_config(config_path: Path | str | None = None, *, load_dotenv: bool 
         admin_chat_ids=_parse_chat_ids(os.getenv("BOT_ADMIN_CHAT_IDS"), var_name="BOT_ADMIN_CHAT_IDS"),
         allowed_chat_ids=_parse_chat_ids(os.getenv("BOT_ALLOWED_CHAT_IDS")),
         poll_timeout=int(os.getenv("BOT_POLL_TIMEOUT", "30")),
+        proxy_url=os.getenv("TELEGRAM_PROXY_URL") or None,
         allowlist_path=DEFAULT_ALLOWLIST,
         state_db=agent.state_db,
         shadow_log=agent.shadow_log,
@@ -145,5 +163,6 @@ def load_bot_config(config_path: Path | str | None = None, *, load_dotenv: bool 
         timeframe=agent.timeframe,
         mode=agent.mode,
         block_mode=agent.block_mode,
+        block_modes=resolve_block_modes(agent.blocks, agent.block_mode),
         live_enabled=agent.live_enabled(),
     )
