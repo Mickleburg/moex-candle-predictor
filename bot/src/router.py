@@ -63,7 +63,9 @@ class Router:
         return self._run(command, chat_id, args)
 
     def _run(self, command: str, chat_id: int | None, args: list[str]) -> str:
-        if command in ("help", "start"):
+        if command == "start":
+            return self.monitor.start()
+        if command == "help":
             return self.monitor.help(self.config.is_admin(chat_id))
         if command == "prices":
             return self.monitor.prices(args or None)

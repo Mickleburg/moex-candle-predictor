@@ -60,6 +60,7 @@ AGENT_ALERT_CHANNEL=telegram
 TELEGRAM_BOT_TOKEN=<from @BotFather>     # shared by agent (push) + bot (poll)
 TELEGRAM_CHAT_ID=<your chat id>          # where the agent PUSHES alerts (@userinfobot)
 BOT_ADMIN_CHAT_IDS=<your chat id>        # bot admin(s); without admins/allowed the bot fail-closes
+TELEGRAM_PROXY_URL=                      # RU VDS (RKN blocks api.telegram.org)? set http://<proxy-ip>:<port>; else blank
 # AGENT_ENABLE_LIVE / EXECUTION_ALLOW_LIVE stay OFF (see paper lock below)
 ```
 
@@ -123,12 +124,23 @@ AGENT_COMBINER_MODE=live         # real risk_manager combiner + H4/H5 risk analy
 AGENT_LLM_REFRESH_CMD=python llm/scripts/refresh_dividend_feed.py   # EOD step 2 feed refresh
 ```
 
-One-time data seed (otherwise the integrity gate HALTs — correct, but no signal accrues):
+One-time data seed (otherwise the integrity gate HALTs — correct, but no signal accrues). Use
+`--with-futures` or the gate HALTs on `presence/BR_CONT` (Brent):
 
 ```bash
-docker compose -f infra/docker-compose.yml exec agent python -m backend.ingest --backfill
+docker compose -f infra/docker-compose.yml run --rm --entrypoint python agent \
+  -m backend.ingest --backfill --with-futures
 # then the daily EOD ingest keeps it fresh
 ```
+
+### First-deploy gotchas (observed on a first-byte VDS)
+
+- **Tiny VDS (1 vCPU / ~1 GB / no swap):** add a 2 GB swapfile first or the image build / EOD cycle
+  OOMs — `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`.
+- **Bind-mount perms:** the image runs as non-root uid **10001** — `chown -R 10001:10001 data` on the
+  host or the container can't write `data/raw`. **Re-run after any `git pull` that touches `data/`.**
+- **One-off commands** use `run --rm --entrypoint python agent …` (the image ENTRYPOINT is the agent
+  CLI, so a bare `python` subcommand isn't recognised).
 
 ## Monitoring, backups, logs
 
