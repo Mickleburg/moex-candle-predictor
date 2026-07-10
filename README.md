@@ -7,7 +7,7 @@
 > **Источник правды:** [`docs/ARCHITECTURE_V3.md`](docs/ARCHITECTURE_V3.md) ·
 > [`docs/RESEARCH_HYPOTHESES.md`](docs/RESEARCH_HYPOTHESES.md) (КАНОН-леджер закрытого/активного) ·
 > [`docs/VDS_AUTONOMOUS_PLAN.md`](docs/VDS_AUTONOMOUS_PLAN.md) (автономный деплой) ·
-> [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). Рабочая ветка: `change-strategy`.
+> [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). Рабочая ветка: `demo`.
 
 ## Статус (2026-07-10)
 
