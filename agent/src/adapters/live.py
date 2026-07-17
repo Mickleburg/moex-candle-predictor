@@ -114,12 +114,17 @@ class LiveBackend:
         self._integrity = cfg.get("integrity_cmd")
         self._prices = cfg.get("prices_cmd")
         self._timeframe = cfg.get("prices_timeframe", "1D")
+        # Continuous futures (BR_CONT/NG_CONT) are stitched by a separate rebuild, refreshed ONLY
+        # with with_futures=True. Without this the daily cycle advances stocks/indices but never
+        # Brent/gas, so the integrity gate HALTs on stale BR_CONT within ~2 trading days while every
+        # other series is fresh. Default ON; set blocks.backend.ingest_with_futures=false to disable.
+        self._with_futures = bool(cfg.get("ingest_with_futures", True))
 
     def run_ingest(self, as_of: str) -> dict:
         if self._ingest:
             return _run_json_cmd([*self._ingest, "--date", str(as_of)[:10]])
         from backend.ingest import run_ingest as backend_ingest  # type: ignore
-        return backend_ingest(today=_as_of_date(as_of))
+        return backend_ingest(today=_as_of_date(as_of), with_futures=self._with_futures)
 
     def integrity_gate(self, as_of: str) -> IntegrityStatus:
         if self._integrity:

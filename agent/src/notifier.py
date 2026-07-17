@@ -48,9 +48,13 @@ class TelegramNotifier:
 
     def send(self, subject: str, body: str) -> bool:
         url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        text = f"*{subject}*\n{body}"[:4000]
+        # Plain text — NO parse_mode. Operational bodies carry '/', '_', '*' (ticker keys like
+        # BR_CONT, reasons like freshness/SBER/1H); under Markdown those are unbalanced entities and
+        # Telegram rejects the whole message with HTTP 400, silently dropping the alert. Alerts must
+        # deliver over being pretty.
+        text = f"{subject}\n{body}"[:4000]
         data = urllib.parse.urlencode(
-            {"chat_id": self._chat_id, "text": text, "parse_mode": "Markdown"}
+            {"chat_id": self._chat_id, "text": text}
         ).encode()
         try:
             req = urllib.request.Request(url, data=data)
