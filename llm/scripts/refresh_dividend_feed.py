@@ -43,6 +43,7 @@ import pandas as pd
 SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parents[1]
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(REPO))     # so `backend.dividends` (history promotion) is importable
 
 import build_dividend_calendar_upcoming as bld  # noqa: E402
 import verify_dividend_feed as vfy  # noqa: E402
@@ -80,6 +81,31 @@ def run_stage(name: str, cmd: list[str], timeout: float, retries: int) -> tuple[
         if attempt < retries:
             time.sleep(2 ** attempt)
     return "failed", last
+
+
+def promote_realized(passed: pd.DataFrame, as_of: pd.Timestamp) -> dict:
+    """Persist already-REALIZED feed events into the permanent dividend history so they survive the
+    builder's rolling forward window. Without this a realized dividend vanishes from
+    ``load_dividend_calendar`` once its record date ages out of the feed (ISS still lacks it for
+    ~11 months), regressing the H9 gate's forward ``n``.
+
+    Each candidate is re-checked by the SAME independent no-lookahead verifier the forward feed passes
+    (per-row), and ONLY rows that individually pass are promoted — so nothing enters history that
+    could not have been traded 12 TD ahead. Upsert is existing-wins (never overwrites ISS/validated
+    history) and idempotent, so re-running is safe."""
+    result = {"eligible": 0 if passed is None else int(len(passed)), "verified": 0, "added": 0}
+    if passed is None or passed.empty:
+        return result
+    keep = [i for i in passed.index if vfy.verify(passed.loc[[i]], as_of)[0]]
+    verified = passed.loc[keep]
+    result["verified"] = int(len(verified))
+    if verified.empty:
+        return result
+    from backend.dividends import promote_events  # lazy: REPO is on sys.path (top of module)
+    ev = verified[["ticker", "record_date", "value"]].rename(columns={"record_date": "date"})
+    rep = promote_events(ev, source="e-disclosure", run_date=str(pd.Timestamp(as_of).date()))
+    result["added"] = int(rep.get("rows_added_this_run", 0))
+    return result
 
 
 def anchor_sverka(py: str) -> tuple[str, str]:
@@ -137,7 +163,7 @@ def main() -> int:
 
     # ---- 3. build (pure) -> TEMP ----
     try:
-        feed, _passed, declined = bld.feed_frames()
+        feed, passed, declined = bld.feed_frames()
         TMP_CSV.parent.mkdir(parents=True, exist_ok=True)
         feed.to_csv(TMP_CSV, index=False, encoding="utf-8")
         summary["stages"]["build"] = "ok"
@@ -189,9 +215,22 @@ def main() -> int:
     summary["feed"]["changed"] = changed
     summary["ok"] = True
 
+    # ---- 7. promote REALIZED events into permanent history (survive the rolling forward window) ----
+    # Best-effort and idempotent: the forward feed is already swapped and trustworthy, so a promotion
+    # hiccup degrades (reported) but never fails the run or rolls the feed back.
+    try:
+        summary["promoted"] = promote_realized(passed, pd.Timestamp(args.as_of))
+    except Exception as exc:  # noqa: BLE001 - promotion must never break an already-trustworthy feed
+        summary["promoted"] = {"error": f"{type(exc).__name__}: {exc}"}
+        summary["degraded"] = True
+        summary["errors"].append(f"promote: {exc}")
+        log(f"promote realized events failed (non-fatal): {exc}")
+
     print(json.dumps(summary, ensure_ascii=False))
+    prom = summary.get("promoted", {})
     log(f"DONE: feed {'updated' if changed else 'unchanged'} "
-        f"({summary['feed']['upcoming']} upcoming) — ok={summary['ok']} degraded={summary['degraded']}")
+        f"({summary['feed']['upcoming']} upcoming, +{prom.get('added', 0)} promoted to history) "
+        f"— ok={summary['ok']} degraded={summary['degraded']}")
     return 0
 
 
