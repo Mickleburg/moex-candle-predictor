@@ -20,6 +20,12 @@ data/agent/
 # environment-specific; admins/seed live in env). Regenerable via /allow.
 data/bot/
 
+# forward-shadow snapshots — READ-ONLY evidence exported off the VDS (state + shadow track + feed).
+# data/forward_snapshots/ = landed imports; incoming_snapshot/ = local import scratch. Per-run and
+# provenance-checked via scripts/{export,import}_forward_snapshot.py — never tracked.
+data/forward_snapshots/
+incoming_snapshot/
+
 # local env / secrets
 .env
 
