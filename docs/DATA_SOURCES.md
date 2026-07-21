@@ -54,6 +54,15 @@
 `llm/scripts/build_dividend_calendar_upcoming.py`). `load_dividend_calendar` их **склеивает** —
 слив H9 видит и прошлые, и предстоящие даты.
 
+**Промоушен реализованных событий (важно для H9-гейта).** Билдер держит только скользящее forward-окно
+(`record ≥ today−30d`), поэтому событие, чья record-дата устарела, выпадает из upcoming-фида. Но ISS
+не публикует его ещё ~11 мес → без вмешательства оно исчезло бы из `load_dividend_calendar` совсем, и
+forward-`n` гейта откатился бы. Поэтому рефреш (`refresh_dividend_feed.py`) после успешного swap
+промотирует **уже реализованные** события в `dividends.csv` (`backend.dividends.promote_events`,
+`source=e-disclosure`, existing-wins) — но **только** строки, прошедшие тот же независимый
+no-lookahead-верификатор, что и forward-фид. Дедуп по (ticker, date) в лоадере + existing-wins в
+upsert исключают двойной счёт, когда ISS позже опубликует то же событие.
+
 **⛔ ISS НЕ МОЖЕТ заменить e-disclosure для forward-фида (разведка 2026-07-19, NO-GO).**
 Отчёт: `llm/docs/ISS_DIVIDEND_SOURCE_RECON_2026-07-19.md`. Две независимые причины:
 1. **Структурная (не чинится обновлением данных):** в схеме `dividends.json` ровно 5 полей и **ни
