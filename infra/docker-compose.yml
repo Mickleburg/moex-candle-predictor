@@ -55,9 +55,14 @@ services:
     entrypoint: ["python", "-m", "bot"]
     command: []
     healthcheck:
-      # liveness: the bot package + its agent-config wiring import cleanly.
-      test: ["CMD", "python", "-c", "import bot.src.app"]
-      interval: 5m
-      timeout: 30s
-      retries: 3
-      start_period: 20s
+      # liveness: a getUpdates round-trip completed recently (bot/src/heartbeat.py stamps the file
+      # after every successful poll). The old probe imported bot.src.app — which stayed green while
+      # the poller was wedged in await, twice (07-15, 07-20): container Up/healthy, logs stopped,
+      # restart never triggered. Freshness is the only signal that distinguishes the two.
+      # 180s ~= 5 missed long-polls at BOT_POLL_TIMEOUT=30; interval 60s + retries 2 => a hung
+      # poller is unhealthy within ~4min, and `restart: unless-stopped` recreates the container.
+      test: ["CMD", "python", "-m", "bot.src.heartbeat"]
+      interval: 60s
+      timeout: 10s
+      retries: 2
+      start_period: 60s

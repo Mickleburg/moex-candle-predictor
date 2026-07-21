@@ -17,6 +17,7 @@ Env vars (see .env.example):
   BOT_ADMIN_CHAT_IDS     comma-separated admin chat ids (bootstrap; immutable via the bot).
   BOT_ALLOWED_CHAT_IDS   comma-separated SEED of read-only chat ids (runtime ids go to the store).
   BOT_POLL_TIMEOUT       long-poll timeout seconds for getUpdates (default 30).
+  BOT_HEARTBEAT_PATH     poller liveness stamp read by the container healthcheck (see heartbeat.py).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .allowlist import AllowlistStore
+from .heartbeat import DEFAULT_HEARTBEAT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INTEGRITY_REPORT = REPO_ROOT / "data" / "reports" / "data_integrity_status.json"
@@ -64,6 +66,9 @@ class BotConfig:
     gate_report: Path = DEFAULT_GATE_REPORT
     data_raw: Path = REPO_ROOT / "data" / "raw"
     allowlist_path: Path = DEFAULT_ALLOWLIST
+    # touched after every successful getUpdates round-trip; the container healthcheck reads its
+    # mtime to tell a live poller from one wedged in await (see heartbeat.py).
+    heartbeat_path: Path = DEFAULT_HEARTBEAT
 
     universe: list[str] = field(default_factory=list)
     capital_rub: float = 10_000_000.0
@@ -154,6 +159,7 @@ def load_bot_config(config_path: Path | str | None = None, *, load_dotenv: bool 
         poll_timeout=int(os.getenv("BOT_POLL_TIMEOUT", "30")),
         proxy_url=os.getenv("TELEGRAM_PROXY_URL") or None,
         allowlist_path=DEFAULT_ALLOWLIST,
+        heartbeat_path=Path(os.getenv("BOT_HEARTBEAT_PATH") or DEFAULT_HEARTBEAT),
         state_db=agent.state_db,
         shadow_log=agent.shadow_log,
         cycle_results_dir=agent.cycle_results_dir,
