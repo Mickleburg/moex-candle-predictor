@@ -183,7 +183,10 @@ docker compose -f infra/docker-compose.yml run --rm --entrypoint python agent \
   dead-man's-switch to `TELEGRAM_CHAT_ID`. `stdout` (default) needs no secrets.
 - **Bot (pull):** read-only commands `/status /positions /pnl /prices /gate /shadowlog /cycle
   /integrity`; admin-only `/users /allow /deny` manage the read allowlist at runtime.
-- **Health:** compose healthchecks (`agent status`, bot import) + `restart: unless-stopped`.
+- **Health:** compose healthchecks — the agent runs `agent status`; the bot probes poller-liveness
+  by heartbeat freshness (`data/bot/heartbeat`, stamped on every `getUpdates` round-trip). An
+  in-process watchdog force-exits a wedged poller so `restart: unless-stopped` recreates it (plain
+  Docker restarts on container *exit*, not on an unhealthy status).
 - **Backups:** `infra/backup.sh` → daily systemd timer (Option B), or host cron under Docker:
   `0 20 * * * docker compose -f /opt/moex-candle-predictor/infra/docker-compose.yml exec -T agent bash infra/backup.sh`.
 - **Logs:** `data/agent/logs/agent.log` (rotating 10×5 MB) + `docker compose ... logs`.
