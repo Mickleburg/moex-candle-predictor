@@ -14,9 +14,12 @@ import pandas as pd
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
+REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(REPO))
 import verify_dividend_feed as vfy  # noqa: E402
 import build_dividend_calendar_upcoming as bld  # noqa: E402
+import refresh_dividend_feed as rf  # noqa: E402
 
 
 SYN_GUID = "SYN123-B-B"
@@ -89,3 +92,36 @@ def test_build_is_deterministic():
     a, _, _ = bld.feed_frames()
     b, _, _ = bld.feed_frames()
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_promote_realized_only_promotes_verified_rows(monkeypatch):
+    # the rolling-window fix: realized events are re-verified per row, and ONLY those that pass the
+    # independent no-lookahead check are promoted into history (AAA passes, BBB fails -> only AAA).
+    import backend.dividends as bd
+    passed = pd.DataFrame([
+        dict(ticker="AAA", record_date="2026-05-04", value="10.00"),
+        dict(ticker="BBB", record_date="2026-05-05", value="20.00"),
+    ])
+    monkeypatch.setattr(rf.vfy, "verify",
+                        lambda one, as_of: (one.iloc[0]["ticker"] == "AAA", [], {}))
+    captured = {}
+
+    def fake_promote(ev, source, run_date=None):
+        captured["ev"], captured["source"] = ev.copy(), source
+        return {"rows_added_this_run": int(len(ev)), "source": source}
+
+    monkeypatch.setattr(bd, "promote_events", fake_promote)
+    res = rf.promote_realized(passed, pd.Timestamp("2026-07-01"))
+
+    assert res == {"eligible": 2, "verified": 1, "added": 1}
+    assert list(captured["ev"]["ticker"]) == ["AAA"]
+    assert {"ticker", "date", "value"} <= set(captured["ev"].columns)   # record_date -> date
+    assert captured["source"] == "e-disclosure"
+
+
+def test_promote_realized_empty_is_noop(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(rf.vfy, "verify", lambda *a: called.__setitem__("n", called["n"] + 1))
+    res = rf.promote_realized(pd.DataFrame(columns=["ticker", "record_date", "value"]),
+                              pd.Timestamp("2026-07-01"))
+    assert res == {"eligible": 0, "verified": 0, "added": 0} and called["n"] == 0
