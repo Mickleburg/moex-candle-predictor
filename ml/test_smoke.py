@@ -1305,6 +1305,45 @@ def test_dividend_sleeve_max_weight_small_book():
         raise
 
 
+def test_h9_daily_series_excludes_weekend_sessions():
+    """H9 counts entry/exit offsets as index POSITIONS, so a bar MUST equal a trading day. MOEX runs
+    weekend sessions since 2025, which silently turned the deployed '-12 trading days' into -12 bars
+    = ~8 real TD on 2026 events while the in-sample benchmark (<2025) stayed a true 12 TD — the gate
+    would then compare the forward against a different rule. Both loaders must drop Sat/Sun.
+    See ml/docs/research/h9_weekend_bar_drift_prereg_2026-07-28.md."""
+
+    print("\nTesting H9 daily series excludes MOEX weekend sessions...")
+    try:
+        import pandas as pd
+
+        from scripts.h9_dividend_research import load_daily
+        from src.features.cross_sectional import _drop_weekend_sessions
+
+        # unit: the shared helper drops Sat/Sun and keeps every weekday
+        idx = pd.date_range("2026-07-01", "2026-07-20", freq="D", tz="Europe/Moscow")
+        s = pd.Series(range(len(idx)), index=idx)
+        out = _drop_weekend_sessions(s)
+        assert not out.empty, "helper dropped everything"
+        assert (out.index.dayofweek < 5).all(), "weekend bar survived the helper"
+        assert len(out) == int((idx.dayofweek < 5).sum()), "helper dropped a weekday"
+
+        # integration on the real panel (skipped when data/raw isn't present, e.g. clean CI)
+        checked = 0
+        for ticker in ("SBER", "PLZL", "IMOEX"):
+            real = load_daily(ticker)
+            if real is None or real.empty:
+                continue
+            checked += 1
+            weekend = real.index[real.index.dayofweek >= 5]
+            assert len(weekend) == 0, \
+                f"{ticker}: {len(weekend)} weekend bars survived (first {weekend[:3].tolist()})"
+        print(f"  PASS weekend sessions excluded (helper + {checked} real series)")
+        return True
+    except Exception as exc:
+        print(f"  FAIL H9 weekend-session exclusion test failed: {exc}")
+        raise
+
+
 def main():
     """Run all smoke tests."""
 
