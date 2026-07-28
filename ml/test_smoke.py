@@ -1327,7 +1327,7 @@ def test_h9_daily_series_excludes_weekend_sessions():
         assert (out.index.dayofweek < 5).all(), "weekend bar survived the helper"
         assert len(out) == int((idx.dayofweek < 5).sum()), "helper dropped a weekday"
 
-        # integration on the real panel (skipped when data/raw isn't present, e.g. clean CI)
+        # integration on the real series (skipped when data/raw isn't present, e.g. clean CI)
         checked = 0
         for ticker in ("SBER", "PLZL", "IMOEX"):
             real = load_daily(ticker)
@@ -1337,7 +1337,16 @@ def test_h9_daily_series_excludes_weekend_sessions():
             weekend = real.index[real.index.dayofweek >= 5]
             assert len(weekend) == 0, \
                 f"{ticker}: {len(weekend)} weekend bars survived (first {weekend[:3].tolist()})"
-        print(f"  PASS weekend sessions excluded (helper + {checked} real series)")
+
+        # the SHARED panel too: every universe name trades the weekend session, so dropna(how="any")
+        # does NOT filter those rows — the H9 sleeve sim / robustness / cost model read this panel.
+        from scripts.xsec_eval_harness import load_daily_panel
+        panel = load_daily_panel()
+        if not panel.empty:
+            checked += 1
+            wk = panel.index[panel.index.dayofweek >= 5]
+            assert len(wk) == 0, f"load_daily_panel: {len(wk)} weekend rows survived"
+        print(f"  PASS weekend sessions excluded (helper + {checked} real series/panels)")
         return True
     except Exception as exc:
         print(f"  FAIL H9 weekend-session exclusion test failed: {exc}")

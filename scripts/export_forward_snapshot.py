@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import socket
 import sqlite3
@@ -51,13 +52,44 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _git_commit_from_dotgit() -> str:
+    """Read HEAD straight out of .git — the slim runtime image ships the repo but NOT the git binary,
+    so `git rev-parse` there returns nothing and the manifest used to record "unknown", losing the
+    provenance of every VDS snapshot (which code produced this evidence?)."""
+    git_dir = REPO_ROOT / ".git"
+    try:
+        if git_dir.is_file():                       # worktree/submodule: "gitdir: <path>"
+            git_dir = Path(git_dir.read_text(encoding="utf-8").split(":", 1)[1].strip())
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if not head.startswith("ref:"):
+            return head                             # detached HEAD holds the sha directly
+        ref = head.split(":", 1)[1].strip()
+        loose = git_dir / ref
+        if loose.exists():
+            return loose.read_text(encoding="utf-8").strip()
+        packed = git_dir / "packed-refs"            # ref may only exist packed
+        if packed.exists():
+            for line in packed.read_text(encoding="utf-8").splitlines():
+                if line.endswith(f" {ref}"):
+                    return line.split(" ", 1)[0].strip()
+    except Exception:  # noqa: BLE001 - provenance is best-effort, never fails the export
+        pass
+    return ""
+
+
 def _git_commit() -> str:
+    """Commit that produced this snapshot: explicit env > git binary > .git files > unknown."""
+    env = os.getenv("GIT_COMMIT", "").strip()       # e.g. baked in at image build time
+    if env:
+        return env
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT),
                              capture_output=True, text=True, timeout=10)
-        return out.stdout.strip() or "unknown"
+        if out.stdout.strip():
+            return out.stdout.strip()
     except Exception:  # noqa: BLE001
-        return "unknown"
+        pass
+    return _git_commit_from_dotgit() or "unknown"
 
 
 def _backup_sqlite_ro(src: Path, dest: Path) -> bool:
