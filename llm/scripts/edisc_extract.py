@@ -93,7 +93,8 @@ RESULT_CAP = 1200         # server truncates a query at ~1200 newest rows -> mus
 # obviously-non-abusive client. Randomised so the pattern isn't a metronome. Slower is fine — this
 # runs at most a couple of times a month, by hand.
 PAUSE_S = (1.0, 2.2)          # between API result pages
-TICKER_PAUSE_S = (6.0, 14.0)  # between tickers (each starts with a fresh page load)
+TICKER_PAUSE_S = (6.0, 14.0)  # between tickers
+RELOAD_EVERY = 6              # force a fresh page load (cookie refresh) every N tickers
 
 
 def _nap(span: tuple[float, float]) -> None:
@@ -143,8 +144,14 @@ def _drain_window(pg, query: str, d0: dt.date, d1: dt.date) -> tuple[list[dict],
     return raw, len(raw) >= RESULT_CAP
 
 
-def open_search(pg, headed: bool, first: bool = False) -> bool:
-    """Load the search page, clearing the anti-bot challenge if one is shown. True = form is ready.
+def open_search(pg, headed: bool, first: bool = False, force: bool = False) -> bool:
+    """Ensure the search page is loaded, clearing the anti-bot challenge if one is shown.
+    True = form is ready.
+
+    If the form is already on screen we do NOT reload: every page load is another chance to be
+    challenged (and another request). The result pages are fetched in-page via the same session, so
+    one good load serves many tickers; `force` re-loads periodically so a long run can't silently
+    outlive its cookie.
 
     The WAF may answer with the ServicePipe interstitial instead of the page. It is an INTERACTIVE
     check ("разверните картинку горизонтально") that never resolves on its own, so:
@@ -153,6 +160,13 @@ def open_search(pg, headed: bool, first: bool = False) -> bool:
       * headless-> we do NOT try to defeat the check. We report it and tell the operator to re-run
                    with --headed, which is the supported way through.
     """
+    if not force and not first:
+        try:
+            if pg.locator(FORM_SEL).count():
+                return True                      # session still good — no extra request needed
+        except Exception:
+            pass
+
     pg.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
     try:
         pg.wait_for_selector(FORM_SEL, timeout=15000 if first else 25000)
@@ -263,9 +277,11 @@ def main() -> int:
                 print(f"skip unknown ticker {tk}")
                 continue
             if i:
-                _nap(TICKER_PAUSE_S)   # pace the run; each ticker starts with a fresh page load
-            # refresh the WAF cookie per ticker so a long run can't silently expire mid-stream
-            if not open_search(pg, args.headed, first=(i == 0)):
+                _nap(TICKER_PAUSE_S)   # pace the run
+            # Reload only when needed (form gone) or every RELOAD_EVERY tickers, so the cookie stays
+            # fresh on a long run without paying a challenge risk on every single ticker.
+            if not open_search(pg, args.headed, first=(i == 0),
+                               force=(i > 0 and i % RELOAD_EVERY == 0)):
                 blocked = True
                 break
             pg.wait_for_timeout(1200)
