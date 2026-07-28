@@ -57,12 +57,29 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def run_stage(name: str, cmd: list[str], timeout: float, retries: int) -> tuple[str, str]:
-    """Run a subprocess stage with retries. Returns (status, detail). status in {ok, failed}."""
+def run_stage(name: str, cmd: list[str], timeout: float, retries: int,
+              stream: bool = False) -> tuple[str, str]:
+    """Run a subprocess stage with retries. Returns (status, detail). status in {ok, failed}.
+
+    `stream` forwards the child's output live to STDERR (never stdout, which must stay clean JSON) —
+    used for the headed pull, where a human is watching for the "solve the challenge" prompt and
+    would otherwise see a browser window appear with no explanation.
+    """
     last = ""
     for attempt in range(1, retries + 1):
         try:
             log(f"[{name}] attempt {attempt}/{retries}: {' '.join(cmd[-3:])}")
+            if stream:
+                p = subprocess.run(cmd, stdout=sys.stderr, stderr=sys.stderr,
+                                   timeout=timeout, cwd=str(REPO))
+                if p.returncode == 0:
+                    log(f"[{name}] ok")
+                    return "ok", ""
+                last = f"rc={p.returncode}"
+                log(f"[{name}] {last}")
+                if attempt < retries:
+                    time.sleep(2 ** attempt)
+                continue
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                                cwd=str(REPO))
             if p.returncode == 0:
@@ -131,6 +148,10 @@ def main() -> int:
     ap.add_argument("--no-extract", action="store_true", help="skip the incremental title pull")
     ap.add_argument("--extract-since", default=None,
                     help="title-pull window start (default today-45d)")
+    ap.add_argument("--headed", action="store_true",
+                    help="run the e-disclosure pull in a visible browser so a human can clear the "
+                         "anti-bot challenge (required since 2026-07-28: headless is challenged even "
+                         "with a stored session, and we do not spoof the browser to get around it)")
     ap.add_argument("--no-anchor-sverka", action="store_true", help="skip the ML anchor cross-check")
     ap.add_argument("--retries", type=int, default=3)
     ap.add_argument("--as-of", default=date.today().isoformat())
@@ -145,9 +166,15 @@ def main() -> int:
     if args.no_extract:
         summary["stages"]["extract"] = "skipped"
     else:
-        st, detail = run_stage("extract", [py, str(SCRIPTS / "edisc_extract.py"),
-                                           "--since", since, "--merge"], timeout=1200,
-                               retries=args.retries)
+        extract_cmd = [py, str(SCRIPTS / "edisc_extract.py"), "--since", since, "--merge"]
+        if args.headed:
+            extract_cmd.append("--headed")
+        # A human clearing a challenge needs minutes, not seconds, and retrying a headed run would
+        # ask them to solve it again — so give it a long timeout and a single attempt.
+        st, detail = run_stage("extract", extract_cmd,
+                               timeout=3600 if args.headed else 1200,
+                               retries=1 if args.headed else args.retries,
+                               stream=args.headed)
         summary["stages"]["extract"] = st
         if st == "failed":
             summary["degraded"] = True
