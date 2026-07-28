@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .allowlist import AllowlistStore
-from .heartbeat import DEFAULT_HEARTBEAT
+from .heartbeat import DEFAULT_HEARTBEAT, resolve_path as resolve_heartbeat_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INTEGRITY_REPORT = REPO_ROOT / "data" / "reports" / "data_integrity_status.json"
@@ -159,7 +159,7 @@ def load_bot_config(config_path: Path | str | None = None, *, load_dotenv: bool 
         poll_timeout=int(os.getenv("BOT_POLL_TIMEOUT", "30")),
         proxy_url=os.getenv("TELEGRAM_PROXY_URL") or None,
         allowlist_path=DEFAULT_ALLOWLIST,
-        heartbeat_path=Path(os.getenv("BOT_HEARTBEAT_PATH") or DEFAULT_HEARTBEAT),
+        heartbeat_path=resolve_heartbeat_path(),   # shared resolver: writer and healthcheck agree
         state_db=agent.state_db,
         shadow_log=agent.shadow_log,
         cycle_results_dir=agent.cycle_results_dir,

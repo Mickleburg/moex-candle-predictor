@@ -84,6 +84,26 @@ def test_check_and_exit_treats_missing_as_not_started_not_wedged(tmp_path: Path)
     assert calls == []
 
 
+def test_env_override_is_honoured_by_both_writer_and_probe(tmp_path: Path, monkeypatch):
+    # regression guard: the poller resolves its path via BotConfig, while the container healthcheck
+    # runs `python -m bot.src.heartbeat` with NO --path. If only one side honoured the env var,
+    # setting it would aim the probe at a file nobody stamps -> permanently unhealthy -> a restart
+    # loop on a healthy bot. Both go through resolve_path, so they cannot diverge.
+    custom = tmp_path / "elsewhere" / "hb"
+    monkeypatch.setenv(heartbeat.ENV_VAR, str(custom))
+
+    from bot.src.config import resolve_heartbeat_path
+    assert heartbeat.resolve_path() == custom          # probe side (no explicit path)
+    assert resolve_heartbeat_path() == custom          # writer side (config) — same file
+
+    heartbeat.touch(custom)                            # writer stamps it...
+    assert heartbeat.main([]) == 0                     # ...and the argument-less CLI sees it
+
+    monkeypatch.delenv(heartbeat.ENV_VAR)
+    assert heartbeat.resolve_path() == heartbeat.DEFAULT_HEARTBEAT   # falls back when unset
+    assert heartbeat.resolve_path(custom) == custom                  # explicit arg still wins
+
+
 def test_healthcheck_cli_exit_codes(tmp_path: Path, capsys):
     hb = tmp_path / "heartbeat"
 

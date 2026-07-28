@@ -37,6 +37,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # the same container — and a human on the host — can both read it.
 DEFAULT_HEARTBEAT = REPO_ROOT / "data" / "bot" / "heartbeat"
 
+# Optional override. Resolved HERE, not at each call site, because the writer (the poller, via
+# BotConfig) and the reader (this module's healthcheck CLI) MUST agree: if only one of them honoured
+# BOT_HEARTBEAT_PATH, setting it would make the probe read a file nobody writes -> permanently
+# unhealthy -> a restart loop on a perfectly healthy bot. One resolver keeps them in lockstep.
+ENV_VAR = "BOT_HEARTBEAT_PATH"
+
+
+def resolve_path(path: Path | str | None = None) -> Path:
+    """The heartbeat path: explicit argument > $BOT_HEARTBEAT_PATH > DEFAULT_HEARTBEAT."""
+    if path is not None:
+        return Path(path)
+    return Path(os.getenv(ENV_VAR) or DEFAULT_HEARTBEAT)
+
 # ~5 missed long-polls at the default 30s timeout. Long enough that one slow round-trip or a proxy
 # retry never restarts the bot; short enough that a wedged poller is recycled within ~3 minutes
 # instead of going unnoticed for days (07-15 → 07-20 was five days of silent death).
@@ -119,9 +132,11 @@ def check_and_exit(path: Path | str = DEFAULT_HEARTBEAT, max_age: float = DEFAUL
 def main(argv: list[str] | None = None) -> int:
     """Container healthcheck entry point: exit 0 = poller alive, 1 = wedged/never started."""
     parser = argparse.ArgumentParser(description="Check the bot poller heartbeat freshness.")
-    parser.add_argument("--path", default=str(DEFAULT_HEARTBEAT))
+    parser.add_argument("--path", default=None,
+                        help=f"heartbeat file (default: ${ENV_VAR} or {DEFAULT_HEARTBEAT})")
     parser.add_argument("--max-age", type=float, default=DEFAULT_MAX_AGE)
     args = parser.parse_args(argv)
+    args.path = resolve_path(args.path)   # same resolution the poller uses -> they cannot diverge
 
     age = age_seconds(args.path)
     if age is None:

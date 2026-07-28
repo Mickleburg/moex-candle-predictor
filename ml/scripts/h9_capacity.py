@@ -44,7 +44,10 @@ def adv_rub(ticker: str) -> float | None:
         return None
     s = pd.Series(df["value"].to_numpy(float), index=pd.to_datetime(df["begin"]))
     daily = s.resample("1D").sum()
-    daily = daily[daily > 0]
+    # Weekend sessions are thin (~5% of a weekday's turnover) but count as full days once MOEX
+    # opened them, so leaving them in drags the ADV median down and understates capacity. ADV is
+    # per TRADING day. Same weekend rule as the H9 price loaders.
+    daily = daily[(daily > 0) & (daily.index.dayofweek < 5)]
     return float(daily.tail(ADV_WINDOW).median())
 
 

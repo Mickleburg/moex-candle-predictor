@@ -34,6 +34,7 @@ REPO_ROOT = ML_DIR.parent
 sys.path.insert(0, str(ML_DIR))
 
 from src.data.load import to_moscow_time  # noqa: E402
+from src.features.cross_sectional import _drop_weekend_sessions  # noqa: E402
 from src.service.dividend_universe import (  # noqa: E402
     active_universe, resolve_universe, FORWARD_START,
 )
@@ -67,7 +68,7 @@ def load_daily(ticker: str) -> pd.Series | None:
     df = pd.read_parquet(files[-1]); df.columns = [c.lower() for c in df.columns]
     s = pd.Series(df["close"].to_numpy(float), index=to_moscow_time(df["begin"]))
     s = s[~s.index.duplicated(keep="last")].sort_index().resample("1D").last().dropna()
-    return s[s.index.dayofweek < 5]
+    return _drop_weekend_sessions(s)
 
 
 FEE_RT = 0.0005 * 2  # round-trip fee (open+close, one-way 5bps)
