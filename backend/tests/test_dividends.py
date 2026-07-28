@@ -114,8 +114,14 @@ def test_promote_idempotent(tmp_path):
     prov = tmp_path / "prov.json"
     ev = pd.DataFrame({"ticker": ["SNGS"], "date": ["2026-07-16"], "value": [4.73]})
     dividends.promote_events(ev, csv_path=csv, run_date="2026-09-01", provenance_path=prov)
+    csv_after, prov_after = csv.read_text(), prov.read_text()
+
     rep2 = dividends.promote_events(ev, csv_path=csv, run_date="2026-09-02", provenance_path=prov)
     assert rep2["rows_added_this_run"] == 0             # re-promoting the same event is a no-op
+    # ...and a TRUE no-op: neither file is rewritten. A bumped `generated_at` made an otherwise
+    # byte-identical refresh show up as a repo change.
+    assert csv.read_text() == csv_after
+    assert prov.read_text() == prov_after
 
 
 def test_promote_filters_nonpositive_and_normalizes_date(tmp_path):
