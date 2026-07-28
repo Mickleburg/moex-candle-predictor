@@ -181,8 +181,13 @@ def main() -> int:
             summary["errors"].append(f"extract: {detail}")
 
     # ---- 2. fetch bodies (network) ----
-    st, detail = run_stage("bodies", [py, str(SCRIPTS / "edisc_fetch_bodies.py")],
-                           timeout=900, retries=args.retries)
+    bodies_cmd = [py, str(SCRIPTS / "edisc_fetch_bodies.py")]
+    if args.headed:
+        bodies_cmd.append("--headed")
+    st, detail = run_stage("bodies", bodies_cmd,
+                           timeout=3600 if args.headed else 900,
+                           retries=1 if args.headed else args.retries,
+                           stream=args.headed)
     summary["stages"]["bodies"] = st
     if st == "failed":
         summary["degraded"] = True

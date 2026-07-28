@@ -242,8 +242,11 @@ def main() -> int:
                     help="pull window start YYYY-MM-DD (default 2020-01-01; use a recent date for "
                          "a light incremental EOD update)")
     ap.add_argument("--merge", action="store_true",
-                    help="merge the pulled window into the existing parquet (dedup by pseudo_guid, "
-                         "keep history) instead of overwriting — for incremental refresh")
+                    help="(default since 2026-07-28; kept for compatibility) merge into the existing "
+                         "parquet, dedup by pseudo_guid")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="DESTRUCTIVE: replace the ticker's parquet instead of merging, dropping "
+                         "every disclosure outside --since. Only for a deliberate full rebuild.")
     ap.add_argument("--headed", action="store_true",
                     help="open a real browser window so a human can clear the anti-bot challenge; "
                          "the session is kept in the persistent profile for later unattended runs")
@@ -291,13 +294,22 @@ def main() -> int:
             rows = extract_ticker(pg, tk, cid, query, start_date, end_date)
             df = pd.DataFrame(rows)
             out = OUT_DIR / f"{tk}.parquet"
-            if args.merge and out.exists():
+            # MERGE IS THE DEFAULT. It used to be opt-in, and a smoke-test run without --merge
+            # silently overwrote SBER.parquet with a 4-week window, destroying 6 years of titles and
+            # with them the board recommendation the feed builder needs — SBER dropped out of the
+            # feed entirely. An incremental scraper must never lose history by omission.
+            if out.exists() and not args.overwrite:
                 prior = pd.read_parquet(out)
                 before = len(prior)
                 df = pd.concat([prior, df], ignore_index=True)
                 df = df.drop_duplicates(subset=["pseudo_guid"], keep="last")
                 added = len(df) - before
             else:
+                if out.exists():
+                    prior_n = len(pd.read_parquet(out, columns=["pseudo_guid"]))
+                    if prior_n > len(df):
+                        print(f"  !! --overwrite drops {prior_n - len(df)} stored rows for {tk} "
+                              f"({prior_n} -> {len(df)})", flush=True)
                 added = len(df)
             if not df.empty:
                 df = df.sort_values("pub_date").reset_index(drop=True)
