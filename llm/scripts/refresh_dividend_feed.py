@@ -188,7 +188,26 @@ def main() -> int:
         log("ABORT: verify failed; live feed left untouched")
         return 1
 
-    # ---- 5. atomic swap, with a backup so a failing sverka can roll back to last-good ----
+    # ---- 5. promote REALIZED events into permanent history — BEFORE the swap ----
+    # The ordering is load-bearing. The SWAP is what drops aged-out events from the feed (rolling
+    # window record >= today-30d). If we swapped first and the promotion then failed, those events
+    # would be gone from the feed AND absent from history — silently regressing the H9 gate's forward
+    # n, which is the exact loss this promotion exists to prevent. Promoting first means a failure
+    # leaves the last-good feed in place and the run is simply retried. Promoted rows are realized
+    # facts (record date already passed), so they remain correct even if the sverka later rolls the
+    # new feed back.
+    try:
+        summary["promoted"] = promote_realized(passed, pd.Timestamp(args.as_of))
+    except Exception as exc:  # noqa: BLE001
+        summary["promoted"] = {"error": f"{type(exc).__name__}: {exc}"}
+        summary["errors"].append(f"promote: {exc}")
+        TMP_CSV.unlink(missing_ok=True)
+        print(json.dumps(summary, ensure_ascii=False))
+        log("ABORT: promotion of realized events failed; live feed left untouched "
+            "(swapping now would drop them from the feed without landing them in history)")
+        return 1
+
+    # ---- 6. atomic swap, with a backup so a failing sverka can roll back to last-good ----
     bak = FEED_CSV.with_suffix(".bak.csv")
     had_live = FEED_CSV.exists()
     changed = not had_live or FEED_CSV.read_text(encoding="utf-8") != TMP_CSV.read_text(encoding="utf-8")
@@ -197,7 +216,7 @@ def main() -> int:
     os.replace(TMP_CSV, FEED_CSV)        # publish new feed to the live path
     summary["stages"]["swap"] = "ok"
 
-    # ---- 6. ML anchor sverka on the now-live feed (best-effort; clear FAIL -> roll back) ----
+    # ---- 7. ML anchor sverka on the now-live feed (best-effort; clear FAIL -> roll back) ----
     if args.no_anchor_sverka:
         summary["stages"]["anchor_sverka"] = "skipped"
     else:
@@ -214,17 +233,6 @@ def main() -> int:
     bak.unlink(missing_ok=True)
     summary["feed"]["changed"] = changed
     summary["ok"] = True
-
-    # ---- 7. promote REALIZED events into permanent history (survive the rolling forward window) ----
-    # Best-effort and idempotent: the forward feed is already swapped and trustworthy, so a promotion
-    # hiccup degrades (reported) but never fails the run or rolls the feed back.
-    try:
-        summary["promoted"] = promote_realized(passed, pd.Timestamp(args.as_of))
-    except Exception as exc:  # noqa: BLE001 - promotion must never break an already-trustworthy feed
-        summary["promoted"] = {"error": f"{type(exc).__name__}: {exc}"}
-        summary["degraded"] = True
-        summary["errors"].append(f"promote: {exc}")
-        log(f"promote realized events failed (non-fatal): {exc}")
 
     print(json.dumps(summary, ensure_ascii=False))
     prom = summary.get("promoted", {})
