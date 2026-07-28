@@ -3,7 +3,7 @@ H9 realized-P&L SHADOW GATE — does the forward realize the in-sample run-up?
   price panel through 2026-07-27; calendar = history + LLM forward feed
 ================================================================================
 
-[methodology identity] vs research runup_capture: closed mean +0.00913 == ref +0.00913  -> OK
+[methodology identity] vs research runup_capture: closed mean +0.00940 == ref +0.00940  -> OK
 
 BENCHMARK (in-sample <2025) — what the forward must match:
   IN-SAMPLE         : n=117  net +0.0123  %pos 0.65  median +0.0143  | high-yield net +0.0157 vs low +0.0089
@@ -35,8 +35,8 @@ PRISTINE forward (record OUTSIDE the burned-split backfill window — DRIVES is_
     VTBR  2026-07-20  yld 17.37%  net -0.1043
 
 CORROBORATION (backfill 2025-08..2026-06 of the burned split — does NOT move the gate):
-  CORROBORATION     : no closed events
-  (no corroboration events yet — awaiting backend backfill of 2025-08..2026-06 records)
+  CORROBORATION     : n=  3  net +0.0206  %pos 0.67  median +0.0235  | high-yield net +0.0196 vs low +0.0225
+  sign vs pristine: corroboration net +0.0206 DIVERGES from (RED FLAG) pristine net -0.0177
 
 PLACEBO band (random non-dividend dates, in-sample) — pristine should sit in its right tail:
   placebo mean +0.0011 [2.5-97.5%: -0.0075..+0.0103]; forward gross -0.0167 at 0% of placebo  -> NOT yet separated (thin)
@@ -46,6 +46,6 @@ PENDING pipeline (0 upcoming events, awaiting realization):
 Live monitor shadow_log: 2 runs, 0 with holdings (accrues real-time as July-2026 events trade).
 
 ================================================================================
-benchmark vs gate: IS net +0.0123 (dose-resp OK, n=117) | PRISTINE net -0.0177 (dose-resp INVERTED, n=19) | corroboration n=0 net +0.0000
+benchmark vs gate: IS net +0.0123 (dose-resp OK, n=117) | PRISTINE net -0.0177 (dose-resp INVERTED, n=19) | corroboration n=3 net +0.0206
 VERDICT: NOT MET: 19 PRISTINE forward events, net -0.0177, %pos 0.53 — forward does NOT confirm the edge yet. is_production stays false; do not deploy live.
   (is_production=false until this gate is MET on accrued PRISTINE forward events AND team sign-off; corroboration backfill is robustness only.)
