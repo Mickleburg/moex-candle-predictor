@@ -211,6 +211,13 @@ def promote_events(events: pd.DataFrame, source: str = "e-disclosure",
     new_rows = ev[[(t, d) not in have for t, d in zip(ev["ticker"], ev["date"])]].copy()
     new_rows["source"] = source
 
+    if new_rows.empty and not discrepancies:
+        # True no-op: touch NOTHING. Re-running a refresh must not rewrite dividends.csv nor bump the
+        # provenance sidecar's `generated_at` — that churn made an otherwise byte-identical refresh
+        # show up as a repo change and quietly broke the documented idempotency contract.
+        return {"rows_added_this_run": 0, "source": source, "total_events": int(len(existing)),
+                "value_discrepancies_reported_not_applied": [], "note": "no new events (no-op)"}
+
     merged = pd.concat([existing, new_rows], ignore_index=True)
     merged = merged.drop_duplicates(subset=["ticker", "date"], keep="first")   # existing wins
     merged = merged.sort_values(["ticker", "date"]).reset_index(drop=True)
