@@ -42,6 +42,7 @@ REPO_ROOT = ML_DIR.parent
 sys.path.insert(0, str(ML_DIR))
 
 from src.data.load import to_moscow_time  # noqa: E402
+from src.features.cross_sectional import _drop_weekend_sessions  # noqa: E402
 
 DATA_RAW = REPO_ROOT / "data" / "raw"
 UNIVERSE = ["SBER", "GAZP", "LKOH", "GMKN", "ROSN", "NVTK",
@@ -54,7 +55,16 @@ ScoreFn = Callable[[pd.DataFrame, int], np.ndarray]
 
 
 def load_daily_panel(universe: list[str] = UNIVERSE) -> pd.DataFrame:
-    """Daily last-close matrix (time x ticker) on the timestamp intersection."""
+    """Daily last-close matrix (time x ticker) on the timestamp intersection, WEEKEND SESSIONS
+    EXCLUDED so a row == a trading day.
+
+    MOEX weekend sessions are traded by every universe name, so `dropna(how="any")` does NOT filter
+    them (104 such rows survive: 54 in 2025, 46 in 2026). Consumers that count offsets as row
+    POSITIONS — the H9 sleeve sim, robustness and cost model — would then hold for fewer real trading
+    days than the rule specifies, and indices (IMOEX/sector) have no weekend bars so they get ffilled
+    to a zero return against a moving stock. Same rule as the H9 gate's `load_daily`; see
+    `ml/docs/research/h9_weekend_bar_drift_prereg_2026-07-28.md`.
+    """
     series = {}
     for tkr in universe:
         files = sorted(DATA_RAW.glob(f"{tkr}_1H_*.parquet"))
@@ -67,7 +77,7 @@ def load_daily_panel(universe: list[str] = UNIVERSE) -> pd.DataFrame:
         s = s[~s.index.duplicated(keep="last")].sort_index()
         series[tkr] = s
     mat = pd.DataFrame(series).resample("1D").last().dropna(how="any")
-    return mat
+    return _drop_weekend_sessions(mat)
 
 
 def _spearman(a: np.ndarray, b: np.ndarray) -> float:

@@ -165,6 +165,71 @@ def _write_provenance(merged, new_rows, discrepancies, tickers, run_date, src_ta
     return report
 
 
+def promote_events(events: pd.DataFrame, source: str = "e-disclosure",
+                   csv_path: Path = CSV_PATH, run_date: Optional[str] = None,
+                   provenance_path: Path = PROVENANCE_PATH) -> dict:
+    """Upsert already-REALIZED dividend events from a NON-ISS source (the e-disclosure forward feed as
+    its events realize) into ``dividends.csv`` -- the same merge discipline as :func:`backfill`.
+
+    Why this exists: the forward feed is the ONLY source of a dividend's record date until MOEX ISS
+    publishes it ~11 months later, and the feed builder keeps only a rolling forward window. Once an
+    event's record date ages out of that window it is dropped from the feed and -- since ISS still
+    lacks it -- disappears from ``load_dividend_calendar`` entirely, silently regressing the H9 gate's
+    forward ``n``. Promoting realized events into the permanent history is what stops that loss.
+
+    Discipline (identical to backfill): existing rows WIN (validated history / an earlier promotion is
+    never overwritten); every new row carries ``source``; a value clash on an existing (ticker, date)
+    is REPORTED, not applied. Idempotent -- re-promoting the same event adds nothing.
+
+    ``events`` needs columns [ticker, date, value] (date = record date); ``ccy`` optional (RUB).
+    """
+    run_date = run_date or datetime.now(timezone.utc).date().isoformat()
+    if events is None or len(events) == 0:
+        return {"rows_added_this_run": 0, "source": source, "note": "no events to promote"}
+
+    ev = events.copy()
+    ev["date"] = pd.to_datetime(ev["date"]).dt.strftime("%Y-%m-%d")
+    ev["value"] = pd.to_numeric(ev["value"], errors="coerce")
+    if "ccy" not in ev.columns:
+        ev["ccy"] = "RUB"
+    ev = ev[["ticker", "date", "value", "ccy"]].dropna(subset=["ticker", "date", "value"])
+    ev = ev[ev["value"] > 0].drop_duplicates(subset=["ticker", "date"], keep="last")
+
+    existing = _load_existing(csv_path)
+    have = set(zip(existing["ticker"], existing["date"])) if not existing.empty else set()
+
+    # value clash on an already-known (ticker, date): report, never overwrite (history stays authoritative)
+    discrepancies = []
+    if not existing.empty:
+        ex_val = {(t, d): v for t, d, v in
+                  zip(existing["ticker"], existing["date"], existing["value"])}
+        for t, d, v in zip(ev["ticker"], ev["date"], ev["value"]):
+            ov = ex_val.get((t, d))
+            if ov is not None and abs(float(ov) - float(v)) > 1e-6:
+                discrepancies.append({"ticker": t, "date": d, "stored": ov, "incoming": v})
+
+    new_rows = ev[[(t, d) not in have for t, d in zip(ev["ticker"], ev["date"])]].copy()
+    new_rows["source"] = source
+
+    if new_rows.empty and not discrepancies:
+        # True no-op: touch NOTHING. Re-running a refresh must not rewrite dividends.csv nor bump the
+        # provenance sidecar's `generated_at` — that churn made an otherwise byte-identical refresh
+        # show up as a repo change and quietly broke the documented idempotency contract.
+        return {"rows_added_this_run": 0, "source": source, "total_events": int(len(existing)),
+                "value_discrepancies_reported_not_applied": [], "note": "no new events (no-op)"}
+
+    merged = pd.concat([existing, new_rows], ignore_index=True)
+    merged = merged.drop_duplicates(subset=["ticker", "date"], keep="first")   # existing wins
+    merged = merged.sort_values(["ticker", "date"]).reset_index(drop=True)
+    merged.to_csv(csv_path, index=False)
+
+    report = _write_provenance(merged, new_rows, discrepancies,
+                               sorted(ev["ticker"].unique().tolist()), run_date, source,
+                               provenance_path)
+    report["source"] = source
+    return report
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

@@ -20,6 +20,13 @@ data/agent/
 # environment-specific; admins/seed live in env). Regenerable via /allow.
 data/bot/
 
+# forward-shadow snapshots — READ-ONLY evidence exported off the VDS (state + shadow track + feed).
+# data/forward_snapshots/ = landed imports; incoming_snapshot/ = local import scratch. Per-run and
+# provenance-checked via scripts/{export,import}_forward_snapshot.py — never tracked.
+data/forward_snapshots/
+data/forward_exports/
+incoming_snapshot*/
+
 # local env / secrets
 .env
 
@@ -35,6 +42,9 @@ data/news/.llm_weekly_cache.json
 # (regenerable; the runtime consumes the distilled dividend_calendar_upcoming.csv +
 # dividend_announcements.csv below, NOT these raw bodies). First VDS refresh re-fetches them.
 data/news/edisclosure_bodies/
+# persistent Chromium profile for the e-disclosure scraper — holds the anti-bot session cookie a
+# human cleared by hand (`edisc_extract.py --headed`). Machine-local credentials-ish state: never commit.
+data/news/.edisc_profile/
 # but DO track the curated dividend-announcement certification table (small, not regenerable
 # without network; the ML block joins it for the H9 run-up no-lookahead test)
 !data/news/dividend_announcements.csv

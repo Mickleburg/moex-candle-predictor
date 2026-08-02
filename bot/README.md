@@ -61,6 +61,14 @@ The agent's `agent/src/notifier.py` only **pushes** (`sendMessage`). This bot is
 getUpdates consumer per token — **the bot is that consumer; the agent only sends, so there is no
 conflict.** Never start a second poller on the same token.
 
+**Poller liveness (heartbeat + watchdog).** A `getUpdates` await can wedge silently on a half-open
+socket through the proxy — event loop alive, logs stop, container stays Up. Defences (`bot/src/heartbeat.py`):
+a heartbeat file (`data/bot/heartbeat`) is stamped on every successful poll round-trip; the container
+healthcheck reads its freshness; and an in-process watchdog force-exits a wedged poller so
+`restart: unless-stopped` recreates it (plain Docker restarts on exit, not on an unhealthy status).
+A bounded `read_timeout` on the getUpdates transport is the first line — it lets PTB self-heal before
+the watchdog ever fires.
+
 ## Run (local)
 
 ```powershell
