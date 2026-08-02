@@ -78,3 +78,67 @@ def test_idempotent_second_run_adds_nothing(tmp_path):
     dividends.backfill(("SBERP",), csv, fetch_fn=fetch, run_date="2026-06-26", provenance_path=prov)
     rep2 = dividends.backfill(("SBERP",), csv, fetch_fn=fetch, run_date="2026-06-27", provenance_path=prov)
     assert rep2["rows_added_this_run"] == 0
+
+
+# --- promote_events: e-disclosure realized events -> permanent history (stops the rolling-window loss)
+
+
+def test_promote_adds_realized_events_tagged_source(tmp_path):
+    csv = _existing_csv(tmp_path)
+    prov = tmp_path / "prov.json"
+    ev = pd.DataFrame({"ticker": ["SNGS", "MOEX"], "date": ["2026-07-16", "2026-07-09"],
+                       "value": [4.73, 26.11]})
+    rep = dividends.promote_events(ev, source="e-disclosure", csv_path=csv,
+                                   run_date="2026-09-01", provenance_path=prov)
+    out = pd.read_csv(csv)
+    assert rep["rows_added_this_run"] == 2
+    assert set(out[out["ticker"].isin(["SNGS", "MOEX"])]["source"]) == {"e-disclosure"}
+    assert set(out[out["ticker"] == "SBER"]["source"]) == {"iss_history"}   # history untouched
+
+
+def test_promote_existing_value_wins_discrepancy_reported(tmp_path):
+    csv = _existing_csv(tmp_path)
+    prov = tmp_path / "prov.json"
+    # e-disclosure parses a DIFFERENT value for an event ISS already has -> keep stored, report clash
+    ev = pd.DataFrame({"ticker": ["SBER"], "date": ["2025-07-18"], "value": [99.99]})
+    rep = dividends.promote_events(ev, csv_path=csv, run_date="2026-09-01", provenance_path=prov)
+    out = pd.read_csv(csv)
+    kept = out[(out["ticker"] == "SBER") & (out["date"] == "2025-07-18")]["value"].iloc[0]
+    assert kept == 34.84 and rep["rows_added_this_run"] == 0
+    disc = rep["value_discrepancies_reported_not_applied"]
+    assert len(disc) == 1 and disc[0]["stored"] == 34.84 and disc[0]["incoming"] == 99.99
+
+
+def test_promote_idempotent(tmp_path):
+    csv = _existing_csv(tmp_path)
+    prov = tmp_path / "prov.json"
+    ev = pd.DataFrame({"ticker": ["SNGS"], "date": ["2026-07-16"], "value": [4.73]})
+    dividends.promote_events(ev, csv_path=csv, run_date="2026-09-01", provenance_path=prov)
+    csv_after, prov_after = csv.read_text(), prov.read_text()
+
+    rep2 = dividends.promote_events(ev, csv_path=csv, run_date="2026-09-02", provenance_path=prov)
+    assert rep2["rows_added_this_run"] == 0             # re-promoting the same event is a no-op
+    # ...and a TRUE no-op: neither file is rewritten. A bumped `generated_at` made an otherwise
+    # byte-identical refresh show up as a repo change.
+    assert csv.read_text() == csv_after
+    assert prov.read_text() == prov_after
+
+
+def test_promote_filters_nonpositive_and_normalizes_date(tmp_path):
+    csv = _existing_csv(tmp_path)
+    prov = tmp_path / "prov.json"
+    ev = pd.DataFrame({"ticker": ["AAA", "BBB"],
+                       "date": [pd.Timestamp("2026-07-16"), "2026-07-17"],
+                       "value": [0.0, 5.0]})            # AAA value 0 -> dropped (ML loader would too)
+    rep = dividends.promote_events(ev, csv_path=csv, run_date="2026-09-01", provenance_path=prov)
+    out = pd.read_csv(csv)
+    assert rep["rows_added_this_run"] == 1 and "AAA" not in set(out["ticker"])
+    assert out[out["ticker"] == "BBB"]["date"].iloc[0] == "2026-07-17"   # Timestamp -> YYYY-MM-DD
+
+
+def test_promote_empty_is_noop(tmp_path):
+    csv = _existing_csv(tmp_path)
+    before = csv.read_text()
+    rep = dividends.promote_events(pd.DataFrame(columns=["ticker", "date", "value"]),
+                                   csv_path=csv, provenance_path=tmp_path / "prov.json")
+    assert rep["rows_added_this_run"] == 0 and csv.read_text() == before   # file untouched

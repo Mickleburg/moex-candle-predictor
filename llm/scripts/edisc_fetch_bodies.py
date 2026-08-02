@@ -89,6 +89,12 @@ def main() -> int:
     ap.add_argument("--tickers", nargs="*", default=UNIVERSE)
     ap.add_argument("--since", default=FETCH_FLOOR)
     ap.add_argument("--refetch", action="store_true", help="re-fetch even if cached")
+    ap.add_argument("--headed", action="store_true",
+                    help="visible browser so a human can clear the anti-bot challenge (required "
+                         "since 2026-07-28 — headless is challenged even with a stored session)")
+    ap.add_argument("--profile", default=None,
+                    help="persistent browser profile dir (defaults to the extractor's, so a "
+                         "challenge cleared there is reused here)")
     args = ap.parse_args()
 
     BODY_DIR.mkdir(parents=True, exist_ok=True)
@@ -99,11 +105,21 @@ def main() -> int:
     if todo.empty:
         return 0
 
+    # Share the extractor's challenge handling and profile: a check cleared in either script is
+    # reused by the other, so one manual solve covers a whole refresh.
+    from edisc_extract import PROFILE_DIR, open_search
+
+    profile = Path(args.profile) if args.profile else PROFILE_DIR
+    profile.mkdir(parents=True, exist_ok=True)
+
     with sync_playwright() as p:
-        b = p.chromium.launch(headless=True)
-        pg = b.new_context(locale="ru-RU", user_agent=UA).new_page()
-        pg.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
-        pg.wait_for_selector("#sEventSearchForm", timeout=45000)
+        ctx = p.chromium.launch_persistent_context(
+            str(profile), headless=not args.headed, locale="ru-RU", user_agent=UA,
+            viewport={"width": 1400, "height": 900})
+        pg = ctx.pages[0] if ctx.pages else ctx.new_page()
+        if not open_search(pg, args.headed, first=True):
+            ctx.close()
+            return 1                      # challenged: reported by open_search, nothing fetched
         pg.wait_for_timeout(1000)
 
         ok = fail = 0
@@ -121,10 +137,12 @@ def main() -> int:
                 fail += 1
                 print(f"  [fail] {r['ticker']} {r['pub'].date()} {r['guid'][:12]}: {exc}")
             time.sleep(PAUSE_S)
-            if i % 25 == 0:  # refresh WAF cookie on long runs
-                pg.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
+            if i % 25 == 0:  # refresh WAF cookie on long runs (re-solvable if it challenges)
+                if not open_search(pg, args.headed, force=True):
+                    print("  !! challenged mid-run; stopping (fetched bodies are cached)", flush=True)
+                    break
                 pg.wait_for_timeout(800)
-        b.close()
+        ctx.close()
         print(f"done: ok={ok} fail={fail} | cache dir {BODY_DIR}")
     return 0
 

@@ -42,6 +42,18 @@ def _to_moscow(series: pd.Series) -> pd.Series:
     return s.dt.tz_localize("Europe/Moscow")
 
 
+def _drop_weekend_sessions(s: pd.Series) -> pd.Series:
+    """Drop MOEX weekend-session bars so an index position == a trading day.
+
+    Calendar sleeves (H9) count entry/exit offsets as index POSITIONS, and indices (IMOEX, sector)
+    have no weekend bars — keeping stock-only Sat/Sun rows both shortens those offsets in real
+    trading-day terms and pairs a stock return against a ffilled (zero-return) market. The weekend
+    move is not lost: it lands in the Friday->Monday return. Same rule as the H9 gate's `load_daily`
+    (`ml/scripts/h9_dividend_research.py`); see `ml/docs/research/h9_weekend_bar_drift_prereg_2026-07-28.md`.
+    """
+    return s[s.index.dayofweek < 5]
+
+
 def _load_close(ticker: str, timeframe: str = "1D") -> pd.Series | None:
     """Load a single instrument's close series at `timeframe`; fallback to resampled 1H."""
     files = sorted(DATA_RAW.glob(f"{ticker}_{timeframe}_*.parquet"))
@@ -52,11 +64,11 @@ def _load_close(ticker: str, timeframe: str = "1D") -> pd.Series | None:
         df = pd.read_parquet(files[-1]); df.columns = [c.lower() for c in df.columns]
         s = pd.Series(df["close"].to_numpy(float), index=_to_moscow(df["begin"]))
         s = s[~s.index.duplicated(keep="last")].sort_index().resample("1D").last()
-        return s
+        return _drop_weekend_sessions(s)
     df = pd.read_parquet(files[-1]); df.columns = [c.lower() for c in df.columns]
     s = pd.Series(df["close"].to_numpy(float), index=_to_moscow(df["begin"]))
     s = s[~s.index.duplicated(keep="last")].sort_index()
-    return s.resample("1D").last()
+    return _drop_weekend_sessions(s.resample("1D").last())
 
 
 def load_panels(universe: list[str] = UNIVERSE, timeframe: str = "1D"):

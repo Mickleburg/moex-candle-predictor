@@ -34,6 +34,7 @@ REPO_ROOT = ML_DIR.parent
 sys.path.insert(0, str(ML_DIR))
 
 from src.data.load import to_moscow_time  # noqa: E402
+from src.features.cross_sectional import _drop_weekend_sessions  # noqa: E402
 from src.service.dividend_universe import (  # noqa: E402
     active_universe, resolve_universe, FORWARD_START,
 )
@@ -46,12 +47,28 @@ WIN = 15  # trading-day window each side of the event anchor
 
 
 def load_daily(ticker: str) -> pd.Series | None:
+    """Daily close series with WEEKEND SESSIONS EXCLUDED, so an index position == a trading day.
+
+    MOEX runs weekend sessions since 2025 (PLZL: 61 Sat/Sun bars in 2025, 46 in 2026, vs 1 in 2021),
+    but H9's entry/exit offsets are index POSITIONS. Keeping weekend bars silently turns the deployed
+    "-12 trading days" into -12 BARS = only ~8 real trading days on 2026 events, while the in-sample
+    benchmark (<2025, no weekend sessions) is a true 12 TD — so the gate would compare the forward
+    against a DIFFERENT rule than the one it validated. Dropping them also keeps stocks aligned with
+    IMOEX, which has no weekend bars: a stock-minus-market spread on a day the market does not trade
+    is undefined, and the NaN it produced also swallowed the following Monday (pct_change off a NaN),
+    silently deleting real trading days from the market adjustment.
+
+    No information is lost: a weekend-session move is still captured by the Friday->Monday return
+    (Monday's close already reflects it) — exactly the pre-2025 behaviour. See the pre-registration
+    `ml/docs/research/h9_weekend_bar_drift_prereg_2026-07-28.md`.
+    """
     files = sorted(DATA_RAW.glob(f"{ticker}_1H_*.parquet"))
     if not files:
         return None
     df = pd.read_parquet(files[-1]); df.columns = [c.lower() for c in df.columns]
     s = pd.Series(df["close"].to_numpy(float), index=to_moscow_time(df["begin"]))
-    return s[~s.index.duplicated(keep="last")].sort_index().resample("1D").last().dropna()
+    s = s[~s.index.duplicated(keep="last")].sort_index().resample("1D").last().dropna()
+    return _drop_weekend_sessions(s)
 
 
 FEE_RT = 0.0005 * 2  # round-trip fee (open+close, one-way 5bps)

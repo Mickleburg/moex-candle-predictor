@@ -12,16 +12,28 @@ Mechanism (validated 2026-06-15, see llm/docs/NEWS_SOURCE_EDISCLOSURE.md):
 No-lookahead: we keep `pubDate` (publication time). `eventDate` is stored for
 reference only and MUST NOT be used as the as-of time downstream.
 
+Anti-bot posture (2026-07-28): the WAF started answering with an INTERACTIVE challenge ("разверните
+картинку горизонтально") whose own text blames browsing/clicking speed. Two honest responses, both
+implemented here — no fingerprint spoofing, no challenge solving:
+  1. PACE. Randomised delays between result pages and between tickers (was 0.3s and none). This runs
+     by hand a couple of times a month; there is no reason to hammer the site.
+  2. HUMAN IN THE LOOP. `--headed` opens a real window so a person clears the challenge themselves,
+     and a PERSISTENT PROFILE keeps that session so later unattended runs reuse it. If a headless run
+     is challenged it stops and says to re-run with --headed, rather than pretending it pulled data.
+
 Run (smoke, one ticker):
   & "ml\.venv-win\Scripts\python.exe" llm\scripts\edisc_extract.py --tickers SBER
 Run (full universe):
   & "ml\.venv-win\Scripts\python.exe" llm\scripts\edisc_extract.py
+First run / after a block — clear the challenge by hand (a window opens):
+  & "ml\.venv-win\Scripts\python.exe" llm\scripts\edisc_extract.py --headed --tickers SBER
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
+import random
 import sys
 import time
 from pathlib import Path
@@ -33,6 +45,15 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 SEARCH_URL = "https://www.e-disclosure.ru/poisk-po-soobshheniyam"
 OUT_DIR = Path(__file__).resolve().parents[2] / "data" / "news" / "edisclosure"
+
+# Persistent browser profile: cookies survive between runs, so a challenge cleared ONCE by a human
+# (--headed) lets later unattended runs reuse that session instead of tripping the check every time.
+PROFILE_DIR = Path(__file__).resolve().parents[2] / "data" / "news" / ".edisc_profile"
+
+FORM_SEL = "#sEventSearchForm"       # only present on the real search page
+CHALLENGE_MARK = "xpvnsulc"          # ServicePipe interstitial path
+# How long to let a human solve the challenge in --headed mode.
+CHALLENGE_WAIT_MS = 5 * 60 * 1000
 
 # issuer_key -> (companyID to keep, name substring to query). Pin by companyID, not text. One parquet
 # per issuer; prefs (SBERP/SNGSP/TATNP) share their ordinary issuer's pull (same companyID).
@@ -64,7 +85,20 @@ START_DATE = dt.date(2020, 1, 1)          # candle history starts 2020-01-03
 PAGE_SIZE = 100
 MAX_PAGES = 20            # 20*100 = 2000 > server cap (~1200); used to drain a window
 RESULT_CAP = 1200         # server truncates a query at ~1200 newest rows -> must subdivide
-PAUSE_S = 0.30            # polite delay between requests
+
+# --- pacing -------------------------------------------------------------------------------------
+# The WAF blocked this scraper on 2026-07-28 with an interactive challenge whose own text names the
+# trigger: "просматриваете страницы и кликаете со скоростью". The old pacing was 0.30s between API
+# pages and NO gap between tickers — 19 page loads back to back. These delays are the fix: be a slow,
+# obviously-non-abusive client. Randomised so the pattern isn't a metronome. Slower is fine — this
+# runs at most a couple of times a month, by hand.
+PAUSE_S = (1.0, 2.2)          # between API result pages
+TICKER_PAUSE_S = (6.0, 14.0)  # between tickers
+RELOAD_EVERY = 6              # force a fresh page load (cookie refresh) every N tickers
+
+
+def _nap(span: tuple[float, float]) -> None:
+    time.sleep(random.uniform(*span))
 
 
 def _fmt(d: dt.date) -> str:
@@ -103,11 +137,63 @@ def _drain_window(pg, query: str, d0: dt.date, d1: dt.date) -> tuple[list[dict],
     raw: list[dict] = []
     for page in range(1, MAX_PAGES + 1):
         items = _fetch_page(pg, query, d0, d1, page)
-        time.sleep(PAUSE_S)
+        _nap(PAUSE_S)
         raw.extend(items)
         if len(items) < PAGE_SIZE:
             break
     return raw, len(raw) >= RESULT_CAP
+
+
+def open_search(pg, headed: bool, first: bool = False, force: bool = False) -> bool:
+    """Ensure the search page is loaded, clearing the anti-bot challenge if one is shown.
+    True = form is ready.
+
+    If the form is already on screen we do NOT reload: every page load is another chance to be
+    challenged (and another request). The result pages are fetched in-page via the same session, so
+    one good load serves many tickers; `force` re-loads periodically so a long run can't silently
+    outlive its cookie.
+
+    The WAF may answer with the ServicePipe interstitial instead of the page. It is an INTERACTIVE
+    check ("разверните картинку горизонтально") that never resolves on its own, so:
+      * headed  -> a human solves it once; we simply wait for the form to appear, and the persistent
+                   profile keeps that cookie for subsequent (even headless) runs.
+      * headless-> we do NOT try to defeat the check. We report it and tell the operator to re-run
+                   with --headed, which is the supported way through.
+    """
+    if not force and not first:
+        try:
+            if pg.locator(FORM_SEL).count():
+                return True                      # session still good — no extra request needed
+        except Exception:
+            pass
+
+    pg.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
+    try:
+        pg.wait_for_selector(FORM_SEL, timeout=15000 if first else 25000)
+        return True
+    except Exception:
+        pass
+
+    challenged = CHALLENGE_MARK in pg.url or not pg.locator(FORM_SEL).count()
+    if not challenged:
+        return False
+    if not headed:
+        print("\n!! anti-bot challenge — the search form never appeared.\n"
+              f"   landed on: {pg.url[:120]}\n"
+              "   This is an INTERACTIVE check; it cannot clear itself and is not bypassed here.\n"
+              "   Re-run once with --headed and solve it by hand; the profile then keeps the\n"
+              f"   session ({PROFILE_DIR}) so later runs go through unattended.", flush=True)
+        return False
+
+    print("\n>> anti-bot challenge shown. Solve it in the open browser window "
+          f"(waiting up to {CHALLENGE_WAIT_MS // 60000} min)...", flush=True)
+    try:
+        pg.wait_for_selector(FORM_SEL, timeout=CHALLENGE_WAIT_MS)
+        print(">> challenge cleared — session stored in the profile.", flush=True)
+        return True
+    except Exception:
+        print("!! challenge not cleared in time.", flush=True)
+        return False
 
 
 def extract_ticker(pg, ticker: str, company_id: int, query: str,
@@ -156,8 +242,16 @@ def main() -> int:
                     help="pull window start YYYY-MM-DD (default 2020-01-01; use a recent date for "
                          "a light incremental EOD update)")
     ap.add_argument("--merge", action="store_true",
-                    help="merge the pulled window into the existing parquet (dedup by pseudo_guid, "
-                         "keep history) instead of overwriting — for incremental refresh")
+                    help="(default since 2026-07-28; kept for compatibility) merge into the existing "
+                         "parquet, dedup by pseudo_guid")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="DESTRUCTIVE: replace the ticker's parquet instead of merging, dropping "
+                         "every disclosure outside --since. Only for a deliberate full rebuild.")
+    ap.add_argument("--headed", action="store_true",
+                    help="open a real browser window so a human can clear the anti-bot challenge; "
+                         "the session is kept in the persistent profile for later unattended runs")
+    ap.add_argument("--profile", default=str(PROFILE_DIR),
+                    help=f"persistent browser profile dir (default {PROFILE_DIR})")
     args = ap.parse_args()
     start_date = dt.date.fromisoformat(args.since) if args.since else START_DATE
 
@@ -168,19 +262,31 @@ def main() -> int:
         print("pandas required:", exc)
         return 1
 
+    profile = Path(args.profile)
+    profile.mkdir(parents=True, exist_ok=True)
+
     with sync_playwright() as p:
-        b = p.chromium.launch(headless=True)
-        ctx = b.new_context(locale="ru-RU", user_agent=UA)
-        pg = ctx.new_page()
+        # Persistent context (not launch()+new_context()): the WAF cookie earned by a --headed run
+        # must outlive the process, otherwise every run starts as an unknown client and gets checked.
+        ctx = p.chromium.launch_persistent_context(
+            str(profile), headless=not args.headed, locale="ru-RU", user_agent=UA,
+            viewport={"width": 1400, "height": 900})
+        pg = ctx.pages[0] if ctx.pages else ctx.new_page()
         end_date = dt.date.today()  # never request a future dateFinish (returns empty)
 
-        for tk in args.tickers:
+        blocked = False
+        for i, tk in enumerate(args.tickers):
             if tk not in UNIVERSE:
                 print(f"skip unknown ticker {tk}")
                 continue
-            # refresh the WAF cookie per ticker so a long run can't silently expire mid-stream
-            pg.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
-            pg.wait_for_selector("#sEventSearchForm", timeout=45000)
+            if i:
+                _nap(TICKER_PAUSE_S)   # pace the run
+            # Reload only when needed (form gone) or every RELOAD_EVERY tickers, so the cookie stays
+            # fresh on a long run without paying a challenge risk on every single ticker.
+            if not open_search(pg, args.headed, first=(i == 0),
+                               force=(i > 0 and i % RELOAD_EVERY == 0)):
+                blocked = True
+                break
             pg.wait_for_timeout(1200)
 
             cid, query = UNIVERSE[tk]
@@ -188,19 +294,35 @@ def main() -> int:
             rows = extract_ticker(pg, tk, cid, query, start_date, end_date)
             df = pd.DataFrame(rows)
             out = OUT_DIR / f"{tk}.parquet"
-            if args.merge and out.exists():
+            # MERGE IS THE DEFAULT. It used to be opt-in, and a smoke-test run without --merge
+            # silently overwrote SBER.parquet with a 4-week window, destroying 6 years of titles and
+            # with them the board recommendation the feed builder needs — SBER dropped out of the
+            # feed entirely. An incremental scraper must never lose history by omission.
+            if out.exists() and not args.overwrite:
                 prior = pd.read_parquet(out)
                 before = len(prior)
                 df = pd.concat([prior, df], ignore_index=True)
                 df = df.drop_duplicates(subset=["pseudo_guid"], keep="last")
                 added = len(df) - before
             else:
+                if out.exists():
+                    prior_n = len(pd.read_parquet(out, columns=["pseudo_guid"]))
+                    if prior_n > len(df):
+                        print(f"  !! --overwrite drops {prior_n - len(df)} stored rows for {tk} "
+                              f"({prior_n} -> {len(df)})", flush=True)
                 added = len(df)
             if not df.empty:
                 df = df.sort_values("pub_date").reset_index(drop=True)
             df.to_parquet(out, index=False)
             print(f"--> wrote {out}  rows={len(df)} (+{added} new)", flush=True)
-        b.close()
+        ctx.close()
+
+    if blocked:
+        # Non-zero so the refresh orchestrator marks the run `degraded` and keeps the last-good feed,
+        # instead of silently reporting a successful pull that discovered nothing.
+        print("\nextract STOPPED at the anti-bot challenge — tickers already pulled were saved; "
+              "re-run with --headed to clear it.", flush=True)
+        return 1
     return 0
 
 

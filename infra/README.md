@@ -121,8 +121,43 @@ AGENT_BACKEND_MODE=live          # real MOEX ingest + integrity gate (needs data
 AGENT_SLEEVE_MODE=live           # real H9 sleeve via ml/scripts/predict_dividend_sleeve.py
 AGENT_COMBINER_MODE=live         # real risk_manager combiner + H4/H5 risk analytics
 # execution stays the paper sim (agent_config.json blocks.execution.mode=live, broker sim)
-AGENT_LLM_REFRESH_CMD=python llm/scripts/refresh_dividend_feed.py   # EOD step 2 feed refresh
+# AGENT_LLM_REFRESH_CMD=...   # LEAVE OFF — see "Dividend feed" below. The refresh needs a browser.
 ```
+
+### Dividend feed — refreshed OFF the VDS, delivered as a CSV (by design)
+
+The forward feed `data/news/dividend_calendar_upcoming.csv` is what lets the H9 sleeve enter ~12
+trading days before a record date. It is built by scraping e-disclosure, which sits behind a WAF that
+**403s every non-browser client** — so the refresh needs Playwright/chromium. That browser must NOT
+run here: on a 961 MB box, chromium next to the EOD cycle means OOM, i.e. missed cycles. MOEX ISS
+cannot substitute (its dividends endpoint has no announcement anchor and is ~11 months frozen —
+`llm/docs/ISS_DIVIDEND_SOURCE_RECON_2026-07-19.md`, NO-GO).
+
+Therefore **`AGENT_LLM_REFRESH_CMD` stays unset on the VDS permanently.** With it unset the
+orchestrator cleanly skips EOD step 2 (`feed_refresh: {configured:false}`) — no error, no alert. If it
+is ever set here it will fail every cycle with `ModuleNotFoundError: playwright` and (now that alerts
+deliver) spam a daily failure alert.
+
+Refresh procedure — run **before each accrual wave** (roughly monthly; the feed only changes when new
+dividends are announced), on the machine that has Playwright:
+
+```powershell
+# 1. LOCAL (Windows, Playwright installed, RU IP — the proven-working host):
+$env:PYTHONIOENCODING="utf-8"
+& "ml\.venv-win\Scripts\python.exe" llm\scripts\refresh_dividend_feed.py
+#    ship ONLY if the JSON summary says ok:true — the script runs no-lookahead verify + anchor
+#    sverka and refuses to swap an untrustworthy feed, so a shipped CSV is already validated.
+```
+```bash
+# 2. DELIVER (CSV is gitignored -> scp, not git), then fix ownership for the non-root container:
+sha256sum data/news/dividend_calendar_upcoming.csv          # note the hash locally
+scp data/news/dividend_calendar_upcoming.csv root@<vds>:/opt/moex-candle-predictor/data/news/
+# on the VDS:
+sha256sum /opt/moex-candle-predictor/data/news/dividend_calendar_upcoming.csv   # MUST match
+chown 10001:10001 /opt/moex-candle-predictor/data/news/dividend_calendar_upcoming.csv
+```
+
+The next EOD cycle picks the new feed up automatically (the sleeve reads the CSV each run).
 
 One-time data seed (otherwise the integrity gate HALTs — correct, but no signal accrues). Use
 `--with-futures` or the gate HALTs on `presence/BR_CONT` (Brent):
@@ -148,7 +183,10 @@ docker compose -f infra/docker-compose.yml run --rm --entrypoint python agent \
   dead-man's-switch to `TELEGRAM_CHAT_ID`. `stdout` (default) needs no secrets.
 - **Bot (pull):** read-only commands `/status /positions /pnl /prices /gate /shadowlog /cycle
   /integrity`; admin-only `/users /allow /deny` manage the read allowlist at runtime.
-- **Health:** compose healthchecks (`agent status`, bot import) + `restart: unless-stopped`.
+- **Health:** compose healthchecks — the agent runs `agent status`; the bot probes poller-liveness
+  by heartbeat freshness (`data/bot/heartbeat`, stamped on every `getUpdates` round-trip). An
+  in-process watchdog force-exits a wedged poller so `restart: unless-stopped` recreates it (plain
+  Docker restarts on container *exit*, not on an unhealthy status).
 - **Backups:** `infra/backup.sh` → daily systemd timer (Option B), or host cron under Docker:
   `0 20 * * * docker compose -f /opt/moex-candle-predictor/infra/docker-compose.yml exec -T agent bash infra/backup.sh`.
 - **Logs:** `data/agent/logs/agent.log` (rotating 10×5 MB) + `docker compose ... logs`.

@@ -1,50 +1,51 @@
 H9 realized-P&L SHADOW GATE — does the forward realize the in-sample run-up?
   deployed rule: enter -12 TD / exit -2 TD vs RECORD date, market-adjusted (stock - IMOEX), net round-trip fee 0.0010
-  price panel through 2026-06-26; calendar = history + LLM forward feed
+  price panel through 2026-07-27; calendar = history + LLM forward feed
 ================================================================================
 
-[methodology identity] vs research runup_capture: closed mean +0.01135 == ref +0.01135  -> OK
+[methodology identity] vs research runup_capture: closed mean +0.00940 == ref +0.00940  -> OK
 
 BENCHMARK (in-sample <2025) — what the forward must match:
-  IN-SAMPLE         : n=117  net +0.0124  %pos 0.65  median +0.0143  | high-yield net +0.0158 vs low +0.0089
+  IN-SAMPLE         : n=117  net +0.0123  %pos 0.65  median +0.0143  | high-yield net +0.0157 vs low +0.0089
 
 PRISTINE forward (record OUTSIDE the burned-split backfill window — DRIVES is_production):
-  PRISTINE          : n= 12  net -0.0093  %pos 0.50  median -0.0071  | high-yield net -0.0187 vs low +0.0001
+  PRISTINE          : n= 19  net -0.0177  %pos 0.53  median +0.0017  | high-yield net -0.0200 vs low -0.0151
   per-year (pristine):
-    2025: n=12  net -0.0093  %pos 0.50
+    2025: n=12  net -0.0043  %pos 0.42
+    2026: n= 7  net -0.0406  %pos 0.71
   pristine closed events (ticker / record / yield / net runup):
-    TATN  2025-01-08  yld 2.66%  net +0.0005
-    MGNT  2025-01-09  yld 11.58%  net -0.0388
-    ROSN  2025-01-10  yld 6.48%  net -0.0166
-    PLZL  2025-04-25  yld 3.93%  net -0.0364
-    NVTK  2025-04-28  yld 3.68%  net +0.0706
-    TATN  2025-06-02  yld 6.57%  net +0.0009
-    LKOH  2025-06-03  yld 8.36%  net +0.0219
-    MTSS  2025-07-07  yld 18.06%  net -0.0621
-    VTBR  2025-07-11  yld 35.14%  net -0.0514
-    SNGS  2025-07-17  yld 4.08%  net +0.0184
-    SBER  2025-07-18  yld 11.28%  net +0.0173
-    ROSN  2025-07-20  yld 3.51%  net -0.0357
+    TATN  2025-01-08  yld 2.66%  net +0.0116
+    MGNT  2025-01-09  yld 11.58%  net -0.0465
+    ROSN  2025-01-10  yld 6.48%  net -0.0031
+    PLZL  2025-04-25  yld 3.93%  net -0.0561
+    NVTK  2025-04-28  yld 3.68%  net +0.1010
+    TATN  2025-06-02  yld 6.57%  net -0.0024
+    LKOH  2025-06-03  yld 8.36%  net +0.0244
+    MTSS  2025-07-07  yld 18.06%  net -0.0168
+    VTBR  2025-07-11  yld 35.14%  net -0.0950
+    SNGS  2025-07-17  yld 4.08%  net +0.0302
+    SBER  2025-07-18  yld 11.28%  net +0.0186
+    ROSN  2025-07-20  yld 3.54%  net -0.0171
+    MTSS  2026-07-09  yld 19.26%  net +0.0007
+    ROSN  2026-07-09  yld 0.73%  net +0.0490
+    PLZL  2026-07-13  yld 2.43%  net -0.2897
+    TATN  2026-07-15  yld 2.49%  net +0.0102
+    SNGS  2026-07-16  yld 6.30%  net +0.0251
+    SBER  2026-07-20  yld 14.42%  net +0.0245
+    VTBR  2026-07-20  yld 17.37%  net -0.1043
 
 CORROBORATION (backfill 2025-08..2026-06 of the burned split — does NOT move the gate):
-  CORROBORATION     : no closed events
-  (no corroboration events yet — awaiting backend backfill of 2025-08..2026-06 records)
+  CORROBORATION     : n=  3  net +0.0206  %pos 0.67  median +0.0235  | high-yield net +0.0196 vs low +0.0225
+  sign vs pristine: corroboration net +0.0206 DIVERGES from (RED FLAG) pristine net -0.0177
 
 PLACEBO band (random non-dividend dates, in-sample) — pristine should sit in its right tail:
-  placebo mean +0.0011 [2.5-97.5%: -0.0064..+0.0093]; forward gross -0.0083 at 0% of placebo  -> NOT yet separated (thin)
+  placebo mean +0.0011 [2.5-97.5%: -0.0075..+0.0103]; forward gross -0.0167 at 0% of placebo  -> NOT yet separated (thin)
 
-PENDING pipeline (7 upcoming events, awaiting realization):
-    MTSS  record 2026-07-09  (~9 TD ahead)
-    ROSN  record 2026-07-09  (~9 TD ahead)
-    PLZL  record 2026-07-13  (~11 TD ahead)
-    TATN  record 2026-07-15  (~13 TD ahead)
-    SNGS  record 2026-07-16  (~14 TD ahead)
-    SBER  record 2026-07-20  (~16 TD ahead)
-    VTBR  record 2026-07-20  (~16 TD ahead)
+PENDING pipeline (0 upcoming events, awaiting realization):
 
 Live monitor shadow_log: 2 runs, 0 with holdings (accrues real-time as July-2026 events trade).
 
 ================================================================================
-benchmark vs gate: IS net +0.0124 (dose-resp OK, n=117) | PRISTINE net -0.0093 (dose-resp INVERTED, n=12) | corroboration n=0 net +0.0000
-VERDICT: NOT MET: 12 PRISTINE forward events, net -0.0093, %pos 0.50 — forward does NOT confirm the edge yet. is_production stays false; do not deploy live.
+benchmark vs gate: IS net +0.0123 (dose-resp OK, n=117) | PRISTINE net -0.0177 (dose-resp INVERTED, n=19) | corroboration n=3 net +0.0206
+VERDICT: NOT MET: 19 PRISTINE forward events, net -0.0177, %pos 0.53 — forward does NOT confirm the edge yet. is_production stays false; do not deploy live.
   (is_production=false until this gate is MET on accrued PRISTINE forward events AND team sign-off; corroboration backfill is robustness only.)
