@@ -7,10 +7,10 @@ H9 anchor sverka — does the forward feed trade the SAME anchor the research va
     -> research anchored on RECORD date; sleeve merges feed.record_date -> 'date'. Same object.
 
 [2] ex_date == record_date - 1 trading day (T+1)  ->  PASS
-    12/12 rows consistent; trading-day gap values = [1]
+    2/2 rows consistent; trading-day gap values = [1]
 
 [3] merged calendar's FUTURE rows == feed record_date  ->  PASS
-    feed events 12; merged future rows 12; feed (ticker,record) all present in merged = True
+    feed events 2; merged future rows 2; feed (ticker,record) all present in merged = True
 
 [4] exit sits before the ex-gap  ->  PASS
     anchor=record; ex=record-1 TD (T+1); entry=record-12, exit=record-2
