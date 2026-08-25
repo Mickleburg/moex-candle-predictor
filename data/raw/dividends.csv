@@ -162,6 +162,7 @@ MOEX,2023-05-12,4.84,RUB,iss_backfill_2026-06-26
 MOEX,2023-06-16,4.84,RUB,iss_backfill_2026-06-26
 MOEX,2024-06-14,17.35,RUB,iss_backfill_2026-06-26
 MOEX,2025-07-10,26.11,RUB,iss_backfill_2026-06-26
+MOEX,2026-07-09,19.57,RUB,e-disclosure
 MTSS,2018-07-09,23.4,RUB,iss_history
 MTSS,2018-10-09,2.6,RUB,iss_history
 MTSS,2019-07-09,19.98,RUB,iss_history
@@ -175,6 +176,7 @@ MTSS,2022-07-12,33.85,RUB,iss_history
 MTSS,2023-06-29,34.29,RUB,iss_history
 MTSS,2024-07-16,35.0,RUB,iss_history
 MTSS,2025-07-07,35.0,RUB,iss_history
+MTSS,2026-07-09,35.0,RUB,e-disclosure
 NLMK,2014-06-17,0.67,RUB,iss_history
 NLMK,2014-10-11,0.88,RUB,iss_history
 NLMK,2015-06-16,1.64,RUB,iss_history
@@ -278,6 +280,7 @@ PLZL,2023-06-16,436.79,RUB,iss_history
 PLZL,2024-12-13,1301.75,RUB,iss_history
 PLZL,2025-04-25,73.0,RUB,iss_history
 PLZL,2026-05-18,56.8,RUB,e-disclosure
+PLZL,2026-07-13,29.05,RUB,e-disclosure
 ROSN,2014-07-08,12.85,RUB,iss_history
 ROSN,2015-06-29,8.21,RUB,iss_history
 ROSN,2016-06-27,11.75,RUB,iss_history
@@ -297,18 +300,22 @@ ROSN,2024-01-11,30.77,RUB,iss_history
 ROSN,2024-07-09,29.01,RUB,iss_history
 ROSN,2025-01-10,36.47,RUB,iss_history
 ROSN,2025-07-20,14.68,RUB,iss_history
+ROSN,2026-07-09,2.27,RUB,e-disclosure
 SBER,2019-06-13,16.0,RUB,iss_history
 SBER,2020-10-05,18.7,RUB,iss_history
 SBER,2021-05-12,18.7,RUB,iss_history
 SBER,2023-05-11,25.0,RUB,iss_history
 SBER,2024-07-11,33.3,RUB,iss_history
 SBER,2025-07-18,34.84,RUB,iss_history
+SBER,2026-07-20,37.64,RUB,e-disclosure
 SBERP,2019-06-13,16.0,RUB,iss_backfill_2026-06-26
 SBERP,2020-10-05,18.7,RUB,iss_backfill_2026-06-26
 SBERP,2021-05-12,18.7,RUB,iss_backfill_2026-06-26
 SBERP,2023-05-11,25.0,RUB,iss_backfill_2026-06-26
 SBERP,2024-07-11,33.3,RUB,iss_backfill_2026-06-26
 SBERP,2025-07-18,34.84,RUB,iss_backfill_2026-06-26
+SBERP,2026-07-20,37.64,RUB,e-disclosure
+SIBN,2026-07-06,45.41,RUB,e-disclosure
 SNGS,2014-07-16,0.6,RUB,iss_history
 SNGS,2015-07-16,0.65,RUB,iss_history
 SNGS,2016-07-18,0.6,RUB,iss_history
@@ -321,6 +328,7 @@ SNGS,2022-07-20,0.8,RUB,iss_history
 SNGS,2023-07-20,0.8,RUB,iss_history
 SNGS,2024-07-18,0.85,RUB,iss_history
 SNGS,2025-07-17,0.9,RUB,iss_history
+SNGS,2026-07-16,0.85,RUB,e-disclosure
 SNGSP,2014-07-16,2.36,RUB,iss_backfill_2026-06-26
 SNGSP,2015-07-16,8.21,RUB,iss_backfill_2026-06-26
 SNGSP,2016-07-18,6.92,RUB,iss_backfill_2026-06-26
@@ -333,6 +341,7 @@ SNGSP,2022-07-20,4.73,RUB,iss_backfill_2026-06-26
 SNGSP,2023-07-20,0.8,RUB,iss_backfill_2026-06-26
 SNGSP,2024-07-18,12.29,RUB,iss_backfill_2026-06-26
 SNGSP,2025-07-17,8.5,RUB,iss_backfill_2026-06-26
+SNGSP,2026-07-16,0.85,RUB,e-disclosure
 TATN,2018-07-06,12.16,RUB,iss_history
 TATN,2018-10-12,30.27,RUB,iss_history
 TATN,2019-01-09,22.26,RUB,iss_history
@@ -356,6 +365,8 @@ TATN,2024-07-09,25.17,RUB,iss_history
 TATN,2024-10-08,38.2,RUB,iss_history
 TATN,2025-01-08,17.39,RUB,iss_history
 TATN,2025-06-02,43.11,RUB,iss_history
+TATN,2026-07-15,11.61,RUB,e-disclosure
+TATNP,2026-07-15,11.61,RUB,e-disclosure
 VTBR,2014-07-01,0.0,RUB,iss_history
 VTBR,2015-07-06,0.0,RUB,iss_history
 VTBR,2016-07-04,0.0,RUB,iss_history
@@ -367,3 +378,4 @@ VTBR,2020-10-05,0.0007734533756113,RUB,iss_history
 VTBR,2021-06-22,1.73965919370917e-05,RUB,iss_history
 VTBR,2021-07-15,1.73965919370917e-05,RUB,iss_history
 VTBR,2025-07-11,25.58,RUB,iss_history
+VTBR,2026-07-20,9.71,RUB,e-disclosure

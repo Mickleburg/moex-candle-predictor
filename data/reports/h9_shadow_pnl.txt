@@ -1,6 +1,6 @@
 H9 realized-P&L SHADOW GATE — does the forward realize the in-sample run-up?
   deployed rule: enter -12 TD / exit -2 TD vs RECORD date, market-adjusted (stock - IMOEX), net round-trip fee 0.0010
-  price panel through 2026-07-27; calendar = history + LLM forward feed
+  price panel through 2026-08-25; calendar = history + LLM forward feed
 ================================================================================
 
 [methodology identity] vs research runup_capture: closed mean +0.00940 == ref +0.00940  -> OK
@@ -26,8 +26,8 @@ PRISTINE forward (record OUTSIDE the burned-split backfill window — DRIVES is_
     SNGS  2025-07-17  yld 4.08%  net +0.0302
     SBER  2025-07-18  yld 11.28%  net +0.0186
     ROSN  2025-07-20  yld 3.54%  net -0.0171
-    MTSS  2026-07-09  yld 19.26%  net +0.0007
     ROSN  2026-07-09  yld 0.73%  net +0.0490
+    MTSS  2026-07-09  yld 19.26%  net +0.0007
     PLZL  2026-07-13  yld 2.43%  net -0.2897
     TATN  2026-07-15  yld 2.49%  net +0.0102
     SNGS  2026-07-16  yld 6.30%  net +0.0251
@@ -39,9 +39,10 @@ CORROBORATION (backfill 2025-08..2026-06 of the burned split — does NOT move t
   sign vs pristine: corroboration net +0.0206 DIVERGES from (RED FLAG) pristine net -0.0177
 
 PLACEBO band (random non-dividend dates, in-sample) — pristine should sit in its right tail:
-  placebo mean +0.0011 [2.5-97.5%: -0.0075..+0.0103]; forward gross -0.0167 at 0% of placebo  -> NOT yet separated (thin)
+  placebo mean +0.0019 [2.5-97.5%: -0.0075..+0.0112]; forward gross -0.0167 at 0% of placebo  -> NOT yet separated (thin)
 
-PENDING pipeline (0 upcoming events, awaiting realization):
+PENDING pipeline (1 upcoming events, awaiting realization):
+    TATN  record 2026-10-13  (~35 TD ahead)
 
 Live monitor shadow_log: 2 runs, 0 with holdings (accrues real-time as July-2026 events trade).
 
