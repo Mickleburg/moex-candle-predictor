@@ -1,13 +1,3 @@
 ticker,record_date,ex_date,board_reco_date,agm_date,value,status,source_url,as_of,confidence,notes
-SIBN,2026-07-06,2026-07-03,2026-05-22,2026-06-29,45.41,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=JWvaTYEAH0GgGgp2YbjcgA-B-B,2026-07-28,high,
-MOEX,2026-07-09,2026-07-08,2026-05-15,2026-06-25,19.57,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=lypBcShlrUqXEPTu8Vvdlw-B-B,2026-07-28,high,
-MTSS,2026-07-09,2026-07-08,2026-05-22,2026-06-24,35.00,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=uNJte-Aey3Uuccg4-Ce7QlpA-B-B,2026-07-28,high,
-ROSN,2026-07-09,2026-07-08,2026-05-15,,2.27,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=Q5iAN0qL2kmUBRvx2UaX6g-B-B,2026-07-28,medium,
-PLZL,2026-07-13,2026-07-10,2026-05-27,2026-07-01,29.05,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=JGA6yFPHpE-CnPIwxcu40GQ-B-B,2026-07-28,high,
-TATN,2026-07-15,2026-07-14,2026-04-28,2026-06-26,11.61,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=hhVrk-CPKk0Kz-CLe-CO3Vvag-B-B,2026-07-28,high,interim-netted: value = installment payable at THIS record (fiscal-year total is higher; earlier interims already paid)
-TATNP,2026-07-15,2026-07-14,2026-04-28,2026-06-26,11.61,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=hhVrk-CPKk0Kz-CLe-CO3Vvag-B-B,2026-07-28,high,interim-netted: value = installment payable at THIS record (fiscal-year total is higher; earlier interims already paid)
-SNGS,2026-07-16,2026-07-15,2026-05-15,2026-06-26,0.85,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=brsCPYYbW06x3ODc2hOLiQ-B-B,2026-07-28,high,
-SNGSP,2026-07-16,2026-07-15,2026-05-15,2026-06-26,0.85,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=brsCPYYbW06x3ODc2hOLiQ-B-B,2026-07-28,high,
-SBER,2026-07-20,2026-07-17,2026-04-21,2026-06-30,37.64,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=kcvIQ1oYb02fGJO6jWcpKA-B-B,2026-07-28,high,
-SBERP,2026-07-20,2026-07-17,2026-04-21,2026-06-30,37.64,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=kcvIQ1oYb02fGJO6jWcpKA-B-B,2026-07-28,high,
-VTBR,2026-07-20,2026-07-17,2026-05-26,2026-06-30,9.71,confirmed,https://www.e-disclosure.ru/portal/event.aspx?EventId=hsyEbRiNskGAlfeI5yeEhw-B-B,2026-07-28,high,
+TATN,2026-10-13,2026-10-12,2026-08-20,,32.88,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=xcetm-CV-APEmbJZrn4V5G2A-B-B,2026-08-25,medium,
+TATNP,2026-10-13,2026-10-12,2026-08-20,,32.88,recommended,https://www.e-disclosure.ru/portal/event.aspx?EventId=xcetm-CV-APEmbJZrn4V5G2A-B-B,2026-08-25,medium,
