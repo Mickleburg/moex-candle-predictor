@@ -38,6 +38,7 @@ class Orchestrator:
         self.store = store or StateStore(self.config.state_db)
         self.adapters = adapters or build_adapters(self.config)
         self.notifier = notifier or build_notifier(self.config)
+        self._lot_cache: dict[str, int] | None = None   # lazy: see _lot_sizes()
 
     # ----------------------------------------------------------------- EOD cycle
     def run_eod_cycle(self, trade_date: Optional[str] = None, as_of: Optional[str] = None,
@@ -142,6 +143,10 @@ class Orchestrator:
         # A filled position/order is LIVE capital iff it came from the live track (net_positions/
         # hedge); SHADOW iff from the shadow track. Shadow paper-fills accrue forward-P&L for the
         # gate WITHOUT being counted as live edge.
+        # Cost basis + sleeve split of the book as it stands BEFORE the fills land — this is what
+        # realized P&L is measured against, and _replace_book is about to overwrite it.
+        prior_live = self._current("live")
+        prior_shadow = self._current("shadow")
         self._record_fills(all_reports)
         self._record_orders(td, phase, live_orders, all_reports, capital_state="live")
         self._record_orders(td, phase, shadow_orders, all_reports, capital_state="shadow")
@@ -153,14 +158,23 @@ class Orchestrator:
 
         live_book = self.store.get_positions("live")
         shadow_book = self.store.get_positions("shadow")
-        live_pnl = pnl.attribute_book_pnl(live_book)
-        shadow_pnl = pnl.attribute_book_pnl(shadow_book)
-        for sleeve, vals in live_pnl.items():
-            self.store.record_pnl_attribution(td, sleeve, realized=0.0, unrealized=vals["unrealized"],
-                                               gross=vals["gross"], capital_state="live")
-        for sleeve, vals in shadow_pnl.items():
-            self.store.record_pnl_attribution(td, sleeve, realized=0.0, unrealized=vals["unrealized"],
-                                               gross=vals["gross"], capital_state="shadow")
+        lots = self._lot_sizes()
+        live_pnl = pnl.attribute_book_pnl(live_book, lots)
+        shadow_pnl = pnl.attribute_book_pnl(shadow_book, lots)
+        live_realized = pnl.attribute_realized_pnl(prior_live, live_orders, all_reports, lots)
+        shadow_realized = pnl.attribute_realized_pnl(prior_shadow, shadow_orders, all_reports, lots)
+        # Iterate the UNION: a closing cycle leaves an EMPTY book, so keying off the marks alone
+        # wrote no row at all for the very day the position realized its result (2026-07-20).
+        for state, marks, realized in (("live", live_pnl, live_realized),
+                                       ("shadow", shadow_pnl, shadow_realized)):
+            for sleeve in sorted(set(marks) | set(realized)):
+                v = marks.get(sleeve, {"unrealized": 0.0, "gross": 0.0})
+                self.store.record_pnl_attribution(
+                    td, sleeve, realized=realized.get(sleeve, 0.0), unrealized=v["unrealized"],
+                    gross=v["gross"], capital_state=state)
+        # surface realized on the shadow track too — the shadow log IS the forward evidence
+        for sleeve, amount in shadow_realized.items():
+            shadow_pnl.setdefault(sleeve, {"unrealized": 0.0, "gross": 0.0})["realized"] = amount
         # the shadow log is the forward-shadow track (the gate that lifts is_production)
         pnl.append_shadow_log(self.config.shadow_log, trade_date=td, as_of=as_of,
                               risk_book=risk_book, positions=shadow_book, sleeve_pnl=shadow_pnl)
@@ -303,6 +317,18 @@ class Orchestrator:
                         f"trade_date={td}\nfeed rebuilt from cache; new disclosures NOT fetched "
                         f"(ok={out.get('ok')}, upcoming={out.get('upcoming')})")
         return out
+
+    def _lot_sizes(self) -> dict[str, int]:
+        """ticker -> shares per lot, cached. Sourced from the execution block (backend metadata
+        overlaid on its defaults). Falls back to {} — i.e. lot=1 — if execution is unavailable, so a
+        mock/CI run still works; that only understates names whose real lot is >1."""
+        if self._lot_cache is None:
+            try:
+                from execution.src.instruments import load_lot_sizes  # type: ignore
+                self._lot_cache = load_lot_sizes()
+            except Exception:  # noqa: BLE001 - accounting must not depend on execution importing
+                self._lot_cache = {}
+        return self._lot_cache
 
     def _record_fills(self, reports: list[dict]) -> None:
         for rep in reports:
