@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+.aws
+CLAUDE.md
+**/.venv
+**/.venv-win
+**/__pycache__
+**/.pytest_cache
+.local-review
+.env
+.env.*
+!.env.example
+data
+**/artifacts
+**/*.pyc
+**/*.pyo

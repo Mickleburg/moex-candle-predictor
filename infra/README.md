@@ -1,5 +1,9 @@
 # Deploy runbook — MOEX autonomous agent + monitoring bot on a VDS (PAPER)
 
+> **Archived deployment instructions.** The author ended server operation in mid-October 2026.
+> The project is complete; these instructions are retained for reproduction, not as a statement
+> that a server is currently running. See [project results](../docs/PROJECT_RETROSPECTIVE.md).
+
 Bring the V3 stack up on a Linux VDS (Ubuntu LTS) so the orchestrator runs the EOD cycle **every
 trading day** and accrues the forward-shadow track through the dividend season, with a Telegram
 bot for on-demand monitoring. **Paper only — never live until sign-off** (see the fenced section
