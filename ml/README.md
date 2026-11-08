@@ -1,6 +1,14 @@
 # ML Block
 
-`ml/` - текущий основной рабочий research-блок проекта. Он отвечает за загрузку свечей, очистку, построение признаков, candle-language эксперименты, action target research и legacy FastAPI inference path.
+`ml/` хранит исследования и реализацию ML-блока завершённого проекта. Финальный paper-контур
+использовал H9 и риск-аналитику H4/H5; направленные модели и candle-language остались историей.
+
+**Результат исследований:** [подтверждённое, отрицательное и непроверенное](../docs/RESEARCH_RESULTS.md).
+SBER/LKOH не прошли финальный гейт; H9 также осталась NOT MET. Наличие inference API или
+модельного артефакта не означает, что его доходность подтверждена.
+
+Ниже сохранено описание раннего research-этапа, включая загрузку свечей, признаки,
+candle-language, action targets и legacy FastAPI inference.
 
 ## Что уже есть
 
@@ -38,7 +46,7 @@
 - Continuous past-only feature baseline.
 - LM + continuous feature combinations.
 
-## Текущий лучший validation-only research candidate
+## Исторический validation-only candidate раннего этапа
 
 ```text
 target:       triple_barrier:h3:w12:up1.25:down1.25
