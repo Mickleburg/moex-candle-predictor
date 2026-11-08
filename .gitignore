@@ -1,6 +1,10 @@
 __pycache__/
 .venv/
 ml/.venv/
+.venv-win/
+.pytest_cache/
+.local-review/
+*.py[cod]
 artifacts/
 ml/artifacts/research_triple_barrier_sber_h1/
 data/raw/*.parquet
